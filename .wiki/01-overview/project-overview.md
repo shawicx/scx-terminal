@@ -8,18 +8,22 @@ scx-terminal 是一个 macOS 桌面终端应用（Tauri v2 + Vue 3 + @xterm/xter
 
 | 功能 | 状态 | 关键代码 |
 | --- | --- | --- |
-| 本地终端（zsh/bash 等，取自 `/etc/shells`） | 可用 | `src/lib/sessions/localSession.ts`、`src-tauri/src/pty.rs` |
-| 多标签（后台标签保持会话运行，`v-show` 不卸载） | 可用 | `src/stores/tabs.ts`、`src/App.vue` |
+| 本地终端（zsh/bash 等，取自 `/etc/shells`），默认以登录 shell（`-l`）启动 | 可用 | `src/lib/sessions/localSession.ts`、`src-tauri/src/pty.rs` |
+| 多标签（后台标签保持会话运行，`v-show` 不卸载；中键关闭、拖拽排序） | 可用 | `src/stores/tabs.ts`、`src/App.vue` |
+| 标签右键菜单：重命名（手动标题优先于 OSC 上报）、关闭其他、颜色标记 | 可用 | `src/components/titlebar/TitleBar.vue`、`src/components/ui/ContextMenu.vue` |
 | 分屏（水平/垂直、拖拽调整比例、键盘导航） | 可用 | `src/components/split/` |
+| 终端内右键菜单（复制/粘贴/全选/清屏/搜索/分屏/关窗格） | 可用 | `src/components/terminal/TerminalPane.vue` |
 | 标签标题跟随 shell OSC 0/2 上报 | 可用 | `TerminalPane.vue` → `frontend.title$` |
 | 终端内搜索 | 可用 | `@xterm/addon-search` + `TerminalPane.vue` 搜索条 |
 | 复制/粘贴（Tauri 剪贴板插件，降级 `navigator.clipboard`） | 可用 | `src/lib/frontendContext.ts` |
-| 命令面板（模糊搜索）+ 可配置热键 | 可用 | `src/components/palette/CommandPalette.vue`、`src/services/` |
+| OSC 52 剪贴板写入（base64 解码 + 100KB 上限，只写不读） | 可用 | `src/lib/middleware/oscProcessing.ts` |
+| 可点击 URL（WebLinks addon + opener 插件；OSC 8 由 xterm 核心支持） | 可用 | `src/lib/frontends/xtermFrontend.ts` |
+| 命令面板（模糊搜索）+ 可配置热键（加载时对旧键名做归一化） | 可用 | `src/components/palette/CommandPalette.vue`、`src/services/` |
 | 配色主题：16 套内置配色 + 界面跟随配色 + 亮暗跟随系统 | 可用 | `src/lib/colorSchemes.ts`、`src/lib/schemeColors.ts`、`src/stores/theme.ts` |
-| 设置页（终端/外观/快捷键/关于），YAML 持久化 | 可用 | `src/components/settings/SettingsView.vue`、`src/stores/config.ts` |
+| 设置页（终端/外观/快捷键/关于），YAML 持久化；含退格行为、输入/输出换行转换、wordSeparator、粗体亮色、登录 shell 开关 | 可用 | `src/components/settings/SettingsView.vue`、`src/stores/config.ts` |
+| 退格重映射与换行转换中间件（会话构造期按配置挂载，对新标签生效） | 可用 | `src/lib/sessions/baseSession.ts`、`src/lib/middleware/{inputProcessing,streamProcessing}.ts` |
 | 中英双语（跟随系统） | 可用 | `src/i18n/index.ts` |
 | 工作目录跟踪（OSC 1337 CurrentDir 解析） | 管道就绪，无消费方 | `src/lib/middleware/oscProcessing.ts` |
-| OSC 52 剪贴板写入 | 未实现（stub） | `oscProcessing.ts` 中 `TODO(phase-later)` |
 
 ## 技术栈
 
@@ -31,13 +35,14 @@ scx-terminal 是一个 macOS 桌面终端应用（Tauri v2 + Vue 3 + @xterm/xter
 
 ## 已知限制与未接线功能
 
-- `InputProcessor`（退格映射）与 `TerminalStreamProcessor`（换行转换）已实现但**从未被实例化**——配置键 `terminal.backspace` / `inputNewlines` / `outputNewlines` 目前无效。
-- 配置键 `appearance.theme`、`appearance.tabBarPosition` 无任何读取方（死键）。
+- 配置键 `appearance.theme`、`appearance.tabBarPosition`、`terminal.lineHeightAdjustment` 无任何读取方（死键，保留以稳定配置结构）。
 - `terminal.paletteGenerate` / `paletteHarmonious`（256 色扩展调色板生成，`src/lib/generatePalette.ts`）有效但未暴露到设置 UI。
+- `terminal.fontWeight` / `fontWeightBold` / `wordSeparator` / `drawBoldTextInBrightColors` 由 xterm 消费；后两者已上设置 UI，字重两项仍无 UI。
 - cwd 跟踪管道（`BaseSession.reportedCWD` → `getWorkingDirectory()`）无调用方；新标签不会继承工作目录（需要 shell 集成脚本上报才有数据源）。
-- 自定义配色编辑器、iTerm2 配色导入未实现（当前仅内置配色 + 下拉选择）。
+- 自定义配色编辑器、iTerm2 配色导入、字体列表选择器未实现（当前仅内置配色 + 下拉选择、字体为自由文本输入）。
+- Profiles 多配置档案（多 shell/命令档案、按档案新建标签）未实现——`LocalSession.start` 已支持 command/args/env/cwd，缺存储与 UI；为 SSH 预留 `type` 判别字段扩展点。
 - 窗口 vibrancy/透明已写代码但被 `#[cfg(any())]` 编译关闭（`src-tauri/src/lib.rs`，WKWebView 下渲染空白，待主题阶段重试）。
-- shell 以**交互非登录**方式启动（无 `-l`、argv0 不带 `-`），`~/.zprofile` 不会被加载。
+- 终端粘贴仍固定做 `\r\n → \n` 归一化（`TerminalPane.vue`），叠加在 `inputNewlines` 转换之前，防多行粘贴被 shell 逐行执行。
 
 ## 起源与设计文档
 

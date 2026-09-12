@@ -4,9 +4,10 @@ import { useI18n } from 'vue-i18n'
 import { ChevronUp, ChevronDown, X } from 'lucide-vue-next'
 import { LocalSession } from '@/lib/sessions/localSession'
 import { XTermWebGLFrontend } from '@/lib/frontends/xtermFrontend'
-import { createFrontendContext, readClipboardText } from '@/lib/frontendContext'
+import { createFrontendContext, readClipboardText, writeClipboardText } from '@/lib/frontendContext'
 import { defaultShell } from '@/services/shells'
 import { encodeUTF8 } from '@/lib/utils/bytes'
+import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
 import { useConfigStore } from '@/stores/config'
 import { useThemeStore } from '@/stores/theme'
 
@@ -17,14 +18,32 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: 'title', title: string): void
     (e: 'closed'): void
+    (e: 'requestSplit', direction: 'right' | 'down'): void
 }>()
 
 const { t } = useI18n()
-const host = ref<HTMLElement>()
+const paneRoot = ref<HTMLElement>()
 const mountError = ref('')
 let session: LocalSession | null = null
 let frontend: XTermWebGLFrontend | null = null
 let disposed = false
+
+/**
+ * @description 解析 xterm 宿主元素。不能用模板 ref：宿主 div 位于 ContextMenu 插槽内，
+ *              reka-ui 的 as-child 触发器（Slot.js）会删除插槽根元素的 ref 属性，
+ *              因此挂载后改由窗格根元素向下查询获取
+ * @returns HTMLElement 宿主元素
+ *
+ * @example resolveHostElement() // <div class="terminal-host">
+ *
+ */
+function resolveHostElement (): HTMLElement {
+    const host = paneRoot.value?.querySelector<HTMLElement>('.terminal-host')
+    if (!host) {
+        throw new Error('terminal host element not found')
+    }
+    return host
+}
 
 // ---- search overlay ----
 const searchOpen = ref(false)
@@ -63,18 +82,86 @@ function onSearchKeydown (event: KeyboardEvent): void {
     }
 }
 
+/**
+ * @description 从剪贴板读取文本并写入当前会话（粘贴）
+ * @returns Promise<void>
+ *
+ */
+async function pasteFromClipboard (): Promise<void> {
+    const text = await readClipboardText()
+    if (text) {
+        session?.feedFromTerminal(encodeUTF8(text.replace(/\r\n/g, '\n')))
+    }
+}
+
 defineExpose({
     focus: () => frontend?.focus(),
     copy: () => frontend?.copySelection(),
-    paste: async () => {
-        const text = await readClipboardText()
-        if (text) {
-            session?.feedFromTerminal(encodeUTF8(text.replace(/\r\n/g, '\n')))
-        }
-    },
+    paste: () => pasteFromClipboard(),
     clear: () => frontend?.clear(),
     find: () => openSearch(),
 })
+
+// ---- context menu ----
+const menuHasSelection = ref(false)
+
+/**
+ * @description 右键菜单打开时刷新选区状态（用于"复制"项的禁用判定）
+ * @param open 菜单是否打开
+ * @returns void
+ *
+ */
+function onMenuOpen (open: boolean): void {
+    if (open) {
+        menuHasSelection.value = !!frontend?.getSelection()
+    }
+}
+
+const menuItems = computed<ContextMenuItemSpec[]>(() => [
+    { key: 'copy', label: t('commands.copy'), disabled: !menuHasSelection.value },
+    { key: 'paste', label: t('commands.paste') },
+    { key: 'select-all', label: t('commands.selectAll') },
+    { key: 'clear', label: t('commands.clear'), separatorBefore: true },
+    { key: 'find', label: t('commands.find') },
+    { key: 'split-right', label: t('commands.splitRight'), separatorBefore: true },
+    { key: 'split-down', label: t('commands.splitDown') },
+    { key: 'close-pane', label: t('commands.closePane'), danger: true },
+])
+
+/**
+ * @description 处理终端右键菜单选择，动作复用窗格既有能力
+ * @param key 菜单项 key
+ * @returns void
+ *
+ */
+function onMenuSelect (key: string): void {
+    switch (key) {
+        case 'copy':
+            frontend?.copySelection()
+            break
+        case 'paste':
+            void pasteFromClipboard()
+            break
+        case 'select-all':
+            frontend?.selectAll()
+            break
+        case 'clear':
+            frontend?.clear()
+            break
+        case 'find':
+            openSearch()
+            break
+        case 'split-right':
+            emit('requestSplit', 'right')
+            break
+        case 'split-down':
+            emit('requestSplit', 'down')
+            break
+        case 'close-pane':
+            emit('closed')
+            break
+    }
+}
 
 // live-apply config changes (font, colors, scrollback, …)
 const configStore = useConfigStore()
@@ -93,11 +180,17 @@ const searchNoResults = computed(() => searchOpen.value && !!searchQuery.value &
 onMounted(async () => {
     try {
         const context = createFrontendContext()
-        session = new LocalSession()
+        // 中间件配置在会话构造期读取（退格/换行/OSC 52），配置变更对新窗格生效
+        session = new LocalSession({
+            setClipboard: writeClipboardText,
+            backspace: configStore.store.terminal.backspace,
+            inputNewlines: configStore.store.terminal.inputNewlines,
+            outputNewlines: configStore.store.terminal.outputNewlines,
+        })
         frontend = new XTermWebGLFrontend(context)
         frontend.configure({ terminalColorScheme: null })
 
-        await frontend.attach(host.value!, { terminalColorScheme: null })
+        await frontend.attach(resolveHostElement(), { terminalColorScheme: null })
         if (disposed) {
             return
         }
@@ -113,9 +206,11 @@ onMounted(async () => {
         if (disposed) {
             return
         }
+        // 登录 shell（-l）：加载 ~/.zprofile 等登录配置，PATH 行为与 Terminal.app 一致
+        const loginShell = configStore.store.terminal.loginShell
         await session.start({
             command: shell.command,
-            args: shell.args,
+            args: loginShell ? [...shell.args, '-l'] : shell.args,
             env: {},
             cwd: null,
             width: null,
@@ -151,8 +246,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div class="terminal-pane">
-        <div ref="host" class="terminal-host"></div>
+    <div ref="paneRoot" class="terminal-pane">
+        <ContextMenu :items="menuItems" @open="onMenuOpen" @select="onMenuSelect">
+            <div class="terminal-host"></div>
+        </ContextMenu>
         <div v-if="mountError" class="mount-error">{{ mountError }}</div>
         <div v-if="searchOpen" class="search-bar">
             <input

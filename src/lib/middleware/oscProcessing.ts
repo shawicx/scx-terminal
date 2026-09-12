@@ -1,9 +1,17 @@
 import { Observable, Subject } from 'rxjs'
 import { SessionMiddleware } from './middleware'
-import { concatBytes, indexOfBytes, bytesFromBase64 } from '@/lib/utils/bytes'
+import { concatBytes, indexOfBytes, bytesFromBase64, decodeUTF8 } from '@/lib/utils/bytes'
 
 const OSC_PREFIX = [0x1b, 0x5d] as const // ESC ]
 const OSC_SUFFIXES = [[0x07], [0x1b, 0x5c]] as const // BEL, ESC \
+
+/** OSC 52 剪贴板写入内容的字节上限（对齐 Tabby，防止远端程序灌爆剪贴板） */
+export const OSC52_MAX_CLIPBOARD_BYTES = 100 * 1024
+
+export interface OSCProcessorOptions {
+    /** 剪贴板写入函数（OSC 52 的目标）；未提供时内容直接丢弃 */
+    setClipboard?: (text: string) => Promise<void>
+}
 
 function ascii (bytes: readonly number[]): Uint8Array {
     return new Uint8Array(bytes as number[])
@@ -30,6 +38,10 @@ export class OSCProcessor extends SessionMiddleware {
 
     private cwdReported = new Subject<string>()
     private buffer: Uint8Array | null = null
+
+    constructor (private readonly options: OSCProcessorOptions = {}) {
+        super()
+    }
 
     feedFromSession (data: Uint8Array): void {
         if (this.buffer) {
@@ -90,10 +102,19 @@ export class OSCProcessor extends SessionMiddleware {
                     this.cwdReported.next(reportedCWD)
                 }
             } else if (oscCode === 52) {
-                if (oscParams[0] === 'c' || oscParams[0] === '') {
-                    const content = bytesFromBase64(oscParams[1] ?? '')
-                    // TODO(phase-later): forward clipboard write to platform clipboard
-                    void content
+                // OSC 52 ; <selection> ; <base64>：剪贴板写入请求。
+                // 只支持写入（selection 'c' 或缺省）；'?' 为读取查询，不响应。
+                const selection = oscParams[0] ?? ''
+                const payload = oscParams[1] ?? ''
+                if ((selection === 'c' || selection === '') && payload && payload !== '?' && this.options.setClipboard) {
+                    try {
+                        const content = bytesFromBase64(payload)
+                        if (content.length <= OSC52_MAX_CLIPBOARD_BYTES) {
+                            void this.options.setClipboard(decodeUTF8(content))
+                        }
+                    } catch {
+                        // 非法 base64 载荷：丢弃该序列（序列本身仍被吞掉不透传）
+                    }
                 }
             } else {
                 processedData.push(data.subarray(prefixIndex, foundSuffix[1] + foundSuffix[0].length))

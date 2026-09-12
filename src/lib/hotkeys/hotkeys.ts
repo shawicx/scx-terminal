@@ -109,3 +109,60 @@ export function getKeystrokeName (keys: KeyName[]): Keystroke {
 export function parseKeystroke (keystroke: string): KeyName[] {
     return keystroke.split('-').map(part => part.trim()).filter(part => part.length > 0)
 }
+
+const ARROW_KEY_ALIASES: Record<string, string> = {
+    ArrowUp: 'Up',
+    ArrowDown: 'Down',
+    ArrowLeft: 'Left',
+    ArrowRight: 'Right',
+}
+
+/**
+ * @description 将热键序列中的键名归一化为 getKeyName 的实际产出形式，兼容手写/旧配置中的别名写法
+ * @param name 单个键名（如 "ArrowRight"、"Alt"、"Meta"、"KeyA"）
+ * @returns string 归一化后的键名（如 "Right"、平台 Alt 键名、平台 Meta 键名、"A"）
+ *
+ * @example normalizeKeyName('ArrowRight') // 'Right'
+ * @example normalizeKeyName('KeyA') // 'A'
+ *
+ */
+export function normalizeKeyName (name: string): KeyName {
+    const part = name.trim()
+    if (part.length === 0) {
+        return part
+    }
+    if (part in ARROW_KEY_ALIASES) {
+        return ARROW_KEY_ALIASES[part]
+    }
+    if (part === 'Alt') {
+        return altKeyName
+    }
+    if (part === 'Meta' || part === 'Cmd' || part === 'Command' || part === 'Super' || part === 'Win') {
+        return metaKeyName
+    }
+    if (/^Key[A-Za-z]$/.test(part)) {
+        return part.slice(3).toUpperCase()
+    }
+    if (/^Digit\d$/.test(part)) {
+        return part.slice(5)
+    }
+    return part
+}
+
+/**
+ * @description 归一化整份热键配置的全部按键序列（每个按键串拆分后逐键走 normalizeKeyName 再重组）
+ * @param hotkeys 热键配置（hotkey id -> 序列列表，序列元素为 "⌘-⌥-Right" 形式的按键串）
+ * @returns 同结构的新对象，按键串中的键名已归一化
+ *
+ * @example normalizeHotkeysConfig({ 'pane-forward': [['⌘-⌥-ArrowRight']] }) // { 'pane-forward': [['⌘-⌥-Right']] }
+ *
+ */
+export function normalizeHotkeysConfig<T extends Record<string, string[][]>> (hotkeys: T): T {
+    const result: Record<string, string[][]> = {}
+    for (const [id, sequences] of Object.entries(hotkeys)) {
+        result[id] = sequences.map(sequence =>
+            sequence.map(keystroke => parseKeystroke(keystroke).map(normalizeKeyName).join('-')),
+        )
+    }
+    return result as T
+}

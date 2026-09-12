@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Plus, Settings, X } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 import { platform } from '@/lib/platform'
-import { useTabsStore } from '@/stores/tabs'
+import { useTabsStore, type Tab } from '@/stores/tabs'
+import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
 
+const { t } = useI18n()
 const store = useTabsStore()
 const appWindow = getCurrentWindow()
 
@@ -13,8 +16,120 @@ const dragFromIndex = ref<number | null>(null)
 
 const needsTrafficLightSpace = computed(() => platform === 'macos')
 
+/** 标签颜色标记的预设色板 */
+const TAB_COLORS = [
+    { name: 'red', color: '#e06c75' },
+    { name: 'orange', color: '#d19a66' },
+    { name: 'yellow', color: '#e5c07b' },
+    { name: 'green', color: '#98c379' },
+    { name: 'blue', color: '#61afef' },
+    { name: 'purple', color: '#c678dd' },
+    { name: 'gray', color: '#7f848e' },
+] as const
+
 function toggleMaximize () {
     void appWindow.toggleMaximize()
+}
+
+/**
+ * @description 标签显示标题：手动重命名 > shell 上报标题 > 回退文案
+ * @param tab 标签对象
+ * @returns string 显示用标题
+ *
+ */
+function displayTitle (tab: Tab): string {
+    return tab.manualTitle || tab.title || 'Terminal'
+}
+
+/**
+ * @description 构造标签右键菜单项
+ * @returns ContextMenuItemSpec[] 菜单项列表
+ *
+ */
+function tabMenuItems (): ContextMenuItemSpec[] {
+    return [
+        { key: 'rename', label: t('tab.rename') },
+        { key: 'close', label: t('tab.close') },
+        {
+            key: 'close-others',
+            label: t('tab.closeOthers'),
+            disabled: store.tabs.length <= 1,
+            separatorBefore: true,
+        },
+        ...TAB_COLORS.map(item => ({
+            key: `color:${item.color}`,
+            label: t(`tab.colorNames.${item.name}`),
+            swatch: item.color,
+            separatorBefore: item.name === 'red',
+        })),
+    ]
+}
+
+/**
+ * @description 处理标签右键菜单选择
+ * @param tab 目标标签
+ * @param key 菜单项 key
+ * @returns void
+ *
+ */
+function onTabMenuSelect (tab: Tab, key: string): void {
+    if (key === 'rename') {
+        startRename(tab)
+    } else if (key === 'close') {
+        store.closeTab(tab.id)
+    } else if (key === 'close-others') {
+        store.closeOtherTabs(tab.id)
+    } else if (key.startsWith('color:')) {
+        store.setTabColor(tab.id, key.slice('color:'.length))
+    }
+}
+
+// ---- inline rename ----
+const renamingId = ref<string | null>(null)
+const renameValue = ref('')
+const renameInputEl = ref<HTMLInputElement | null>(null)
+
+/**
+ * @description 函数 ref：捕获当前渲染的重命名输入框（v-for 中字符串 ref 会退化为数组，故用函数形式）
+ * @param el 挂载/卸载的元素
+ * @returns void
+ *
+ */
+function setRenameInput (el: unknown): void {
+    renameInputEl.value = (el as HTMLInputElement | null) ?? null
+}
+
+/**
+ * @description 进入标签行内重命名模式，预填当前显示标题
+ * @param tab 目标标签
+ * @returns void
+ *
+ */
+function startRename (tab: Tab): void {
+    renamingId.value = tab.id
+    renameValue.value = displayTitle(tab)
+    void nextTick(() => renameInputEl.value?.focus())
+}
+
+/**
+ * @description 提交重命名（Enter / 失焦）
+ * @returns void
+ *
+ */
+function commitRename (): void {
+    if (renamingId.value) {
+        store.renameTab(renamingId.value, renameValue.value)
+    }
+    renamingId.value = null
+}
+
+/**
+ * @description 取消重命名（Esc）
+ * @returns void
+ *
+ */
+function cancelRename (): void {
+    renamingId.value = null
 }
 
 function onDragStart (index: number, event: DragEvent) {
@@ -62,32 +177,49 @@ function onDragEnd () {
         ></div>
 
         <div class="tabs-region">
-            <div
+            <ContextMenu
                 v-for="(tab, index) in store.tabs"
                 :key="tab.id"
-                class="tab-header"
-                :class="{
-                    active: tab.id === store.activeId,
-                    'drag-over': dragOverIndex === index && dragFromIndex !== null && dragFromIndex !== index,
-                }"
-                draggable="true"
-                :title="tab.title || 'Terminal'"
-                @dragstart="onDragStart(index, $event)"
-                @dragover="onDragOver(index, $event)"
-                @drop="onDrop(index, $event)"
-                @dragend="onDragEnd"
-                @click="store.activate(tab.id)"
-                @auxclick="onAuxClick(tab.id, $event)"
+                :items="tabMenuItems()"
+                @select="key => onTabMenuSelect(tab, key)"
             >
-                <span class="tab-title">{{ tab.title || 'Terminal' }}</span>
-                <button
-                    class="tab-close"
-                    :title="'Close'"
-                    @click.stop="store.closeTab(tab.id)"
+                <div
+                    class="tab-header"
+                    :class="{
+                        active: tab.id === store.activeId,
+                        'drag-over': dragOverIndex === index && dragFromIndex !== null && dragFromIndex !== index,
+                    }"
+                    :draggable="renamingId !== tab.id"
+                    :title="displayTitle(tab)"
+                    @dragstart="onDragStart(index, $event)"
+                    @dragover="onDragOver(index, $event)"
+                    @drop="onDrop(index, $event)"
+                    @dragend="onDragEnd"
+                    @click="store.activate(tab.id)"
+                    @auxclick="onAuxClick(tab.id, $event)"
                 >
-                    <X :size="12" />
-                </button>
-            </div>
+                    <span v-if="tab.color" class="tab-color-dot" :style="{ background: tab.color }"></span>
+                    <input
+                        v-if="renamingId === tab.id"
+                        :ref="setRenameInput"
+                        v-model="renameValue"
+                        class="tab-rename"
+                        @click.stop
+                        @keydown.enter.prevent="commitRename"
+                        @keydown.esc.prevent="cancelRename"
+                        @blur="commitRename"
+                    />
+                    <span v-else class="tab-title">{{ displayTitle(tab) }}</span>
+                    <button
+                        v-if="renamingId !== tab.id"
+                        class="tab-close"
+                        :title="'Close'"
+                        @click.stop="store.closeTab(tab.id)"
+                    >
+                        <X :size="12" />
+                    </button>
+                </div>
+            </ContextMenu>
 
             <button class="new-tab-button" title="New Tab" @click="store.openTerminalTab()">
                 <Plus :size="14" />
@@ -160,6 +292,25 @@ function onDragEnd () {
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
+}
+
+.tab-color-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.tab-rename {
+    width: 110px;
+    min-width: 0;
+    padding: 0 4px;
+    border: 1px solid var(--color-ring);
+    border-radius: 4px;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-size: 12px;
+    outline: none;
 }
 
 .tab-close {

@@ -1,6 +1,25 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
-import { deepMerge } from './config'
+
+// 锁定为 mac 平台：默认热键的 mac 分支曾出现与 getKeyName 产出不一致的键名（回归测试目标）
+vi.mock('@/lib/platform', () => ({
+    detectPlatform: () => 'macos' as const,
+    platform: 'macos' as const,
+}))
+
+import { deepMerge, defaultHotkeys } from './config'
+import { getKeyName, metaKeyName, altKeyName, normalizeHotkeysConfig } from '@/lib/hotkeys/hotkeys'
+
+/** 模拟按下带修饰键的物理按键，返回 getKeyName 产出的键名 */
+function pressedKeyName (key: string, code?: string): string {
+    return getKeyName({
+        eventName: 'keydown',
+        key,
+        code: code ?? key,
+        metaKey: true,
+        altKey: true,
+    } as never)
+}
 
 describe('config deepMerge', () => {
     it('fills missing keys with defaults and keeps user values', () => {
@@ -32,5 +51,17 @@ describe('config YAML round-trip', () => {
 
     it('parses an empty document without error', () => {
         expect(parseYaml('')).toBe(null)
+    })
+})
+
+describe('default hotkeys', () => {
+    it('pane navigation defaults match the keystrokes getKeyName produces', () => {
+        const hotkeys = defaultHotkeys()
+        expect(hotkeys['pane-forward']).toEqual([[`${metaKeyName}-${altKeyName}-${pressedKeyName('ArrowRight')}`]])
+        expect(hotkeys['pane-back']).toEqual([[`${metaKeyName}-${altKeyName}-${pressedKeyName('ArrowLeft')}`]])
+    })
+
+    it('defaults stay normalized (idempotent under normalizeHotkeysConfig)', () => {
+        expect(normalizeHotkeysConfig(defaultHotkeys())).toEqual(defaultHotkeys())
     })
 })

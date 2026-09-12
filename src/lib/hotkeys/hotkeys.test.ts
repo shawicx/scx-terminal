@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getKeyName, getKeystrokeName, metaKeyName, altKeyName, parseKeystroke } from './hotkeys'
+import { getKeyName, getKeystrokeName, metaKeyName, altKeyName, parseKeystroke, normalizeKeyName, normalizeHotkeysConfig } from './hotkeys'
 import { HotkeysService } from '@/services/hotkeys'
 
 function keyEvent (overrides: Partial<KeyboardEvent> & { key: string }): KeyboardEvent {
@@ -33,6 +33,41 @@ describe('key naming', () => {
 
     it('parses keystroke strings', () => {
         expect(parseKeystroke(`${metaKeyName}-Shift-P`)).toEqual([metaKeyName, 'Shift', 'P'])
+    })
+})
+
+describe('keystroke normalization', () => {
+    it('strips the Arrow prefix like getKeyName does', () => {
+        expect(normalizeKeyName('ArrowRight')).toBe('Right')
+        expect(normalizeKeyName('ArrowLeft')).toBe('Left')
+        expect(normalizeKeyName('ArrowUp')).toBe('Up')
+        expect(normalizeKeyName('ArrowDown')).toBe('Down')
+    })
+
+    it('maps modifier aliases to the platform key names', () => {
+        expect(normalizeKeyName('Alt')).toBe(altKeyName)
+        expect(normalizeKeyName('Meta')).toBe(metaKeyName)
+        expect(normalizeKeyName('Cmd')).toBe(metaKeyName)
+        expect(normalizeKeyName('Super')).toBe(metaKeyName)
+    })
+
+    it('unwraps physical code names and leaves canonical names untouched', () => {
+        expect(normalizeKeyName('KeyA')).toBe('A')
+        expect(normalizeKeyName('Digit1')).toBe('1')
+        expect(normalizeKeyName(metaKeyName)).toBe(metaKeyName)
+        expect(normalizeKeyName('Right')).toBe('Right')
+        expect(normalizeKeyName('F5')).toBe('F5')
+    })
+
+    it('normalizes every sequence of a full hotkeys config', () => {
+        const normalized = normalizeHotkeysConfig({
+            'pane-forward': [[`${metaKeyName}-${altKeyName}-ArrowRight`], ['Ctrl-Alt-ArrowDown']],
+            'copy': [[`${metaKeyName}-C`]],
+        })
+        expect(normalized).toEqual({
+            'pane-forward': [[`${metaKeyName}-${altKeyName}-Right`], [`Ctrl-${altKeyName}-Down`]],
+            'copy': [[`${metaKeyName}-C`]],
+        })
     })
 })
 

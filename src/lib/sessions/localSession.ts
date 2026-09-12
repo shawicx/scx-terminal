@@ -1,4 +1,4 @@
-import { BaseSession } from './baseSession'
+import { BaseSession, type BaseSessionOptions } from './baseSession'
 import { TauriPTYProxy } from '@/services/pty'
 import { encodeUTF8 } from '@/lib/utils/bytes'
 
@@ -21,6 +21,10 @@ export class LocalSession extends BaseSession {
     private ptyClosed = false
     private pauseAfterExit = false
     private pendingResize: { columns: number, rows: number } | null = null
+
+    constructor (options?: BaseSessionOptions) {
+        super(options)
+    }
 
     async start (options: LocalSessionOptions): Promise<void> {
         const env = {

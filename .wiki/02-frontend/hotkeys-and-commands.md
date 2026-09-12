@@ -48,9 +48,9 @@
 
 模糊搜索（`src/lib/utils/fuzzy.ts`）`sortedCommands`，回车执行；打开时 `hotkeys.disable()`，关闭 `enable()`。
 
-## 已知坑
+## 已知坑（历史）
 
-- 默认序列 `'⌘-⌥-ArrowRight'` 写法与 `getKeyName` 的输出（`Right`，会剥掉 `Arrow` 前缀）不一致，窗格导航热键可能永远匹配不上——调整默认序列或解析器时注意（见 `src/lib/hotkeys/hotkeys.ts`）。
+- 早期默认序列写作 `'⌘-⌥-ArrowRight'` / `'⌘-Alt-W'`，与 `getKeyName` 的实际产出（macOS 方向键剥 `Arrow` 前缀、Alt 映射为 `⌥`）不一致，窗格导航/关窗格热键永不匹配。已修复：默认值改为解析器产出，且 `config.ts` 加载配置时经 `normalizeHotkeysConfig`（`src/lib/hotkeys/hotkeys.ts`）对旧值做归一化兼容；回归测试锁定默认值与 `getKeyName` 产出一致（`config.test.ts`）。
 
 ## Related
 

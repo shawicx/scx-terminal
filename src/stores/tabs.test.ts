@@ -51,4 +51,42 @@ describe('tabs store', () => {
         store.setTitle(t1.id, 'zsh — dev')
         expect(store.tabs[0]!.title).toBe('zsh — dev')
     })
+
+    it('renaming overrides the OSC title until cleared', () => {
+        const store = useTabsStore()
+        const t1 = store.openTerminalTab()
+        store.setTitle(t1.id, 'zsh — dev')
+        store.renameTab(t1.id, 'build')
+        expect(t1.manualTitle).toBe('build')
+        // shell 上报的新标题不覆盖手动命名
+        store.setTitle(t1.id, 'zsh — other')
+        expect(t1.title).toBe('zsh — other')
+        expect(t1.manualTitle).toBe('build')
+        // 清空恢复跟随 shell 标题
+        store.renameTab(t1.id, '  ')
+        expect(t1.manualTitle).toBeUndefined()
+    })
+
+    it('toggles tab color markers', () => {
+        const store = useTabsStore()
+        const t1 = store.openTerminalTab()
+        store.setTabColor(t1.id, '#61afef')
+        expect(t1.color).toBe('#61afef')
+        store.setTabColor(t1.id, '#98c379')
+        expect(t1.color).toBe('#98c379')
+        // 再次设置同色 = 清除
+        store.setTabColor(t1.id, '#98c379')
+        expect(t1.color).toBeUndefined()
+    })
+
+    it('closes other tabs and activates the kept one', () => {
+        const store = useTabsStore()
+        const t1 = store.openTerminalTab()
+        const t2 = store.openTerminalTab()
+        const t3 = store.openTerminalTab()
+        store.closeOtherTabs(t2.id)
+        expect(store.tabs.map(t => t.id)).toEqual([t2.id])
+        expect(store.activeId).toBe(t2.id)
+        expect(t1.id).not.toBe(t3.id)
+    })
 })

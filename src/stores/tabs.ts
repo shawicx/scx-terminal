@@ -7,6 +7,10 @@ export interface Tab {
     id: string
     type: TabType
     title: string
+    /** 手动重命名的标题；存在时优先于 shell 上报标题（title）显示 */
+    manualTitle?: string
+    /** 标签颜色标记（CSS 颜色值） */
+    color?: string
 }
 
 /**
@@ -80,6 +84,38 @@ export const useTabsStore = defineStore('tabs', {
             if (tab) {
                 tab.title = title
             }
+        },
+        /**
+         * 重命名标签；空串清除手动标题，恢复显示 shell 上报标题
+         */
+        renameTab (id: string, title: string) {
+            const tab = this.tabs.find(t => t.id === id)
+            if (!tab) {
+                return
+            }
+            const trimmed = title.trim()
+            tab.manualTitle = trimmed || undefined
+        },
+        /**
+         * 设置标签颜色标记；再次设置同色则清除
+         */
+        setTabColor (id: string, color?: string) {
+            const tab = this.tabs.find(t => t.id === id)
+            if (!tab) {
+                return
+            }
+            tab.color = color && tab.color !== color ? color : undefined
+        },
+        /**
+         * 关闭除指定标签外的全部标签
+         */
+        closeOtherTabs (id: string) {
+            const keep = this.tabs.find(t => t.id === id)
+            if (!keep) {
+                return
+            }
+            this.tabs = [keep]
+            this.activeId = id
         },
     },
 })

@@ -3,6 +3,7 @@ import { reactive, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { platform } from '@/lib/platform'
+import { normalizeHotkeysConfig } from '@/lib/hotkeys/hotkeys'
 
 export interface TerminalConfig {
     font: string
@@ -24,6 +25,8 @@ export interface TerminalConfig {
     backspace: 'ctrl-h' | 'ctrl-?' | 'delete' | 'backspace'
     inputNewlines: null | 'cr' | 'lf' | 'crlf' | 'implicit_cr' | 'implicit_lf'
     outputNewlines: null | 'cr' | 'lf' | 'crlf' | 'implicit_cr' | 'implicit_lf'
+    /** 以登录 shell 启动（-l，加载 ~/.zprofile 等登录配置），对齐 Tabby/Terminal.app */
+    loginShell: boolean
 }
 
 export interface AppearanceConfig {
@@ -65,6 +68,7 @@ function defaultConfig (): ConfigStore {
             backspace: 'backspace',
             inputNewlines: null,
             outputNewlines: null,
+            loginShell: true,
         },
         appearance: {
             colorScheme: 'auto',
@@ -76,7 +80,14 @@ function defaultConfig (): ConfigStore {
     }
 }
 
-function defaultHotkeys (): HotkeysConfig {
+/**
+ * @description 构造当前平台的默认热键配置
+ * @returns HotkeysConfig hotkey id -> 按键序列列表
+ *
+ * @example defaultHotkeys()['pane-forward'] // mac: [['⌘-⌥-Right']]
+ *
+ */
+export function defaultHotkeys (): HotkeysConfig {
     const mac = platform === 'macos'
     if (mac) {
         return {
@@ -87,9 +98,9 @@ function defaultHotkeys (): HotkeysConfig {
             'prev-tab': [['⌘-Shift-[']],
             'split-right': [['⌘-D']],
             'split-down': [['⌘-Shift-D']],
-            'close-pane': [['⌘-Alt-W']],
-            'pane-forward': [['⌘-⌥-ArrowRight']],
-            'pane-back': [['⌘-⌥-ArrowLeft']],
+            'close-pane': [['⌘-⌥-W']],
+            'pane-forward': [['⌘-⌥-Right']],
+            'pane-back': [['⌘-⌥-Left']],
             'copy': [['⌘-C']],
             'paste': [['⌘-V']],
             'clear': [['⌘-K']],
@@ -147,6 +158,7 @@ export const useConfigStore = defineStore('config', () => {
             const content = await invoke<string>('config_load')
             if (content.trim()) {
                 deepMerge(store, parseYaml(content))
+                store.hotkeys = normalizeHotkeysConfig(store.hotkeys)
             }
         } catch (error) {
             console.error('could not load config', error)
@@ -181,6 +193,7 @@ export const useConfigStore = defineStore('config', () => {
         const content = await invoke<string>('config_load')
         if (content.trim()) {
             deepMerge(store, parseYaml(content))
+            store.hotkeys = normalizeHotkeysConfig(store.hotkeys)
         }
     }
 

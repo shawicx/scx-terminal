@@ -3,6 +3,8 @@ import { BehaviorSubject, filter, firstValueFrom, fromEvent, takeUntil } from 'r
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon, type ISearchOptions } from '@xterm/addon-search'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
@@ -38,6 +40,20 @@ function isIMETextKey (event: KeyboardEvent): boolean {
         return false
     }
     return LINUX_IME_TEXT_KEY_CODES.has(event.code) || event.code === 'Space' && event.shiftKey
+}
+
+/**
+ * @description 经系统默认浏览器打开终端内点击的链接（WebLinksAddon 回调）
+ * @param event 触发的鼠标事件
+ * @param uri 链接地址
+ * @returns void
+ *
+ * @example openLinkInSystemBrowser(event, 'https://example.com')
+ *
+ */
+function openLinkInSystemBrowser (event: MouseEvent, uri: string): void {
+    event.preventDefault()
+    void openUrl(uri)
 }
 
 // How many times to recreate the WebGL renderer after a lost GPU context
@@ -98,6 +114,7 @@ export class XTermFrontend extends Frontend {
     private search = new SearchAddon()
     private searchState: SearchState = { resultCount: 0 }
     private fitAddon = new FitAddon()
+    private webLinksAddon = new WebLinksAddon((event, uri) => openLinkInSystemBrowser(event, uri))
     private webGLAddon?: WebglAddon
     private canvasAddon?: CanvasAddon
     private opened = false
@@ -161,6 +178,7 @@ export class XTermFrontend extends Frontend {
 
         this.xterm.loadAddon(this.fitAddon)
         this.xterm.loadAddon(new Unicode11Addon())
+        this.xterm.loadAddon(this.webLinksAddon)
         this.xterm.unicode.activeVersion = '11'
 
         const keyboardEventHandler = (name: string, event: KeyboardEvent) => {
@@ -382,8 +400,9 @@ export class XTermFrontend extends Frontend {
             mousedown: event => this.mouseEvent.next(event),
             mouseup: event => this.mouseEvent.next(event),
             contextmenu: event => {
+                // 只屏蔽 WKWebView 原生菜单；不 stopPropagation，
+                // 让右键事件冒泡到窗格层触发应用内右键菜单
                 event.preventDefault()
-                event.stopPropagation()
             },
         }
 

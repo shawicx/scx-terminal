@@ -8,7 +8,7 @@
 | `src/lib/frontends/xtermFrontend.ts` | `XTermWebGLFrontend extends Frontend`：xterm.js 具体实现（WebGL 优先、Canvas 兜底） |
 | `src/lib/frontendContext.ts` | `createFrontendContext()`：替代 Tabby 的 Angular DI，向前端注入 config / 配色解析 / 剪贴板 / 热键桥 |
 | `src/lib/frontends/xterm.css` | 终端滚动条样式（颜色取 CSS 变量 `--term-scrollbar-*`，跟随配色） |
-| `src/components/terminal/TerminalPane.vue` | 每个分屏叶的容器：组装 session + frontend，处理搜索条与挂载错误 |
+| `src/components/terminal/TerminalPane.vue` | 每个分屏叶的容器：组装 session + frontend，处理搜索条、右键菜单与挂载错误 |
 
 ## Frontend 契约（`frontend.ts`）
 
@@ -53,6 +53,10 @@ xterm 的 `write` 是异步分批渲染的；前端维护发送/确认计数做�
 4. `session.releaseInitialDataBuffer()` 放行首屏 → 活动叶 `focus()`。
 
 `props.active` 变化（标签切换回来）时 `reactivate() + focus()`；卸载时销毁 session 与 frontend。搜索条（⌘F）是覆盖在终端上的浮层，输入不进 shell。
+
+**终端右键菜单**：`.terminal-host` 由 `ui/ContextMenu.vue`（reka-ui）包裹，菜单项为 复制（无选区时禁用，打开时经 `frontend.getSelection()` 判定）/ 粘贴 / 全选 / 清屏 / 搜索 / 向右分屏 / 向下分屏 / 关闭窗格；分屏项经 `requestSplit` 事件沿 `SplitContainer → TerminalTabContent` 上行（带叶 id），关窗格复用既有 `closed` 事件。`xtermFrontend` 对宿主 `contextmenu` 只 `preventDefault`（屏蔽 WKWebView 原生菜单）不 `stopPropagation`，事件冒泡到包裹层触发菜单。
+
+**可点击链接**：attach 时加载 `@xterm/addon-web-links`，URL 点击经 `@tauri-apps/plugin-opener` 的 `openUrl` 用系统默认浏览器打开（capabilities 已含 `opener:default`）；OSC 8 超链接由 xterm 核心原生支持。
 
 ## Related
 

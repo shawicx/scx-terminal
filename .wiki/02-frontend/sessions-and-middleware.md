@@ -4,16 +4,26 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/lib/sessions/baseSession.ts` | `BaseSession` 抽象基类：拥有中间件栈、输出/关闭/销毁流、首屏缓冲、销毁管线（移植 tabby-terminal） |
+| `src/lib/sessions/baseSession.ts` | `BaseSession` 抽象基类：拥有中间件栈、输出/关闭/销毁流、首屏缓冲、销毁管线（移植 tabby-terminal）；构造期按 `BaseSessionOptions` 挂载中间件 |
 | `src/lib/sessions/localSession.ts` | `LocalSession`：本地 shell 会话（移植 tabby-local），对接 `TauriPTYProxy` |
 | `src/services/pty.ts` | `TauriPTYProxy`：Rust PTY 的前端句柄（移植 tabby-electron 的 pty 代理，Electron IPC → Tauri IPC） |
 | `src/lib/middleware/middleware.ts` | `SessionMiddleware` / `SessionMiddlewareStack`：会话与前端之间的 I/O 处理链 |
-| `src/lib/middleware/oscProcessing.ts` | `OSCProcessor`：拦截 OSC 1337（cwd 上报）与 OSC 52（剪贴板写入，未实现） |
-| `src/lib/middleware/inputProcessing.ts`、`streamProcessing.ts` | 退格重映射 / 换行转换中间件——**已实现但未被实例化**（配置键无效） |
+| `src/lib/middleware/oscProcessing.ts` | `OSCProcessor`：拦截 OSC 1337（cwd 上报）与 OSC 52（剪贴板写入：base64 解码 → 注入的 `setClipboard`，100KB 上限，不响应 `?` 查询） |
+| `src/lib/middleware/inputProcessing.ts` | `InputProcessor`：退格重映射（`terminal.backspace` 为 `ctrl-h`/`delete` 时挂载） |
+| `src/lib/middleware/streamProcessing.ts` | `TerminalStreamProcessor`：输入/输出换行转换（`terminal.inputNewlines`/`outputNewlines` 非 null 时挂载） |
 
 ## 中间件栈
 
-数据结构：栈内每个 `SessionMiddleware` 有 `outputToTerminal$` 与 `outputToSession$` 两个 Subject；`SessionMiddlewareStack.relink()` 把相邻层串成链（session→terminal 从栈底流向栈顶方向，terminal→session 反向）。当前栈内容（`BaseSession` 构造函数）：`[基础透传层, OSCProcessor]`。
+数据结构：栈内每个 `SessionMiddleware` 有 `outputToTerminal$` 与 `outputToSession$` 两个 Subject；`SessionMiddlewareStack.relink()` 把相邻层串成链（session→terminal 从栈底流向栈顶方向，terminal→session 反向）。
+
+栈内容在 `BaseSession` 构造函数按 `BaseSessionOptions` 组装（配置在会话创建时读取，**变更对新标签生效**）：
+
+```text
+[基础透传层, OSCProcessor, (InputProcessor 仅当 backspace ∈ {ctrl-h, delete}),
+ (TerminalStreamProcessor 仅当 inputNewlines 或 outputNewlines 非 null)]
+```
+
+`TerminalPane` 创建 `LocalSession` 时传入 `setClipboard`（OSC 52 目标，Tauri 剪贴板 + navigator 降级）与三项中间件配置。
 
 `feedFromSession`（shell 输出）从 `stack[0]` 进入；`feedFromTerminal`（用户输入）从栈顶进入。
 
@@ -25,7 +35,7 @@
 
 ## LocalSession（`localSession.ts`）
 
-**启动参数**：注入环境 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=scx-terminal`；cwd 为 `null`（Rust 侧回退 `$HOME`）；**初始尺寸竞态修复**——`resize$` 是 ReplaySubject，fit 尺寸可能在 spawn 前到达，此时存入 `pendingResize`，`start()` 用它作为 spawn 尺寸（避免 PTY 固定 80×30 导致输入行第 80 列提前换行）；spawn 往返期间新到的 resize 在启动后立即补发。
+**启动参数**：注入环境 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=scx-terminal`；cwd 为 `null`（Rust 侧回退 `$HOME`）；`terminal.loginShell`（默认开）时在 shell 参数后追加 `-l`，加载 `~/.zprofile` 等登录配置（PATH 行为与 Terminal.app/Tabby 一致）；**初始尺寸竞态修复**——`resize$` 是 ReplaySubject，fit 尺寸可能在 spawn 前到达，此时存入 `pendingResize`，`start()` 用它作为 spawn 尺寸（避免 PTY 固定 80×30 导致输入行第 80 列提前换行）；spawn 往返期间新到的 resize 在启动后立即补发。
 
 **输出链**：`pty.subscribe('data')` → 每块先 `ackData(len)`（驱动 Rust 侧背压）再 `emitOutput`。
 

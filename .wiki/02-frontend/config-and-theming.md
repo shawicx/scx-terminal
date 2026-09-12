@@ -4,11 +4,11 @@
 
 `ConfigStore` 三段结构（默认值见 `defaultConfig()`）：
 
-- `terminal`：font/fontSize/linePadding/cursor/cursorBlink/altIsMeta/scrollbackLines/wordSeparator/drawBoldTextInBrightColors/fontWeight(Bold)/minimumContrastRatio/copyOnSelect/paletteGenerate/paletteHarmonious/backspace/inputNewlines/outputNewlines。
+- `terminal`：font/fontSize/linePadding/cursor/cursorBlink/altIsMeta/scrollbackLines/wordSeparator/drawBoldTextInBrightColors/fontWeight(Bold)/minimumContrastRatio/copyOnSelect/paletteGenerate/paletteHarmonious/backspace/inputNewlines/outputNewlines/**loginShell**（默认 `true`，spawn 追加 `-l`）。
 - `appearance`：`colorScheme: string`（`'auto'` | 旧值 `'dark'`/`'light'` | 内置配色名，默认 `'auto'`）、`tabBarPosition`（死键）、`theme`（死键）、`language`。
 - `hotkeys`：`Record<hotkeyId, string[][]>`（每个热键多组按键序列；macOS 默认含 ⌘ 前缀，见 `defaultHotkeys()`，平台判断来自 `src/lib/platform.ts`）。
 
-机制：启动时 `config_load` 读 YAML → `deepMerge(默认值, 用户值)`（未知键丢弃，测试见 `config.test.ts`）；store 深度 watch 后 500ms 防抖全量快照 `config_save`。文件位置由 Rust 侧决定（`~/Library/Application Support/scx-terminal/config.yaml`，原子写 + `.backup`，见 [03-backend/commands-and-config](../03-backend/commands-and-config.md)）。
+机制：启动时 `config_load` 读 YAML → `deepMerge(默认值, 用户值)`（未知键丢弃）→ **`normalizeHotkeysConfig` 归一化热键键名**（`Arrow*`/`Alt`/`Meta` 等旧别名 → `getKeyName` 产出，如 `⌘-⌥-ArrowRight` → `⌘-⌥-Right`），测试见 `config.test.ts` / `hotkeys.test.ts`；store 深度 watch 后 500ms 防抖全量快照 `config_save`。文件位置由 Rust 侧决定（`~/Library/Application Support/scx-terminal/config.yaml`，原子写 + `.backup`，见 [03-backend/commands-and-config](../03-backend/commands-and-config.md)）。
 
 ## 配色库（`src/lib/colorSchemes.ts`）
 
@@ -31,7 +31,9 @@
 
 ## 设置 UI（`src/components/settings/SettingsView.vue`）
 
-四个页面：终端 / 外观 / 快捷键 / 关于。外观页的"配色方案"下拉 = `自动` + 全部内置配色名，绑定 `store.appearance.colorScheme`，改动即时生效（config 深度 watch + theme epoch）。快捷键页通过 `hotkeys.keystroke$` 录制按键序列。命令面板的"切换配色方案"命令在两套默认配色间切换（保持与下拉值域一致）。
+四个页面：终端 / 外观 / 快捷键 / 关于。终端页控件：字号/字体/行距/光标样式/闪烁/回滚行数/选中即复制/Alt 作 Meta/最小对比度，以及 登录 shell 开关、退格键行为、输入/输出换行转换（`null` 在 UI 以"不转换"占位）、双击选词分隔符、粗体亮色。外观页的"配色方案"下拉 = `自动` + 全部内置配色名，绑定 `store.appearance.colorScheme`，改动即时生效（config 深度 watch + theme epoch）。快捷键页通过 `hotkeys.keystroke$` 录制按键序列。命令面板的"切换配色方案"命令在两套默认配色间切换（保持与下拉值域一致）。
+
+注意：退格/换行/OSC 52 等中间件配置在会话构造期读取，**对新开标签生效**（设置页有提示文案）。
 
 ## Related
 

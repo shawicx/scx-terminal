@@ -14,6 +14,7 @@ import { useConfigStore } from '@/stores/config'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { builtinColorSchemes } from '@/lib/colorSchemes'
+import type { NewlineMode } from '@/lib/middleware/streamProcessing'
 
 const { t } = useI18n()
 const config = useConfigStore()
@@ -72,6 +73,42 @@ const cursorOptions = computed(() => [
     { value: 'bar', label: t('settings.cursorStyleBar') },
     { value: 'underline', label: t('settings.cursorStyleUnderline') },
 ])
+
+const backspaceOptions = computed(() => [
+    { value: 'backspace', label: t('settings.backspaceDefault') },
+    { value: 'ctrl-h', label: t('settings.backspaceCtrlH') },
+    { value: 'ctrl-?', label: t('settings.backspaceCtrlQ') },
+    { value: 'delete', label: t('settings.backspaceDelete') },
+])
+
+const newlineOptions = computed(() => [
+    { value: 'auto', label: t('settings.newlinesAuto') },
+    { value: 'cr', label: t('settings.newlinesCr') },
+    { value: 'lf', label: t('settings.newlinesLf') },
+    { value: 'crlf', label: t('settings.newlinesCrlf') },
+    { value: 'implicit_cr', label: t('settings.newlinesImplicitCr') },
+    { value: 'implicit_lf', label: t('settings.newlinesImplicitLf') },
+])
+
+/**
+ * @description 换行转换配置的双向绑定：配置值为 null 表示不转换，UI 用 'auto' 占位
+ * @param key 配置键（'inputNewlines' | 'outputNewlines'）
+ * @returns WritableComputed<string, void> 以字符串值驱动的双向绑定
+ *
+ * @example newlineModel('inputNewlines').value = 'auto' // store.terminal.inputNewlines = null
+ *
+ */
+function newlineModel (key: 'inputNewlines' | 'outputNewlines') {
+    return computed({
+        get: () => store.terminal[key] ?? 'auto',
+        set: (value: string) => {
+            store.terminal[key] = (value === 'auto' ? null : value) as NewlineMode
+        },
+    })
+}
+
+const inputNewlinesModel = newlineModel('inputNewlines')
+const outputNewlinesModel = newlineModel('outputNewlines')
 
 const colorSchemeOptions = computed(() => [
     { value: 'auto', label: t('settings.colorSchemeAuto') },
@@ -143,6 +180,33 @@ function openConfigDir (): void {
                 <div class="settings-field">
                     <Label>{{ t('settings.minimumContrast') }} <span class="value-hint">{{ store.terminal.minimumContrastRatio }}</span></Label>
                     <Slider v-model="store.terminal.minimumContrastRatio" :min="1" :max="7" :step="0.5" />
+                </div>
+                <Separator />
+                <div class="settings-field row">
+                    <Label>{{ t('settings.loginShell') }}</Label>
+                    <Switch v-model="store.terminal.loginShell" />
+                </div>
+                <p class="hint">{{ t('settings.middlewareHint') }}</p>
+                <div class="settings-field">
+                    <Label>{{ t('settings.backspace') }}</Label>
+                    <Select v-model="store.terminal.backspace" :options="backspaceOptions" class="w-44" />
+                </div>
+                <div class="settings-field">
+                    <Label>{{ t('settings.inputNewlines') }}</Label>
+                    <Select v-model="inputNewlinesModel" :options="newlineOptions" class="w-44" />
+                </div>
+                <div class="settings-field">
+                    <Label>{{ t('settings.outputNewlines') }}</Label>
+                    <Select v-model="outputNewlinesModel" :options="newlineOptions" class="w-44" />
+                </div>
+                <Separator />
+                <div class="settings-field">
+                    <Label>{{ t('settings.wordSeparator') }}</Label>
+                    <Input v-model="store.terminal.wordSeparator" class="w-44" />
+                </div>
+                <div class="settings-field row">
+                    <Label>{{ t('settings.boldInBright') }}</Label>
+                    <Switch v-model="store.terminal.drawBoldTextInBrightColors" />
                 </div>
             </template>
 

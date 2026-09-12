@@ -1,7 +1,18 @@
 import { Observable, Subject } from 'rxjs'
-import { OSCProcessor } from '@/lib/middleware/oscProcessing'
+import { OSCProcessor, type OSCProcessorOptions } from '@/lib/middleware/oscProcessing'
+import { InputProcessor } from '@/lib/middleware/inputProcessing'
+import { TerminalStreamProcessor, type NewlineMode } from '@/lib/middleware/streamProcessing'
 import { SessionMiddlewareStack } from '@/lib/middleware/middleware'
 import { concatBytes, decodeUTF8 } from '@/lib/utils/bytes'
+
+export interface BaseSessionOptions extends OSCProcessorOptions {
+    /** 退格键映射；缺省与 'backspace'/'ctrl-?' 为恒等映射，不挂载中间件 */
+    backspace?: 'ctrl-h' | 'ctrl-?' | 'delete' | 'backspace'
+    /** 输入方向（终端→会话）换行转换；null 不转换 */
+    inputNewlines?: NewlineMode
+    /** 输出方向（会话→终端）换行转换；null 不转换 */
+    outputNewlines?: NewlineMode
+}
 
 /**
  * Base class for terminal sessions: owns the middleware stack and the
@@ -9,7 +20,7 @@ import { concatBytes, decodeUTF8 } from '@/lib/utils/bytes'
  */
 export abstract class BaseSession {
     open = false
-    readonly oscProcessor = new OSCProcessor()
+    readonly oscProcessor: OSCProcessor
     readonly middleware = new SessionMiddlewareStack()
     protected output = new Subject<string>()
     protected binaryOutput = new Subject<Uint8Array>()
@@ -25,8 +36,19 @@ export abstract class BaseSession {
     get closed$ (): Observable<void> { return this.closed }
     get destroyed$ (): Observable<void> { return this.destroyed }
 
-    constructor () {
+    constructor (options: BaseSessionOptions = {}) {
+        this.oscProcessor = new OSCProcessor(options)
         this.middleware.push(this.oscProcessor)
+        // 按配置挂载退格/换行中间件（构造期读取，配置变更对新会话生效）
+        if (options.backspace === 'ctrl-h' || options.backspace === 'delete') {
+            this.middleware.push(new InputProcessor({ backspace: options.backspace }))
+        }
+        if (options.inputNewlines || options.outputNewlines) {
+            this.middleware.push(new TerminalStreamProcessor({
+                inputNewlines: options.inputNewlines ?? null,
+                outputNewlines: options.outputNewlines ?? null,
+            }))
+        }
         this.oscProcessor.cwdReported$.subscribe(cwd => {
             this.reportedCWD = cwd
         })

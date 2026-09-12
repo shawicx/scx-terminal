@@ -40,8 +40,8 @@ function setPaneTitle (leafId: string, title: string) {
     }
 }
 
-function split (direction: 'right' | 'down') {
-    const result = splitLeaf(tree.value, activeLeafId.value, direction)
+function split (direction: 'right' | 'down', leafId?: string) {
+    const result = splitLeaf(tree.value, leafId ?? activeLeafId.value, direction)
     if (result) {
         tree.value = result.tree
         activeLeafId.value = result.newLeafId
@@ -112,6 +112,7 @@ onBeforeUnmount(() => {
             @leaf-activated="id => (activeLeafId = id)"
             @leaf-title="setPaneTitle"
             @pane-closed="closePane"
+            @leaf-split="(id, direction) => split(direction, id)"
             @tree-updated="updated => (tree = updated)"
         />
     </div>
