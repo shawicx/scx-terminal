@@ -98,8 +98,8 @@ Tauri 项目同时包含前端（JS/TS）与后端（Rust），两套依赖体�
 
 ### 包管理与运行时
 
-1. **前端必须使用 `pnpm`**，Rust 后端使用 `cargo`，不得混用
-2. **Node.js 版本要求 22+**（前端构建工具链）
+1. **前端必须使用 `bun`**，Rust 后端使用 `cargo`，不得混用
+2. **Bun 版本要求 1.4+**（前端包管理与构建工具链统一使用 Bun 运行时，锁定文件为 `bun.lock`）
 3. Rust edition 必须与 `src-tauri/Cargo.toml` 中声明的版本一致（通常为 2021）
 
 ### 项目结构约定
@@ -117,10 +117,10 @@ Tauri 项目同时包含前端（JS/TS）与后端（Rust），两套依赖体�
 
 ### 构建与测试命令
 
-- `pnpm install` — 安装前端依赖
-- `pnpm tauri dev` — 开发模式（同时启动前端与 Rust）
-- `pnpm tauri build` — 生产打包
-- `pnpm dev` — 仅启动前端（用于纯前端调试）
+- `bun install` — 安装前端依赖
+- `bun run app:dev` — 开发模式（同时启动前端与 Rust，等价 `tauri dev`）
+- `bun run app:build` — 生产打包（等价 `tauri build`）
+- `bun run dev` — 仅启动前端（用于纯前端调试）
 - `cargo test --manifest-path src-tauri/Cargo.toml` — Rust 测试
 
 ### 依赖与配置规则
@@ -128,7 +128,7 @@ Tauri 项目同时包含前端（JS/TS）与后端（Rust），两套依赖体�
 1. **`tauri.conf.json` 的 security 相关字段必须保留**（CSP、allowlist、capabilities 等），不得删除或弱化
 2. 前后端通过 Tauri IPC（`invoke` / `#[tauri::command]`）通信，命令必须在 `invoke_handler` 中注册
 3. Rust 依赖遵循 cargo semver，不得降级
-4. 前端依赖遵循 pnpm + Node 22+ 规范
+4. 前端依赖遵循 bun 规范（新增依赖用 `bun add`，版本策略仍为 semver `^`）
 5. `tauri.conf.json` 修改必须采取合并策略，不得重写整个文件
 6. Tauri v2 项目权限必须在 `capabilities/` 下显式声明，不得通过 wildcard 放开
 

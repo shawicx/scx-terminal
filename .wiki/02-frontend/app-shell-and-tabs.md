@@ -1,0 +1,53 @@
+# 应用外壳与标签系统
+
+## 路径与职责
+
+| 文件 | 职责 |
+| --- | --- |
+| `src/App.vue` | 应用骨架：TitleBar + 标签内容区 + CommandPalette；启动时创建首个标签；注册命令与全局键盘监听；语言跟随 |
+| `src/main.ts` | bootstrap：Pinia → **先加载配置再初始化主题** → Vue errorHandler / window error / unhandledrejection 全部转发到 Rust `dev_log`（`tauri dev` 控制台可见） |
+| `src/components/titlebar/TitleBar.vue` | 自定义标题栏（macOS Overlay 标题栏）：交通灯占位、标签条（标题回退 `Terminal`）、`+` 新建、设置齿轮 |
+| `src/stores/tabs.ts` | 标签状态（`tabs` / `activeId` / `activeTab`）与动作 |
+| `src/components/palette/CommandPalette.vue` | 命令面板：模糊搜索命令并执行；打开期间 `hotkeys.disable()` 暂停全局热键 |
+| `src/services/terminalTabsApi.ts` | `terminalTabApi.current`：当前激活终端标签的动作句柄（split/copy/paste/clear/find…），供命令与热键调用 |
+
+## 标签模型
+
+`Tab = { id: nanoid(), type: 'terminal' | 'settings', title }`（`src/stores/tabs.ts`）。要点：
+
+- `openSettingsTab()` 是单例（已有设置标签则激活）。
+- `closeTab()` 关闭最后一个标签时自动开一个新终端标签。
+- 所有标签的 DOM 常驻（`App.vue` 用 `v-show`），后台会话不中断——对标 Tabby 行为。
+- 标签标题来源：shell OSC 0/2 → `frontend.title$` → `TerminalTabContent.setPaneTitle` → `tabs.setTitle`；新标签初始为空串，TitleBar 显示回退文案。
+
+## 布局层级（曾出过 0 宽度坍塌 bug，改动前先读）
+
+```text
+.app-shell (flex column, 100vh)
+├── TitleBar
+└── .tab-content (flex:1, position:relative)
+    └── .tab-pane (position:absolute inset:0, v-show 切换)
+        └── .terminal-tab-content (height:100%, display:flex)
+            └── SplitContainer.split-root (flex:1 1 0, min-width/height:0)   ← 必须有 flex 尺寸
+```
+
+`.split-root` 缺失时根分栏容器按内容计算宽度，而其内容（`.terminal-pane`）是绝对定位不占流内尺寸 → 根容器宽度为 0、终端不可见。该类定义在 `src/components/terminal/TerminalTabContent.vue`。
+
+## TerminalTabContent（`src/components/terminal/TerminalTabContent.vue`）
+
+每个终端标签一棵分屏树（`tree = makeLeaf()` 起步）+ `activeLeafId` + 各窗格标题表 `paneTitles`：
+
+- 激活标签时把 `tabApi` 注册进 `terminalTabApi.current` 并聚焦活动叶；失活/卸载时注销。
+- `split/closePane/navigatePane` 操作树（见 [split-panes](split-panes.md)）；活动叶的标题同步为标签标题。
+- 暴露给命令面板的动作：`split / closePane / navigatePane / copy / paste / clear / find`。
+
+## 命令与热键入口
+
+全局键盘事件有两条投递路径汇入同一个热键状态机（`src/services/hotkeysSingleton.ts` 单例）：`App.vue` 的 document 监听（跳过 INPUT/TEXTAREA/SELECT 目标）与 xterm 的 `attachCustomKeyEventHandler`（终端聚焦时）。热键命中后由 `useCommands().dispatchHotkey` 分发。详见 [hotkeys-and-commands](hotkeys-and-commands.md)。
+
+## Related
+
+- [split-panes](split-panes.md)
+- [hotkeys-and-commands](hotkeys-and-commands.md)
+- [02-frontend/terminal-rendering](terminal-rendering.md)
+- [03-backend/capabilities-and-window](../03-backend/capabilities-and-window.md)
