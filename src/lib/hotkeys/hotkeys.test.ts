@@ -1,0 +1,78 @@
+import { describe, expect, it } from 'vitest'
+import { getKeyName, getKeystrokeName, metaKeyName, altKeyName, parseKeystroke } from './hotkeys'
+import { HotkeysService } from '@/services/hotkeys'
+
+function keyEvent (overrides: Partial<KeyboardEvent> & { key: string }): KeyboardEvent {
+    return {
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        code: overrides.key.length === 1 ? `Key${overrides.key.toUpperCase()}` : overrides.key,
+        repeat: false,
+        timeStamp: performance.now(),
+        ...overrides,
+    } as KeyboardEvent
+}
+
+describe('key naming', () => {
+    it('names plain letters by character (Dvorak-safe)', () => {
+        expect(getKeyName({ eventName: 'keydown', key: 'p', code: 'KeyQ' } as never)).toBe('P')
+    })
+
+    it('normalizes modifiers', () => {
+        expect(getKeyName({ eventName: 'keydown', key: 'Control' } as never)).toBe('Ctrl')
+        expect(getKeyName({ eventName: 'keydown', key: 'Meta' } as never)).toBe(metaKeyName)
+        expect(getKeyName({ eventName: 'keydown', key: 'Alt' } as never)).toBe(altKeyName)
+    })
+
+    it('orders modifiers strictly in keystrokes', () => {
+        expect(getKeystrokeName(['Shift', metaKeyName, 'P'])).toBe(`${metaKeyName}-Shift-P`)
+        expect(getKeystrokeName([altKeyName, 'Ctrl', 'K'])).toBe(`Ctrl-${altKeyName}-K`)
+    })
+
+    it('parses keystroke strings', () => {
+        expect(parseKeystroke(`${metaKeyName}-Shift-P`)).toEqual([metaKeyName, 'Shift', 'P'])
+    })
+})
+
+describe('hotkey matching', () => {
+    it('matches a simple hotkey and emits it', () => {
+        const service = new HotkeysService(() => ({ 'command-palette': [[`${metaKeyName}-Shift-P`]] }))
+        const emitted: string[] = []
+        service.hotkey$.subscribe(id => emitted.push(id))
+
+        service.pushKeyEvent('keydown', keyEvent({ key: 'Meta', metaKey: true }))
+        service.pushKeyEvent('keydown', keyEvent({ key: 'Shift', metaKey: true, shiftKey: true }))
+        service.pushKeyEvent('keydown', keyEvent({ key: 'p', metaKey: true, shiftKey: true }))
+
+        expect(emitted).toEqual(['command-palette'])
+    })
+
+    it('does not match when disabled', () => {
+        const service = new HotkeysService(() => ({ 'copy': [['⌘-C']] }))
+        const emitted: string[] = []
+        service.hotkey$.subscribe(id => emitted.push(id))
+
+        service.disable()
+        service.pushKeyEvent('keydown', keyEvent({ key: 'Meta', metaKey: true }))
+        service.pushKeyEvent('keydown', keyEvent({ key: 'c', metaKey: true }))
+        service.enable()
+
+        expect(emitted).toEqual([])
+    })
+
+    it('matches multi-key sequences in order', () => {
+        const service = new HotkeysService(() => ({ 'close-pane': [[`${metaKeyName}-K`, `${metaKeyName}-X`]] }))
+        const emitted: string[] = []
+        service.hotkey$.subscribe(id => emitted.push(id))
+
+        const press = (key: string) => {
+            service.pushKeyEvent('keydown', keyEvent({ key, metaKey: true }))
+            service.pushKeyEvent('keyup', keyEvent({ key, metaKey: true }))
+        }
+        press('k')
+        press('x')
+        expect(emitted).toEqual(['close-pane'])
+    })
+})
