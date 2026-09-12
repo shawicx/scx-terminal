@@ -13,6 +13,7 @@ import Separator from '@/components/ui/Separator.vue'
 import { useConfigStore } from '@/stores/config'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
+import { builtinColorSchemes } from '@/lib/colorSchemes'
 
 const { t } = useI18n()
 const config = useConfigStore()
@@ -74,8 +75,7 @@ const cursorOptions = computed(() => [
 
 const colorSchemeOptions = computed(() => [
     { value: 'auto', label: t('settings.colorSchemeAuto') },
-    { value: 'dark', label: t('settings.colorSchemeDark') },
-    { value: 'light', label: t('settings.colorSchemeLight') },
+    ...builtinColorSchemes.map(scheme => ({ value: scheme.name, label: scheme.name })),
 ])
 
 const configDir = ref('')

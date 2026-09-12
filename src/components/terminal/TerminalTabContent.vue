@@ -105,6 +105,7 @@ onBeforeUnmount(() => {
     <div class="terminal-tab-content">
         <SplitContainer
             ref="rootContainer"
+            class="split-root"
             :node="tree"
             :active-leaf-id="activeLeafId"
             :tab-active="tabActive"
@@ -121,5 +122,13 @@ onBeforeUnmount(() => {
     height: 100%;
     display: flex;
     transition: all 0.125s ease;
+}
+
+/* 根分栏容器必须占满可用空间：其内容（terminal-pane）为绝对定位，
+   不占流内尺寸，若缺少 flex 尺寸根容器会坍塌为 0 宽度 */
+.split-root {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
 }
 </style>

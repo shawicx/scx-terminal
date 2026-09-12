@@ -3,7 +3,7 @@ import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { useConfigStore } from '@/stores/config'
 import { platform } from './platform'
 import { hotkeys } from '@/services/hotkeysSingleton'
-import { defaultDarkColorScheme, defaultLightColorScheme } from './colorSchemes'
+import { resolveColorScheme } from './colorSchemes'
 
 export { readClipboardText, writeClipboardText }
 
@@ -31,16 +31,10 @@ export function createFrontendContext (): FrontendContext {
         getCSSFontFamily: () => config.getCSSFontFamily(),
         platform,
         colorScheme () {
-            const pref = config.store.appearance.colorScheme
-            if (pref === 'dark') {
-                return defaultDarkColorScheme
-            }
-            if (pref === 'light') {
-                return defaultLightColorScheme
-            }
-            return window.matchMedia('(prefers-color-scheme: light)').matches
-                ? defaultLightColorScheme
-                : defaultDarkColorScheme
+            return resolveColorScheme(
+                config.store.appearance.colorScheme,
+                window.matchMedia('(prefers-color-scheme: light)').matches,
+            )
         },
         async setClipboard (text: string) {
             await writeClipboardText(text)

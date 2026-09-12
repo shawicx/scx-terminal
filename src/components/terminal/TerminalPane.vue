@@ -21,6 +21,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const host = ref<HTMLElement>()
+const mountError = ref('')
 let session: LocalSession | null = null
 let frontend: XTermWebGLFrontend | null = null
 let disposed = false
@@ -90,38 +91,45 @@ watch(() => themeStore.epoch, () => {
 const searchNoResults = computed(() => searchOpen.value && !!searchQuery.value && searchResultCount.value === 0)
 
 onMounted(async () => {
-    const context = createFrontendContext()
-    session = new LocalSession()
-    frontend = new XTermWebGLFrontend(context)
-    frontend.configure({ terminalColorScheme: null })
+    try {
+        const context = createFrontendContext()
+        session = new LocalSession()
+        frontend = new XTermWebGLFrontend(context)
+        frontend.configure({ terminalColorScheme: null })
 
-    await frontend.attach(host.value!, { terminalColorScheme: null })
-    if (disposed) {
-        return
-    }
+        await frontend.attach(host.value!, { terminalColorScheme: null })
+        if (disposed) {
+            return
+        }
 
-    frontend.input$.subscribe(data => session!.feedFromTerminal(data))
-    session.output$.subscribe(data => void frontend!.write(data))
-    frontend.resize$.subscribe(({ columns, rows }) => session!.resize(columns, rows))
-    frontend.title$.subscribe(title => emit('title', title))
-    frontend.bell$.subscribe(() => frontend!.visualBell())
-    session.destroyed$.subscribe(() => emit('closed'))
+        frontend.input$.subscribe(data => session!.feedFromTerminal(data))
+        session.output$.subscribe(data => void frontend!.write(data))
+        frontend.resize$.subscribe(({ columns, rows }) => session!.resize(columns, rows))
+        frontend.title$.subscribe(title => emit('title', title))
+        frontend.bell$.subscribe(() => frontend!.visualBell())
+        session.destroyed$.subscribe(() => emit('closed'))
 
-    const shell = await defaultShell()
-    if (disposed) {
-        return
-    }
-    await session.start({
-        command: shell.command,
-        args: shell.args,
-        env: {},
-        cwd: null,
-        width: null,
-        height: null,
-    })
-    session.releaseInitialDataBuffer()
-    if (props.active) {
-        frontend.focus()
+        const shell = await defaultShell()
+        if (disposed) {
+            return
+        }
+        await session.start({
+            command: shell.command,
+            args: shell.args,
+            env: {},
+            cwd: null,
+            width: null,
+            height: null,
+        })
+        session.releaseInitialDataBuffer()
+        if (props.active) {
+            frontend.focus()
+        }
+    } catch (error) {
+        // attach/start 失败时 input$ 订阅不会建立——必须把错误暴露出来，
+        // 否则是一个不可输入且无任何提示的空白面板
+        console.error('terminal pane failed to start', error)
+        mountError.value = String(error instanceof Error ? error.message : error)
     }
 })
 
@@ -145,6 +153,7 @@ onBeforeUnmount(() => {
 <template>
     <div class="terminal-pane">
         <div ref="host" class="terminal-host"></div>
+        <div v-if="mountError" class="mount-error">{{ mountError }}</div>
         <div v-if="searchOpen" class="search-bar">
             <input
                 ref="searchInputEl"
@@ -171,6 +180,20 @@ onBeforeUnmount(() => {
 .terminal-host {
     position: absolute;
     inset: 0;
+}
+
+.mount-error {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: var(--color-background);
+    color: var(--color-destructive);
+    font-size: 13px;
+    text-align: center;
+    white-space: pre-wrap;
 }
 
 .search-bar {

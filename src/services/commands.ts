@@ -4,6 +4,7 @@ import { useTabsStore } from '@/stores/tabs'
 import { useConfigStore } from '@/stores/config'
 import { terminalTabApi } from './terminalTabsApi'
 import { hotkeys } from './hotkeysSingleton'
+import { defaultDarkColorScheme, defaultLightColorScheme } from '@/lib/colorSchemes'
 
 export interface Command {
     id: string
@@ -126,10 +127,12 @@ export function useCommands () {
             label: () => t('commands.toggleColorScheme'),
             handler: () => {
                 const current = config.store.appearance.colorScheme
+                const osLight = window.matchMedia('(prefers-color-scheme: light)').matches
+                const isLight = current === 'light' || current === defaultLightColorScheme.name ||
+                    (current === 'auto' && osLight)
+                // 与设置页下拉的值域保持一致：在两套默认配色之间切换
                 config.store.appearance.colorScheme =
-                    current === 'light' || (current === 'auto' && window.matchMedia('(prefers-color-scheme: light)').matches)
-                        ? 'dark'
-                        : 'light'
+                    isLight ? defaultDarkColorScheme.name : defaultLightColorScheme.name
             },
         })
     }

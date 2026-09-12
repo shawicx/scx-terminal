@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use portable_pty::{Child, CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use serde::Deserialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, State};
@@ -223,6 +223,9 @@ pub struct Pty {
     writer: Mutex<Option<Box<dyn Write + Send>>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
+    /// 独立于 `child` 的杀手句柄：清理线程会在 `child.lock().wait()` 上阻塞，
+    /// 若 kill 也去抢同一把锁会永久死锁（前台任务运行时 wait 永不返回）。
+    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     exited: Arc<AtomicBool>,
     reader_done: Arc<AtomicBool>,
     queue: Arc<PtyDataQueue>,
@@ -250,7 +253,8 @@ impl Pty {
         // Close the master writer first: dropping it signals EOF/SIGHUP to the
         // session, giving the shell a chance to shut down cleanly.
         *self.writer.lock().unwrap() = None;
-        let _ = self.child.lock().unwrap().kill();
+        // 经由 clone_killer 发送信号，绝不触碰 child 锁（见字段注释）。
+        let _ = self.killer.lock().unwrap().kill();
     }
 }
 
@@ -264,8 +268,10 @@ impl PtyManager {
     }
 }
 
+// spawn/write/kill 使用 async 命令：Tauri 同步命令在主线程执行，
+// 阻塞 IO（pty 缓冲满时的 write、等待子进程的 kill）会冻结整个窗口。
 #[tauri::command]
-pub fn pty_spawn(
+pub async fn pty_spawn(
     app: AppHandle,
     manager: State<'_, PtyManager>,
     channel: Channel<InvokeResponseBody>,
@@ -318,11 +324,15 @@ pub fn pty_spawn(
     let id = Uuid::new_v4().to_string();
     let queue = Arc::new(PtyDataQueue::new(channel));
 
+    // 在 child 移入 Mutex 前拆出独立杀手句柄，供 kill() 无死锁地发信号
+    let killer = child.clone_killer();
+
     let pty = Arc::new(Pty {
         id: id.clone(),
         writer: Mutex::new(Some(writer)),
         master: Mutex::new(pair.master),
         child: Mutex::new(child),
+        killer: Mutex::new(killer),
         exited: Arc::new(AtomicBool::new(false)),
         reader_done: Arc::new(AtomicBool::new(false)),
         queue: queue.clone(),
@@ -423,7 +433,7 @@ fn apply_macos_locale(cmd: &mut CommandBuilder) {
 }
 
 #[tauri::command]
-pub fn pty_write(manager: State<'_, PtyManager>, id: String, data: Vec<u8>) -> Result<(), String> {
+pub async fn pty_write(manager: State<'_, PtyManager>, id: String, data: Vec<u8>) -> Result<(), String> {
     let pty = manager.ptys.lock().unwrap().get(&id).cloned();
     match pty {
         Some(pty) => pty.write(&data).map_err(|e| e.to_string()),
@@ -444,7 +454,7 @@ pub fn pty_resize(manager: State<'_, PtyManager>, id: String, cols: u16, rows: u
 }
 
 #[tauri::command]
-pub fn pty_kill(manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
+pub async fn pty_kill(manager: State<'_, PtyManager>, id: String) -> Result<(), String> {
     let pty = manager.ptys.lock().unwrap().get(&id).cloned();
     match pty {
         Some(pty) => {

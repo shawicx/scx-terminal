@@ -27,7 +27,8 @@ export interface TerminalConfig {
 }
 
 export interface AppearanceConfig {
-    colorScheme: 'auto' | 'light' | 'dark'
+    /** 'auto' 跟随系统；'dark'/'light' 为旧值（映射默认深/浅配色）；其余为内置配色名 */
+    colorScheme: string
     tabBarPosition: 'top' | 'bottom'
     theme: 'default-dark' | 'default-light' | 'auto'
     language: 'auto' | 'zh-CN' | 'en'

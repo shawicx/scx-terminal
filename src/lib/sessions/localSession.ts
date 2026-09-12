@@ -20,6 +20,7 @@ export class LocalSession extends BaseSession {
     private pty: TauriPTYProxy | null = null
     private ptyClosed = false
     private pauseAfterExit = false
+    private pendingResize: { columns: number, rows: number } | null = null
 
     async start (options: LocalSessionOptions): Promise<void> {
         const env = {
@@ -29,6 +30,11 @@ export class LocalSession extends BaseSession {
             ...options.env,
         }
 
+        // fit 尺寸可能在 spawn 前就通过 resize() 到达（resize$ 是 ReplaySubject），
+        // 记下并在 spawn 时使用，避免 PTY 固定以 80×30 启动导致输入行提前换行
+        const initialSize = this.pendingResize
+        this.pendingResize = null
+
         const pty = new TauriPTYProxy()
         try {
             await pty.start({
@@ -36,8 +42,8 @@ export class LocalSession extends BaseSession {
                 args: options.args,
                 env,
                 cwd: options.cwd,
-                cols: options.width ?? 80,
-                rows: options.height ?? 30,
+                cols: initialSize?.columns ?? options.width ?? 80,
+                rows: initialSize?.rows ?? options.height ?? 30,
             })
         } catch (error) {
             this.emitOutput(encodeUTF8(`\r\nCould not start ${options.command}:\r\n${String(error)}\r\n`))
@@ -46,6 +52,13 @@ export class LocalSession extends BaseSession {
 
         this.pty = pty
         this.open = true
+
+        // spawn 往返期间若又有新的 resize 到达，启动后立即补发
+        if (this.pendingResize) {
+            const { columns, rows } = this.pendingResize
+            this.pendingResize = null
+            void pty.resize(columns, rows)
+        }
 
         pty.subscribe('data', payload => {
             const data = payload as Uint8Array
@@ -78,7 +91,12 @@ export class LocalSession extends BaseSession {
     }
 
     resize (columns: number, rows: number): void {
-        void this.pty?.resize(columns, rows)
+        if (!this.pty) {
+            // PTY 尚未启动：先记录，start() 会以该尺寸 spawn 或在启动后补发
+            this.pendingResize = { columns, rows }
+            return
+        }
+        void this.pty.resize(columns, rows)
     }
 
     write (data: Uint8Array): void {

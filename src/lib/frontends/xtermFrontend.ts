@@ -214,7 +214,9 @@ export class XTermFrontend extends Frontend {
                 return false
             }
 
-            const handled = keyboardEventHandler('keydown', event)
+            // xterm 对 keydown 与 keyup 都会回调本 handler；必须透传真实事件类型，
+            // 否则 keyup 被当作 keydown 二次喂入热键机会重复匹配（如 ⌘T 开出两个标签）
+            const handled = keyboardEventHandler(event.type === 'keyup' ? 'keyup' : 'keydown', event)
             if (!handled) {
                 return false
             }

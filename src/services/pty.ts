@@ -27,6 +27,7 @@ export class TauriPTYProxy {
     private handlers: Record<string, PTYEventHandler[]> = {}
     private unlisteners: UnlistenFn[] = []
     private exited = false
+    private pendingChunks: Uint8Array[] = []
 
     async start (options: PTYSpawnOptions): Promise<void> {
         const channel = new Channel<ArrayBuffer | number[]>()
@@ -34,9 +35,7 @@ export class TauriPTYProxy {
             const data = message instanceof ArrayBuffer
                 ? new Uint8Array(message)
                 : new Uint8Array(message as number[])
-            for (const handler of this.handlers['data'] ?? []) {
-                handler(data)
-            }
+            this.deliverData(data)
         }
 
         this.id = await invoke<string>('pty_spawn', { options, channel })
@@ -50,6 +49,37 @@ export class TauriPTYProxy {
                     handler(e.payload)
                 }
             }))
+        }
+    }
+
+    /**
+     * @description 分发一条来自 Rust 的 PTY 输出。channel 回调在 spawn 前就已安装，
+     * 而 'data' 订阅者要等 spawn 与事件监听往返之后才注册；这段窗口内到达的
+     * 输出（通常是提示符行的开头字节）先缓冲，待首个订阅者注册时统一回放。
+     * @param data 输出字节
+     */
+    private deliverData (data: Uint8Array): void {
+        const handlers = this.handlers['data']
+        if (!handlers || handlers.length === 0) {
+            this.pendingChunks.push(data)
+            return
+        }
+        for (const handler of handlers) {
+            handler(data)
+        }
+    }
+
+    /**
+     * @description 回放缓冲的输出块；订阅者在 flush 过程中接收数据与正常路径完全一致
+     */
+    private flushPendingChunks (): void {
+        if (this.pendingChunks.length === 0) {
+            return
+        }
+        const chunks = this.pendingChunks
+        this.pendingChunks = []
+        for (const chunk of chunks) {
+            this.deliverData(chunk)
         }
     }
 
@@ -92,10 +122,14 @@ export class TauriPTYProxy {
     subscribe (event: string, handler: PTYEventHandler): void {
         this.handlers[event] ??= []
         this.handlers[event].push(handler)
+        if (event === 'data') {
+            this.flushPendingChunks()
+        }
     }
 
     unsubscribeAll (): void {
         this.handlers = {}
+        this.pendingChunks = []
         for (const unlisten of this.unlisteners) {
             unlisten()
         }
