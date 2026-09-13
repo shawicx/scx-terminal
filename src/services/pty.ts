@@ -94,6 +94,24 @@ export class TauriPTYProxy {
         return invoke<boolean>('pty_exists', { id: this.id })
     }
 
+    /**
+     * @description 经 Rust 进程探测读取会话 shell 子进程的当前工作目录
+     * @returns Promise<string | null> 目录绝对路径；未启动/已退出/探测失败为 null
+     *
+     * @example const cwd = await pty.getWorkingDirectory()
+     *
+     */
+    async getWorkingDirectory (): Promise<string | null> {
+        if (!this.id || this.exited) {
+            return null
+        }
+        try {
+            return await invoke<string | null>('pty_get_cwd', { id: this.id })
+        } catch {
+            return null
+        }
+    }
+
     async resize (columns: number, rows: number): Promise<void> {
         if (this.id) {
             await invoke('pty_resize', { id: this.id, cols: columns, rows })

@@ -26,12 +26,37 @@ function asciiSlice (data: Uint8Array, start: number, end: number): string {
 }
 
 /**
+ * @description 解析 OSC 7 载荷（file://[host]/path URI）为绝对路径
+ * @param payload OSC 7 载荷字符串
+ * @returns string | null percent-decode 后的路径；载荷非法时返回 null
+ *
+ * @example parseOsc7Cwd('file:///tmp/my%20dir') // '/tmp/my dir'
+ *
+ */
+export function parseOsc7Cwd (payload: string): string | null {
+    if (!payload.startsWith('file://')) {
+        return null
+    }
+    try {
+        const url = new URL(payload)
+        const path = decodeURIComponent(url.pathname)
+        if (!path.startsWith('/')) {
+            return null
+        }
+        return path
+    } catch {
+        return null
+    }
+}
+
+/**
  * Intercepts OSC escape sequences that carry side channels:
+ * - OSC 7 ; file://host/path — working directory reporting (standard; tmux passes it through)
  * - OSC 1337 ; CurrentDir=… — shell-reported working directory (e.g. by zsh hooks)
  * - OSC 52 ; c ; <base64> — clipboard write request from the remote program
  * Everything else passes through untouched.
  *
- * Ported from tabby-terminal/src/middleware/oscProcessing.ts.
+ * Ported from tabby-terminal/src/middleware/oscProcessing.ts (OSC 7 added).
  */
 export class OSCProcessor extends SessionMiddleware {
     get cwdReported$ (): Observable<string> { return this.cwdReported }
@@ -95,7 +120,14 @@ export class OSCProcessor extends SessionMiddleware {
             const [oscCodeString, ...oscParams] = oscString.split(';')
             const oscCode = parseInt(oscCodeString!)
 
-            if (oscCode === 1337) {
+            if (oscCode === 7) {
+                // OSC 7 ; file://[host]/path：标准 cwd 上报（host 忽略——本地场景空或本机名）；
+                // 非法载荷静默丢弃（序列仍被吞掉不透传）
+                const cwd = parseOsc7Cwd(oscParams.join(';'))
+                if (cwd) {
+                    this.cwdReported.next(cwd)
+                }
+            } else if (oscCode === 1337) {
                 const paramString = oscParams.join(';')
                 if (paramString.startsWith('CurrentDir=')) {
                     const reportedCWD = paramString.split('=').slice(1).join('=')

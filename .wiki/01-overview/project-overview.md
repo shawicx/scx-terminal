@@ -26,7 +26,8 @@ scx-terminal 是一个 macOS 桌面终端应用（Tauri v2 + Vue 3 + @xterm/xter
 | 设置页（终端/外观/快捷键/关于），YAML 持久化；含退格行为、输入/输出换行转换、wordSeparator、粗体亮色、登录 shell 开关 | 可用 | `src/components/settings/SettingsView.vue`、`src/stores/config.ts` |
 | 退格重映射与换行转换中间件（会话构造期按配置挂载，对新标签生效） | 可用 | `src/lib/sessions/baseSession.ts`、`src/lib/middleware/{inputProcessing,streamProcessing}.ts` |
 | 中英双语（跟随系统） | 可用 | `src/i18n/index.ts` |
-| 工作目录跟踪（OSC 1337 CurrentDir 解析） | 管道就绪，无消费方 | `src/lib/middleware/oscProcessing.ts` |
+| 工作目录跟踪（M4）：OSC 7 + OSC 1337 双协议解析 + Rust 进程探测（`pty_get_cwd`）三级回退 | 可用 | `src/lib/middleware/oscProcessing.ts`、`src-tauri/src/proc_cwd.rs` |
+| 新标签/分屏窗格继承当前目录（档案显式 cwd 优先，同 Tabby 语义）；「复制当前路径」命令 | 可用 | `src/services/commands.ts`、`src/components/terminal/TerminalTabContent.vue`、`src/stores/tabs.ts` |
 
 ## 技术栈
 

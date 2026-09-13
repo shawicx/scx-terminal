@@ -1,5 +1,6 @@
 mod config;
 mod fonts;
+pub mod proc_cwd;
 mod pty;
 mod shells;
 
@@ -25,6 +26,7 @@ pub fn run() {
             pty::pty_kill,
             pty::pty_ack_data,
             pty::pty_exists,
+            pty::pty_get_cwd,
             shells::list_shells,
             fonts::list_fonts,
             config::config_load,

@@ -14,9 +14,9 @@
 
 ## 标签模型
 
-`Tab = { id: nanoid(), type: 'terminal' | 'settings', title, manualTitle?, color?, profileId? }`（`src/stores/tabs.ts`）。要点：
+`Tab = { id: nanoid(), type: 'terminal' | 'settings', title, manualTitle?, color?, profileId?, cwd? }`（`src/stores/tabs.ts`）。要点：
 
-- `openTerminalTab(profileId?)`：绑定所用配置档案（缺省 = 默认档案），初始标题为档案名（OSC 上报后覆盖）。
+- `openTerminalTab(profileId?, cwd?)`：绑定所用配置档案（缺省 = 默认档案），初始标题为档案名（OSC 上报后覆盖）；`cwd` 为继承的初始目录（新标签入口先经 `terminalTabApi.current?.getActivePaneCwd()` 取活动窗格目录再开标签——`commands.ts` 的 `openNewTerminalTabWithCwd` 与 TitleBar「+」菜单同此；档案显式配置 `cwd` 时继承值被丢弃，同 Tabby `getNewTabParameters` 语义），由 `TerminalTabContent` 初始 `makeLeaf(tab.cwd)` 消费。
 - `openSettingsTab()` 是单例（已有设置标签则激活）。
 - `closeTab()` 关闭最后一个标签时自动开一个新终端标签；`closeOtherTabs(id)` 只保留指定标签。
 - 所有标签的 DOM 常驻（`App.vue` 用 `v-show`），后台会话不中断——对标 Tabby 行为。`App.vue` 以 `:profile-id` 传给 `TerminalTabContent`，其内部解析档案对象（精确匹配 → 默认档案 → `fallbackProfile()` 兜底）。
@@ -43,7 +43,7 @@
 
 - 激活标签时把 `tabApi` 注册进 `terminalTabApi.current` 并聚焦活动叶；失活/卸载时注销。
 - `split/closePane/navigatePane` 操作树（见 [split-panes](split-panes.md)）；活动叶的标题同步为标签标题。
-- 暴露给命令面板的动作：`split / closePane / navigatePane / copy / paste / clear / find`。
+- 暴露给命令面板的动作：`split / closePane / navigatePane / copy / paste / clear / find / getActivePaneCwd`；`split` 为 async——先经 `SplitContainer.getLeafCwd`（递归下钻）取源叶会话 cwd，作为新叶 `SplitLeaf.cwd` 传给 `TerminalPane.initialCwd`（新窗格继承目录）。
 
 ## 命令与热键入口
 

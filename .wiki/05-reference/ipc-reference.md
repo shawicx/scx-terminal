@@ -12,6 +12,7 @@
 | `pty_kill` | JS→Rust | `id` | `()` | **async** | drop writer（EOF/SIGHUP）+ killer 信号 |
 | `pty_ack_data` | JS→Rust | `id`、`length: usize` | `()` | sync | 输出流确认，驱动背压 |
 | `pty_exists` | JS→Rust | `id` | `bool` | sync | 存在且未退出 |
+| `pty_get_cwd` | JS→Rust | `id` | `Option<string>` | sync | 进程探测读 shell 子进程当前工作目录（`proc_cwd.rs` FFI `PROC_PIDVNODEPATHINFO`；pid 在 spawn 时拆出存 `Pty.pid`——child 锁被清理线程 wait() 持有，事后不可取） |
 | `list_shells` | JS→Rust | 无 | `ShellInfo[]`（path/name/default/args） | sync | 解析 `/etc/shells` |
 | `list_fonts` | JS→Rust | 无 | `Vec<String>`（字体族名，去重排序） | sync | `font-loader` 枚举系统字体（macOS CoreText）；失败前端回退自由文本输入 |
 | `config_load` | JS→Rust | 无 | `string`（YAML 原文，可空） | sync | 读配置文件 |

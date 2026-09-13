@@ -1,8 +1,8 @@
 /**
- * @description OSCProcessor 单元测试：OSC 1337 cwd 上报透传语义 + OSC 52 剪贴板写入（解码/上限/容错）
+ * @description OSCProcessor 单元测试：OSC 7/1337 cwd 上报透传语义 + OSC 52 剪贴板写入（解码/上限/容错）
  */
 import { describe, expect, it, vi } from 'vitest'
-import { OSCProcessor, OSC52_MAX_CLIPBOARD_BYTES } from './oscProcessing'
+import { OSCProcessor, OSC52_MAX_CLIPBOARD_BYTES, parseOsc7Cwd } from './oscProcessing'
 import { encodeUTF8 } from '@/lib/utils/bytes'
 
 function osc52Sequence (payload: string, selection = 'c'): Uint8Array {
@@ -66,5 +66,60 @@ describe('OSC 1337 working directory reporting', () => {
         processor.feedFromSession(encodeUTF8('\x1b]1337;CurrentDir=/Users/scx/project\x07$ '))
         expect(reported).toEqual(['/Users/scx/project'])
         expect(new TextDecoder().decode(output[0]!)).toBe('$ ')
+    })
+})
+
+describe('OSC 7 working directory reporting', () => {
+    it('emits decoded path with BEL terminator and swallows the sequence', () => {
+        const reported: string[] = []
+        const output: Uint8Array[] = []
+        const processor = new OSCProcessor()
+        processor.cwdReported$.subscribe(cwd => reported.push(cwd))
+        processor.outputToTerminal$.subscribe(data => output.push(data))
+        processor.feedFromSession(encodeUTF8('before\x1b]7;file://myhost/Users/scx/my%20dir\x07$ '))
+        expect(reported).toEqual(['/Users/scx/my dir'])
+        expect(new TextDecoder().decode(output[0]!)).toBe('before$ ')
+    })
+
+    it('accepts ST terminator and empty host', () => {
+        const reported: string[] = []
+        const processor = new OSCProcessor()
+        processor.cwdReported$.subscribe(cwd => reported.push(cwd))
+        processor.feedFromSession(encodeUTF8('\x1b]7;file:///tmp/\x1b\\'))
+        expect(reported).toEqual(['/tmp/'])
+    })
+
+    it('decodes non-ASCII (percent-encoded) paths', () => {
+        const reported: string[] = []
+        const processor = new OSCProcessor()
+        processor.cwdReported$.subscribe(cwd => reported.push(cwd))
+        processor.feedFromSession(encodeUTF8('\x1b]7;file:///Users/scx/%E4%B8%AD%E6%96%87\x07'))
+        expect(reported).toEqual(['/Users/scx/中文'])
+    })
+
+    it('reassembles sequences split across chunks', () => {
+        const reported: string[] = []
+        const processor = new OSCProcessor()
+        processor.cwdReported$.subscribe(cwd => reported.push(cwd))
+        processor.feedFromSession(encodeUTF8('\x1b]7;file://local'))
+        processor.feedFromSession(encodeUTF8('host/tmp\x07'))
+        expect(reported).toEqual(['/tmp'])
+    })
+
+    it('drops invalid payloads silently (no emit, no passthrough)', () => {
+        const reported: string[] = []
+        const output: Uint8Array[] = []
+        const processor = new OSCProcessor()
+        processor.cwdReported$.subscribe(cwd => reported.push(cwd))
+        processor.outputToTerminal$.subscribe(data => output.push(data))
+        processor.feedFromSession(encodeUTF8('a\x1b]7;not-a-uri\x07b'))
+        expect(reported).toEqual([])
+        expect(new TextDecoder().decode(output[0]!)).toBe('ab')
+    })
+
+    it('parseOsc7Cwd handles edge cases', () => {
+        expect(parseOsc7Cwd('file://localhost/private/tmp')).toBe('/private/tmp')
+        expect(parseOsc7Cwd('relative/path')).toBeNull()
+        expect(parseOsc7Cwd('file://host')).toBe('/')
     })
 })

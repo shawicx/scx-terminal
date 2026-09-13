@@ -13,6 +13,8 @@ export interface TerminalTabApi {
     paste (): void
     clear (): void
     find (): void
+    /** 活动窗格会话的当前工作目录（新标签继承与「复制当前路径」用） */
+    getActivePaneCwd (): Promise<string | null>
 }
 
 export const terminalTabApi = {

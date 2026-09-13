@@ -5,6 +5,7 @@ import { useConfigStore, type TerminalProfile } from '@/stores/config'
 import { terminalTabApi } from './terminalTabsApi'
 import { hotkeys } from './hotkeysSingleton'
 import { defaultDarkColorScheme, defaultLightColorScheme } from '@/lib/colorSchemes'
+import { writeClipboardText } from '@/lib/frontendContext'
 
 export interface Command {
     id: string
@@ -29,6 +30,20 @@ export function useCommands () {
         }
     }
 
+    /**
+     * @description 取当前活动标签活动窗格的 cwd 后按档案开新标签（新标签 cwd 继承入口；
+     *              活动标签不是终端标签时 cwd 为 null，走 HOME 兜底）
+     * @param profileId 配置档案 id（缺省 = 默认档案）
+     * @returns Promise<void>
+     *
+     * @example void openNewTerminalTabWithCwd('local-zsh-abc')
+     *
+     */
+    async function openNewTerminalTabWithCwd (profileId?: string): Promise<void> {
+        const cwd = await terminalTabApi.current?.getActivePaneCwd() ?? null
+        tabs.openTerminalTab(profileId, cwd)
+    }
+
     const PROFILE_COMMAND_PREFIX = 'new-tab-profile:'
 
     /**
@@ -45,7 +60,7 @@ export function useCommands () {
                 id: `${PROFILE_COMMAND_PREFIX}${profile.id}`,
                 group: 'tab',
                 label: () => t('commands.newTabWithProfile', { name: profile.name }),
-                handler: () => tabs.openTerminalTab(profile.id),
+                handler: () => void openNewTerminalTabWithCwd(profile.id),
             })
         }
     }
@@ -59,7 +74,7 @@ export function useCommands () {
         register({
             id: 'new-tab', group: 'tab', hotkeyId: 'new-tab',
             label: () => t('commands.newTab'),
-            handler: () => tabs.openTerminalTab(),
+            handler: () => void openNewTerminalTabWithCwd(),
         })
         register({
             id: 'close-tab', group: 'tab', hotkeyId: 'close-tab',
@@ -137,6 +152,19 @@ export function useCommands () {
             id: 'find', group: 'terminal', hotkeyId: 'find',
             label: () => t('commands.find'),
             handler: () => terminalTabApi.current?.find(),
+        })
+        register({
+            id: 'copy-current-path', group: 'terminal', hotkeyId: 'copy-current-path',
+            label: () => t('commands.copyCurrentPath'),
+            enabled: () => !!terminalTabApi.current,
+            handler: () => {
+                void (async () => {
+                    const cwd = await terminalTabApi.current?.getActivePaneCwd()
+                    if (cwd) {
+                        void writeClipboardText(cwd)
+                    }
+                })()
+            },
         })
         register({
             id: 'open-settings', group: 'app',

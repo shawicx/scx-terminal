@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+    findLeaf,
     listLeaves,
     makeBranch,
     makeLeaf,
@@ -20,6 +21,18 @@ describe('split tree', () => {
         expect(tree.orientation).toBe('h')
         expect(tree.children.map(c => c.id)).toEqual([root.id, newLeafId])
         expect(listLeaves(tree).map(l => l.id)).toEqual([root.id, newLeafId])
+    })
+
+    it('carries inherited cwd on the new leaf only', () => {
+        const root = makeLeaf()
+        const { tree, newLeafId } = splitLeaf(root, root.id, 'right', '/tmp')!
+        expect(findLeaf(tree, newLeafId)?.cwd).toBe('/tmp')
+        expect(findLeaf(tree, root.id)?.cwd).toBeUndefined()
+    })
+
+    it('makeLeaf keeps cwd optional', () => {
+        expect(makeLeaf().cwd).toBeUndefined()
+        expect(makeLeaf('/tmp').cwd).toBe('/tmp')
     })
 
     it('splits a nested leaf without disturbing siblings', () => {

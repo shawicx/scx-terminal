@@ -26,7 +26,7 @@
 
 命令对象 `{ id, group, label(): string, hotkeyId?, enabled?, handler() }`；`useCommands()` 提供 `register/registerDefaults/registerProfileCommands/bindHotkeys/dispatchHotkey/sortedCommands`。
 
-默认命令（`registerDefaults`）：`new-tab`、`close-tab`、`next-tab`、`prev-tab`、`split-right`、`split-down`、`close-pane`、`pane-forward`、`pane-back`、`copy`、`paste`、`clear`、`find`、`command-palette`、`open-settings`、`toggle-color-scheme`。标签/窗格类命令经 `terminalTabApi.current`（见 [app-shell-and-tabs](app-shell-and-tabs.md)）驱动当前激活的终端标签；`toggle-color-scheme` 在两套默认配色间切换。
+默认命令（`registerDefaults`）：`new-tab`、`close-tab`、`next-tab`、`prev-tab`、`split-right`、`split-down`、`close-pane`、`pane-forward`、`pane-back`、`copy`、`paste`、`clear`、`find`、`copy-current-path`（活动窗格 cwd → 剪贴板；默认不绑定热键，与 Tabby 一致，设置页可录制）、`command-palette`、`open-settings`、`toggle-color-scheme`。标签/窗格类命令经 `terminalTabApi.current`（见 [app-shell-and-tabs](app-shell-and-tabs.md)）驱动当前激活的终端标签；`new-tab` 与 `new-tab-profile:*` 先取活动窗格 cwd 再开标签（继承当前目录，M4）；`toggle-color-scheme` 在两套默认配色间切换。
 
 `registerProfileCommands(profiles)`（M2）：同步式为每个 local 档案注册 `new-tab-profile:{id}` 命令（label「新建标签页：{档案名}」，无默认热键）；`App.vue` 在启动与 `config.store.profiles` 变化时调用（先清旧再重建）。
 

@@ -5,6 +5,8 @@ export type SplitOrientation = 'h' | 'v'
 export interface SplitLeaf {
     id: string
     type: 'leaf'
+    /** 新窗格的初始工作目录（继承自源窗格会话）；仅 spawn 时消费 */
+    cwd?: string
 }
 
 export interface SplitBranch {
@@ -18,8 +20,16 @@ export interface SplitBranch {
 
 export type SplitNode = SplitLeaf | SplitBranch
 
-export function makeLeaf (): SplitLeaf {
-    return { id: nanoid(), type: 'leaf' }
+/**
+ * @description 构造一个窗格叶子节点
+ * @param cwd 可选的初始工作目录（新窗格继承源窗格 cwd 时传入）
+ * @returns SplitLeaf 叶子节点
+ *
+ * @example makeLeaf('/tmp')
+ *
+ */
+export function makeLeaf (cwd?: string): SplitLeaf {
+    return cwd ? { id: nanoid(), type: 'leaf', cwd } : { id: nanoid(), type: 'leaf' }
 }
 
 export function makeBranch (orientation: SplitOrientation, children: SplitNode[]): SplitBranch {
@@ -89,11 +99,13 @@ function cloneTree (node: SplitNode): SplitNode {
 /**
  * Splits the leaf `leafId` in the given direction by wrapping it into a new
  * branch. Returns a new tree (immutably) and the id of the new leaf.
+ *
+ * `newLeafCwd` 为新窗格携带初始工作目录（继承自源窗格会话的 cwd）。
  */
-export function splitLeaf (root: SplitNode, leafId: string, direction: 'right' | 'down'): { tree: SplitNode; newLeafId: string } | null {
+export function splitLeaf (root: SplitNode, leafId: string, direction: 'right' | 'down', newLeafCwd?: string): { tree: SplitNode; newLeafId: string } | null {
     const tree = cloneTree(root)
     const ref = findParent(tree, leafId)
-    const newLeaf = makeLeaf()
+    const newLeaf = makeLeaf(newLeafCwd)
 
     const orientation: SplitOrientation = direction === 'right' ? 'h' : 'v'
     if (!ref) {

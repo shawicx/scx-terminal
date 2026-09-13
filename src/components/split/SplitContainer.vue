@@ -21,12 +21,14 @@ const emit = defineEmits<{
 }>()
 
 const branchEl = ref<HTMLElement>()
-const paneRefs = new Map<string, { focus (): void, copy (): void, paste (): void, clear (): void, find (): void }>()
-const containerRefs = new Map<string, { focusLeaf (id: string): void, invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find'): void }>()
+type PaneHandle = { focus (): void, copy (): void, paste (): void, clear (): void, find (): void, getWorkingDirectory (): Promise<string | null> }
+const paneRefs = new Map<string, PaneHandle>()
+type ContainerHandle = { focusLeaf (id: string): void, invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find'): void, getLeafCwd (id: string): Promise<string | null | undefined> }
+const containerRefs = new Map<string, ContainerHandle>()
 
 function registerPane (id: string, comp: unknown) {
     if (comp) {
-        paneRefs.set(id, comp as { focus (): void, copy (): void, paste (): void, clear (): void, find (): void })
+        paneRefs.set(id, comp as PaneHandle)
     } else {
         paneRefs.delete(id)
     }
@@ -34,7 +36,7 @@ function registerPane (id: string, comp: unknown) {
 
 function registerContainer (id: string, comp: unknown) {
     if (comp) {
-        containerRefs.set(id, comp as { focusLeaf (id: string): void, invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find'): void })
+        containerRefs.set(id, comp as ContainerHandle)
     } else {
         containerRefs.delete(id)
     }
@@ -55,7 +57,29 @@ function invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find'):
     }
 }
 
-defineExpose({ focusLeaf, invokeOnLeaf })
+/**
+ * @description 查询叶窗格会话的当前工作目录（递归下钻子容器）
+ * @param id 叶节点 id
+ * @returns Promise<string | null | undefined> 目录路径；null = 叶存在但无 cwd；undefined = 叶不在本子树
+ *
+ * @example const cwd = await getLeafCwd(activeLeafId)
+ *
+ */
+async function getLeafCwd (id: string): Promise<string | null | undefined> {
+    const pane = paneRefs.get(id)
+    if (pane) {
+        return pane.getWorkingDirectory()
+    }
+    for (const container of containerRefs.values()) {
+        const cwd = await container.getLeafCwd(id)
+        if (cwd !== undefined) {
+            return cwd
+        }
+    }
+    return undefined
+}
+
+defineExpose({ focusLeaf, invokeOnLeaf, getLeafCwd })
 
 function onSpannerResize (index: number, delta: number) {
     const node = props.node.type === 'branch' ? props.node : null
@@ -85,6 +109,7 @@ function onSpannerResize (index: number, delta: number) {
             :ref="el => registerPane(node.id, el)"
             :active="tabActive && node.id === activeLeafId"
             :profile="profile"
+            :initial-cwd="node.cwd ?? null"
             @title="title => emit('leafTitle', node.id, title)"
             @closed="emit('paneClosed', node.id)"
             @request-split="direction => emit('leafSplit', node.id, direction)"

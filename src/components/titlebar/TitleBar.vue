@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { platform } from '@/lib/platform'
 import { useTabsStore, type Tab } from '@/stores/tabs'
 import { useConfigStore, defaultFirstProfiles } from '@/stores/config'
+import { terminalTabApi } from '@/services/terminalTabsApi'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
 import DropdownMenu from '@/components/ui/DropdownMenu.vue'
 
@@ -43,13 +44,16 @@ const newTabMenuItems = computed<ContextMenuItemSpec[]>(() => defaultFirstProfil
     })))
 
 /**
- * @description 处理「+」档案菜单选择：按档案开新标签
+ * @description 处理「+」档案菜单选择：取活动窗格 cwd 后按档案开新标签（继承当前目录）
  * @param key 档案 id
  * @returns void
  *
  */
 function onNewTabMenuSelect (key: string): void {
-    store.openTerminalTab(key)
+    void (async () => {
+        const cwd = await terminalTabApi.current?.getActivePaneCwd() ?? null
+        store.openTerminalTab(key, cwd)
+    })()
 }
 
 function toggleMaximize () {

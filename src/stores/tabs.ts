@@ -14,6 +14,8 @@ export interface Tab {
     color?: string
     /** 开标签所用配置档案；缺省 = 默认档案 */
     profileId?: string
+    /** 继承的初始工作目录（开标签时来自上一个活动标签；档案显式 cwd 优先于此值） */
+    cwd?: string | null
 }
 
 /**
@@ -31,16 +33,28 @@ export const useTabsStore = defineStore('tabs', {
         },
     },
     actions: {
-        openTerminalTab (profileId?: string): Tab {
+        /**
+         * @description 打开新的终端标签（缺省用默认档案；cwd 为继承的初始目录，
+         *              档案显式配置了 cwd 时该值被忽略——同 Tabby getNewTabParameters 语义）
+         * @param profileId 配置档案 id（缺省 = 默认档案）
+         * @param cwd 继承的初始工作目录（可选）
+         * @returns Tab 新标签
+         *
+         * @example openTerminalTab(undefined, '/tmp')
+         *
+         */
+        openTerminalTab (profileId?: string, cwd?: string | null): Tab {
             const config = useConfigStore()
             const profile = profileId
                 ? config.store.profiles.find(p => p.id === profileId)
                 : (config.defaultProfile() ?? undefined)
+            const inheritsCwd = cwd && !profile?.cwd ? cwd : null
             const tab: Tab = {
                 id: nanoid(),
                 type: 'terminal',
                 title: profile?.name ?? '',
                 profileId: profile?.id,
+                cwd: inheritsCwd,
             }
             this.tabs.push(tab)
             this.activeId = tab.id

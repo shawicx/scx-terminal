@@ -12,15 +12,15 @@
 ## 树模型（`splitTree.ts`）
 
 ```typescript
-SplitLeaf   = { id, type: 'leaf' }                              // 一个终端窗格
+SplitLeaf   = { id, type: 'leaf', cwd?: string }                  // 一个终端窗格；cwd=继承的初始目录
 SplitBranch = { id, type: 'branch', orientation: 'h' | 'v',     // 水平/垂直排列
                 ratios: number[], children: SplitNode[] }        // ratios 为相对 flex 份额
 ```
 
 操作（全部返回新树，不做原地修改）：
 
-- `makeLeaf` / `makeBranch`：构造。
-- `splitLeaf(root, leafId, 'right' | 'down')`：把叶包进新枝并追加新叶；拆根叶时整体包一层。返回 `{ tree, newLeafId }`。
+- `makeLeaf(cwd?)` / `makeBranch`：构造。
+- `splitLeaf(root, leafId, 'right' | 'down', newLeafCwd?)`：把叶包进新枝并追加新叶（`newLeafCwd` 来自源叶会话 cwd，新窗格继承目录）；拆根叶时整体包一层。返回 `{ tree, newLeafId }`。
 - `removeLeaf(root, leafId)`：删除并 `prune`（单子枝上提、空枝剪除）；返回 `null` 表示树空（调用方关标签）。
 - `resizeChildren(root, branchId, index, first, second)`：分隔条拖拽调整比例（下限 0.1）。
 - `listLeaves`（深度优先视觉序）/ `neighborLeaf`（键盘导航 Δ±1）/ `findLeaf` / `findParent`。

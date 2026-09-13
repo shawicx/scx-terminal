@@ -32,6 +32,20 @@ describe('tabs store', () => {
         expect(store.activeId).toBe(t2.id)
     })
 
+    it('stores inherited cwd on the new tab unless the profile pins its own', () => {
+        const config = useConfigStore()
+        const store = useTabsStore()
+        const fallback = localProfile({ id: 'local-fallback', name: 'fallback', isDefault: true })
+        const pinned = localProfile({ id: 'local-pinned', name: 'pinned', cwd: '/var/root' })
+        config.store.profiles = [fallback, pinned]
+
+        const inherited = store.openTerminalTab(undefined, '/tmp/inherited')
+        expect(inherited.cwd).toBe('/tmp/inherited')
+
+        const withPinned = store.openTerminalTab(pinned.id, '/tmp/inherited')
+        expect(withPinned.cwd).toBeNull()
+    })
+
     it('closing the active tab activates a neighbor', () => {
         const store = useTabsStore()
         const t1 = store.openTerminalTab()

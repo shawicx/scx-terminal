@@ -8,7 +8,7 @@
 | `src/lib/sessions/localSession.ts` | `LocalSession`：本地 shell 会话（移植 tabby-local），对接 `TauriPTYProxy` |
 | `src/services/pty.ts` | `TauriPTYProxy`：Rust PTY 的前端句柄（移植 tabby-electron 的 pty 代理，Electron IPC → Tauri IPC） |
 | `src/lib/middleware/middleware.ts` | `SessionMiddleware` / `SessionMiddlewareStack`：会话与前端之间的 I/O 处理链 |
-| `src/lib/middleware/oscProcessing.ts` | `OSCProcessor`：拦截 OSC 1337（cwd 上报）与 OSC 52（剪贴板写入：base64 解码 → 注入的 `setClipboard`，100KB 上限，不响应 `?` 查询） |
+| `src/lib/middleware/oscProcessing.ts` | `OSCProcessor`：拦截 OSC 7（`file://host/path` cwd 上报，percent-decode）、OSC 1337（`CurrentDir=` cwd 上报）与 OSC 52（剪贴板写入：base64 解码 → 注入的 `setClipboard`，100KB 上限，不响应 `?` 查询）；三者均吞掉序列不上屏 |
 | `src/lib/middleware/inputProcessing.ts` | `InputProcessor`：退格重映射（`terminal.backspace` 为 `ctrl-h`/`delete` 时挂载） |
 | `src/lib/middleware/streamProcessing.ts` | `TerminalStreamProcessor`：输入/输出换行转换（`terminal.inputNewlines`/`outputNewlines` 非 null 时挂载） |
 
@@ -31,7 +31,7 @@
 
 - `initialDataBuffer`：会话输出在 `releaseInitialDataBuffer()` 之前先攒在内存，保证 attach 完成前首屏（提示符/motd）不丢。`TerminalPane` 在 `session.start()` 返回后立即调用它。
 - `destroy()` 幂等：先发 `closed`/`destroyed` → `gracefullyKillProcess()` → 关闭中间件与全部 Subject。
-- `reportedCWD`：订阅 `oscProcessor.cwdReported$` 更新——目前无消费方（见项目概述"已知限制"）。
+- `reportedCWD`：订阅 `oscProcessor.cwdReported$` 更新（OSC 7 / OSC 1337 双协议）。
 
 ## LocalSession（`localSession.ts`）
 
@@ -39,13 +39,15 @@
 
 **输出链**：`pty.subscribe('data')` → 每块先 `ackData(len)`（驱动 Rust 侧背压）再 `emitOutput`。
 
+**工作目录（三级回退，M4）**：`getWorkingDirectory()` = `reportedCWD`（OSC 7/1337 上报优先，tmux 内嵌场景靠 OSC 7）→ `pty.getWorkingDirectory()`（Rust `pty_get_cwd` 进程探测，读 shell 子进程 cwd，零配置全 shell 通用；libproc crate 无高层封装，`proc_cwd.rs` 自包含 FFI `PROC_PIDVNODEPATHINFO`）→ null。消费方：新标签/分屏继承 cwd、`copy-current-path` 命令。
+
 **退出处理**：监听 `pty:{id}:exit` / `pty:{id}:close` 事件；`pauseAfterExit` 模式下显示 "Press any key to close"，否则直接销毁会话。
 
 ## TauriPTYProxy（`src/services/pty.ts`）
 
 - `start()`：先安装 `Channel.onmessage`（二进制），再 `invoke('pty_spawn', { options, channel })`，随后 `listen` exit/close 事件。
 - **首屏缓冲**：channel 回调先于 spawn 安装、而 `data` 订阅者在 spawn+两次 listen 往返后才注册；这段窗口内的输出压入 `pendingChunks`，首个 `subscribe('data')` 时 `flushPendingChunks()` 回放（走同一路径保证 ack 语义一致）。这是新建标签提示符完整显示的关键之一。
-- `write/resize/kill/ackData/exists` 均为对 Rust 命令的薄封装；`write` 错误被吞掉（PTY 可能在按键与送达之间退出，不是错误）。
+- `write/resize/kill/ackData/exists/getWorkingDirectory` 均为对 Rust 命令的薄封装；`write` 错误被吞掉（PTY 可能在按键与送达之间退出，不是错误）。
 
 ## Related
 

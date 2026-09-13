@@ -179,6 +179,8 @@ export function defaultHotkeys (): HotkeysConfig {
             'paste': [['⌘-V']],
             'clear': [['⌘-K']],
             'find': [['⌘-F']],
+            // 默认不绑定（与 Tabby 一致），可在设置页快捷键录制
+            'copy-current-path': [],
         }
     }
     return {
@@ -196,6 +198,7 @@ export function defaultHotkeys (): HotkeysConfig {
         'paste': [['Ctrl-Shift-V']],
         'clear': [['Ctrl-Shift-K']],
         'find': [['Ctrl-Shift-F']],
+        'copy-current-path': [],
     }
 }
 

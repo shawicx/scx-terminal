@@ -220,6 +220,9 @@ fn maybe_emit(state: &mut QueueState, channel: &Channel<InvokeResponseBody>) {
 pub struct Pty {
     #[allow(dead_code)]
     pub id: String,
+    /// 子进程 pid：spawn 时在 child 移入 Mutex 前取出（child 锁被清理线程的
+    /// wait() 长期持有，事后无法无死锁地再取），供 cwd 探测使用
+    pid: Option<u32>,
     writer: Mutex<Option<Box<dyn Write + Send>>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
@@ -235,6 +238,22 @@ impl Pty {
     fn resize(&self, cols: u16, rows: u16) {
         let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
         let _ = self.master.lock().unwrap().resize(size);
+    }
+
+    /// 读 shell 子进程当前工作目录；pid 未知或会话已退出时返回 `None`
+    ///
+    /// # Returns
+    ///
+    /// 目录绝对路径或 `None`
+    ///
+    /// # Examples
+    ///
+    /// `pty.process_cwd()` // Some("/Users/scx")
+    fn process_cwd(&self) -> Option<String> {
+        if self.exited.load(Ordering::Acquire) {
+            return None;
+        }
+        crate::proc_cwd::proc_cwd(self.pid? as i32)
     }
 
     fn write(&self, data: &[u8]) -> std::io::Result<()> {
@@ -326,9 +345,11 @@ pub async fn pty_spawn(
 
     // 在 child 移入 Mutex 前拆出独立杀手句柄，供 kill() 无死锁地发信号
     let killer = child.clone_killer();
+    let pid = child.process_id();
 
     let pty = Arc::new(Pty {
         id: id.clone(),
+        pid,
         writer: Mutex::new(Some(writer)),
         master: Mutex::new(pair.master),
         child: Mutex::new(child),
@@ -477,6 +498,26 @@ pub fn pty_ack_data(manager: State<'_, PtyManager>, id: String, length: usize) {
 pub fn pty_exists(manager: State<'_, PtyManager>, id: String) -> bool {
     let map = manager.ptys.lock().unwrap();
     map.get(&id).is_some_and(|pty| !pty.exited.load(Ordering::Acquire))
+}
+
+/// 读取会话 shell 子进程的当前工作目录（进程探测；OSC 7/1337 上报在前端中间件处理）
+///
+/// # Arguments
+///
+/// * `manager` - 全局 PTY 管理器
+/// * `id` - 会话 id
+///
+/// # Returns
+///
+/// 工作目录绝对路径；会话不存在/已退出/探测失败时为 `None`
+///
+/// # Examples
+///
+/// `invoke('pty_get_cwd', { id })`
+#[tauri::command]
+pub fn pty_get_cwd(manager: State<'_, PtyManager>, id: String) -> Option<String> {
+    let pty = manager.ptys.lock().unwrap().get(&id).cloned();
+    pty.and_then(|pty| pty.process_cwd())
 }
 
 #[cfg(test)]

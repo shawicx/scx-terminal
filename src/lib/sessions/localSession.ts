@@ -123,10 +123,24 @@ export class LocalSession extends BaseSession {
     }
 
     supportsWorkingDirectory (): boolean {
-        return !!this.reportedCWD
+        return true
     }
 
+    /**
+     * @description 当前工作目录（三级回退）：OSC 7/1337 上报优先，其次 Rust 进程
+     *              探测（读 shell 子进程 cwd，零配置兜底），都不可用时 null
+     * @returns Promise<string | null> 目录绝对路径或 null
+     *
+     * @example const cwd = await session.getWorkingDirectory()
+     *
+     */
     async getWorkingDirectory (): Promise<string | null> {
-        return this.reportedCWD ?? null
+        if (this.reportedCWD) {
+            return this.reportedCWD
+        }
+        if (!this.pty || this.ptyClosed) {
+            return null
+        }
+        return this.pty.getWorkingDirectory()
     }
 }

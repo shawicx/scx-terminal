@@ -15,6 +15,8 @@ import { useThemeStore } from '@/stores/theme'
 const props = defineProps<{
     active: boolean
     profile: TerminalProfile
+    /** 继承的初始工作目录（新标签/分屏来自源窗格会话）；档案显式 cwd 优先于它 */
+    initialCwd?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -96,12 +98,27 @@ async function pasteFromClipboard (): Promise<void> {
     }
 }
 
+/**
+ * @description 查询本窗格会话的当前工作目录（OSC 上报优先，进程探测兜底）
+ * @returns Promise<string | null> 目录绝对路径或 null（会话未启动/已退出）
+ *
+ * @example await paneRef.value?.getWorkingDirectory()
+ *
+ */
+async function getWorkingDirectory (): Promise<string | null> {
+    if (!session) {
+        return null
+    }
+    return session.getWorkingDirectory()
+}
+
 defineExpose({
     focus: () => frontend?.focus(),
     copy: () => frontend?.copySelection(),
     paste: () => pasteFromClipboard(),
     clear: () => frontend?.clear(),
     find: () => openSearch(),
+    getWorkingDirectory,
 })
 
 // ---- context menu ----
@@ -217,12 +234,13 @@ onMounted(async () => {
         if (disposed) {
             return
         }
-        // 启动参数全部来自配置档案；登录 shell（-l）加载 ~/.zprofile 等登录配置
+        // 启动参数全部来自配置档案；登录 shell（-l）加载 ~/.zprofile 等登录配置。
+        // 初始目录优先级：档案显式配置 cwd > 继承的源窗格 cwd（新标签/分屏）> Rust 兜底 HOME
         await session.start({
             command: props.profile.command,
             args: props.profile.loginShell ? [...props.profile.args, '-l'] : props.profile.args,
             env: { ...props.profile.env },
-            cwd: props.profile.cwd,
+            cwd: props.profile.cwd ?? props.initialCwd ?? null,
             width: null,
             height: null,
         })

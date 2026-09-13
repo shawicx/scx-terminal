@@ -21,7 +21,8 @@ const props = defineProps<{
 
 const tabs = useTabsStore()
 const config = useConfigStore()
-const tree = ref<SplitNode>(makeLeaf())
+// 初始叶子继承标签创建时的 cwd（新标签来自上一个活动标签的活动窗格，见 commands.ts）
+const tree = ref<SplitNode>(makeLeaf(tabs.tabs.find(t => t.id === props.tabId)?.cwd ?? undefined))
 const activeLeafId = ref(tree.value.id)
 const rootContainer = ref<InstanceType<typeof SplitContainer>>()
 const paneTitles = reactive(new Map<string, string>())
@@ -51,8 +52,19 @@ function setPaneTitle (leafId: string, title: string) {
     }
 }
 
-function split (direction: 'right' | 'down', leafId?: string) {
-    const result = splitLeaf(tree.value, leafId ?? activeLeafId.value, direction)
+/**
+ * @description 分屏：新窗格继承源窗格会话的当前工作目录（档案显式 cwd 仍优先，见 TerminalPane）
+ * @param direction 分屏方向
+ * @param leafId 源叶 id（缺省为活动叶）
+ * @returns Promise<void>
+ *
+ * @example await split('right')
+ *
+ */
+async function split (direction: 'right' | 'down', leafId?: string): Promise<void> {
+    const sourceLeafId = leafId ?? activeLeafId.value
+    const cwd = await rootContainer.value?.getLeafCwd(sourceLeafId)
+    const result = splitLeaf(tree.value, sourceLeafId, direction, cwd ?? undefined)
     if (result) {
         tree.value = result.tree
         activeLeafId.value = result.newLeafId
@@ -94,6 +106,8 @@ const tabApi = {
     paste: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'paste'),
     clear: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'clear'),
     find: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'find'),
+    getActivePaneCwd: async (): Promise<string | null> =>
+        (await rootContainer.value?.getLeafCwd(activeLeafId.value)) ?? null,
 }
 
 watch(() => props.tabActive, active => {
