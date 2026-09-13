@@ -3,6 +3,7 @@ mod fonts;
 pub mod proc_cwd;
 mod pty;
 mod shells;
+mod ssh;
 
 use tauri::Manager;
 
@@ -19,6 +20,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(pty::PtyManager::new())
+        .manage(ssh::SshManager::new())
         .invoke_handler(tauri::generate_handler![
             pty::pty_spawn,
             pty::pty_write,
@@ -32,6 +34,12 @@ pub fn run() {
             config::config_load,
             config::config_save,
             config::config_dir_path,
+            ssh::ssh_connect,
+            ssh::ssh_write,
+            ssh::ssh_resize,
+            ssh::ssh_kill,
+            ssh::ssh_ack_data,
+            ssh::ssh_confirm_host_key,
             dev_log,
         ])
         .setup(|app| {

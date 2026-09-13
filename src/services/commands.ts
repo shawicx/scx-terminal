@@ -53,7 +53,7 @@ export function useCommands () {
     function registerProfileCommands (profiles: TerminalProfile[]): void {
         commands.value = commands.value.filter(c => !c.id.startsWith(PROFILE_COMMAND_PREFIX))
         for (const profile of profiles) {
-            if (profile.type !== 'local') {
+            if (profile.type !== 'local' && profile.type !== 'ssh') {
                 continue
             }
             register({

@@ -48,7 +48,8 @@ export const useTabsStore = defineStore('tabs', {
             const profile = profileId
                 ? config.store.profiles.find(p => p.id === profileId)
                 : (config.defaultProfile() ?? undefined)
-            const inheritsCwd = cwd && !profile?.cwd ? cwd : null
+            // cwd 继承仅对 local 档案有意义（SSH 档案的 cwd 是远端路径概念，忽略）
+            const inheritsCwd = cwd && profile?.type === 'local' && !profile.cwd ? cwd : null
             const tab: Tab = {
                 id: nanoid(),
                 type: 'terminal',

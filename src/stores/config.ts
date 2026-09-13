@@ -8,8 +8,11 @@ import { normalizeHotkeysConfig } from '@/lib/hotkeys/hotkeys'
 import { listShells, type Shell } from '@/services/shells'
 import type { TerminalColorScheme } from '@/lib/colorSchemes'
 
-/** 终端配置档案；type 为判别字段，为将来 SSH 等远程档案预留扩展点 */
-export interface TerminalProfile {
+/** SSH 认证策略：auto = agent → 私钥（显式或 ~/.ssh/id_*）→ 密码（若配置） */
+export type SshAuthMethod = 'auto' | 'agent' | 'publicKey' | 'password'
+
+/** 本地 shell 档案 */
+export interface LocalProfile {
     id: string
     type: 'local'
     name: string
@@ -22,6 +25,27 @@ export interface TerminalProfile {
     loginShell: boolean
     isDefault: boolean
 }
+
+/** SSH 远程档案 */
+export interface SshProfile {
+    id: string
+    type: 'ssh'
+    name: string
+    host: string
+    port: number
+    user: string
+    auth: SshAuthMethod
+    /** 私钥文件绝对路径（auth 含 publicKey/auto 时使用）；null = 未配置 */
+    privateKeyPath: string | null
+    /** 密码（明文存储于 config.yaml，UI 有风险提示）；null = 未配置 */
+    password: string | null
+    /** 档案专属配色名；null 跟随全局 */
+    colorScheme: string | null
+    isDefault: boolean
+}
+
+/** 终端配置档案：type 为判别字段（local 本地 shell / ssh 远程连接） */
+export type TerminalProfile = LocalProfile | SshProfile
 
 export interface TerminalConfig {
     font: string
@@ -107,14 +131,14 @@ function defaultConfig (): ConfigStore {
  * @description 由系统 shell 列表（/etc/shells）生成默认的 local 配置档案；默认 shell 档案置顶
  * @param shells Rust list_shells 返回的 shell 列表
  * @param loginShell 生成的档案是否以登录 shell 启动（取全局 terminal.loginShell 当前值）
- * @returns TerminalProfile[] 档案列表（系统默认 shell 标 isDefault 且排首位，仅首个默认生效）
+ * @returns LocalProfile[] 档案列表（系统默认 shell 标 isDefault 且排首位，仅首个默认生效）
  *
  * @example profilesFromShells([{ id: 'zsh', name: 'zsh', command: '/bin/zsh', args: [], default: true }], true)[0].isDefault // true
  *
  */
-export function profilesFromShells (shells: Shell[], loginShell: boolean): TerminalProfile[] {
+export function profilesFromShells (shells: Shell[], loginShell: boolean): LocalProfile[] {
     let defaultAssigned = false
-    const profiles: TerminalProfile[] = shells.map(shell => {
+    const profiles: LocalProfile[] = shells.map(shell => {
         const isDefault = shell.default && !defaultAssigned
         if (isDefault) {
             defaultAssigned = true
@@ -143,7 +167,7 @@ export function profilesFromShells (shells: Shell[], loginShell: boolean): Termi
  * @example defaultFirstProfiles([{ name: 'bash', isDefault: false }, { name: 'zsh', isDefault: true }])[0].name // 'zsh'
  *
  */
-export function defaultFirstProfiles (profiles: TerminalProfile[]): TerminalProfile[] {
+export function defaultFirstProfiles<T extends TerminalProfile> (profiles: T[]): T[] {
     const index = profiles.findIndex(profile => profile.isDefault)
     if (index <= 0) {
         return [...profiles]
@@ -209,7 +233,7 @@ export function defaultHotkeys (): HotkeysConfig {
  * @example fallbackProfile().command // '/bin/zsh'
  *
  */
-export function fallbackProfile (): TerminalProfile {
+export function fallbackProfile (): LocalProfile {
     return {
         id: 'local-fallback',
         type: 'local',

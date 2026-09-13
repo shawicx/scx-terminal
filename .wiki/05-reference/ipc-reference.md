@@ -1,11 +1,17 @@
 # IPC 契约总表（前端 ↔ Rust）
 
-注册处：`src-tauri/src/lib.rs` `invoke_handler`。前端调用方：`src/services/pty.ts`（pty_*）、`src/services/shells.ts`（list_shells）、`src/services/fonts.ts`（list_fonts）、`src/stores/config.ts`（config_*）、`src/main.ts` 与 `SettingsView.vue`（dev_log / config_dir_path / opener 插件）。
+注册处：`src-tauri/src/lib.rs` `invoke_handler`。前端调用方：`src/services/pty.ts`（pty_*）、`src/services/ssh.ts`（ssh_*）、`src/services/shells.ts`（list_shells）、`src/services/fonts.ts`（list_fonts）、`src/stores/config.ts`（config_*）、`src/main.ts` 与 `SettingsView.vue`（dev_log / config_dir_path / opener 插件）。
 
 ## invoke 命令
 
 | 命令 | 方向 | 参数 | 返回 | 执行方式 | 说明 |
 | --- | --- | --- | --- | --- | --- |
+| `ssh_connect` | JS→Rust | `options: SshConnectOptions`（camelCase：**id（前端生成）**/host/port/user/auth/privateKeyPath/password/cols/rows）、`dataChannel: Channel` | `()` | **async** | 连接 + TOFU 指纹 + 认证 + PTY/shell；输出经 channel 回传；指纹确认期间挂起等待 `ssh_confirm_host_key` |
+| `ssh_write` | JS→Rust | `id`、`data: number[]` | `()` 或错误 | **async** | `channel.data_bytes` 写远端 |
+| `ssh_resize` | JS→Rust | `id`、`cols: u32`、`rows: u32` | `()` 或错误 | **async** | `window_change` |
+| `ssh_kill` | JS→Rust | `id` | `()` 或错误 | **async** | 关 channel + `disconnect` + 停队列 |
+| `ssh_ack_data` | JS→Rust | `id`、`length: usize` | `()` | sync | 背压恢复（语义同 pty_ack_data） |
+| `ssh_confirm_host_key` | JS→Rust | `id`、`accepted: bool` | `()` | sync | 应答 `ssh:{id}:hostkey` 事件（oneshot） |
 | `pty_spawn` | JS→Rust | `options: SpawnOptions`（camelCase：file/args/env/cwd/cols/rows）、`channel: Channel` | `string`（会话 id，UUID） | **async**（线程池） | 建会话；输出经 channel 二进制流回传 |
 | `pty_write` | JS→Rust | `id: string`、`data: number[]`（字节） | `()` 或错误 | **async** | 写 master；前端吞掉错误（会话可能已退出） |
 | `pty_resize` | JS→Rust | `id`、`cols: u16`、`rows: u16` | `()` | sync | ioctl resize |
@@ -30,11 +36,14 @@
 | --- | --- | --- |
 | `pty:{id}:close` | `()` | 读线程 EOF/错误，master 关闭 |
 | `pty:{id}:exit` | 退出码 JSON 或 `null` | 子进程 wait 返回 |
+| `ssh:{id}:exit` | `null` | SSH channel Eof/Close（输出泵末尾发出） |
+| `ssh:{id}:hostkey` | `{fingerprint, keyType, changed}` | KEX 后 TOFU 校验：未知/失配时发出，**前端必须在 invoke 前注册监听**（connect 挂起等应答，事后注册=事件丢失死锁） |
+| `ssh:{id}:close` | （预留，当前不发） | — |
 
 ## 数据通道（非事件、非普通 invoke 返回）
 
-- **输出**：`pty_spawn` 时传入的 `tauri::ipc::Channel`，Rust 以 `InvokeResponseBody::Raw(Vec<u8>)` 直发二进制块（≤100KB，UTF-8 安全切分）；JS 端 `channel.onmessage` 收 `ArrayBuffer`/`number[]`。每块必须 `pty_ack_data(len)` 确认——未确认累计 >500KB 时 Rust 暂停读取（内核反压子进程）。
-- **输入**：普通 `pty_write`（JSON number[]），无流控。
+- **输出**：`pty_spawn` / `ssh_connect` 时传入的 `tauri::ipc::Channel`，Rust 以 `InvokeResponseBody::Raw(Vec<u8>)` 直发二进制块（≤100KB，UTF-8 安全切分；SSH 复用 pty 的 `PtyDataQueue`）；JS 端 `channel.onmessage` 收 `ArrayBuffer`/`number[]`。每块必须 `pty_ack_data` / `ssh_ack_data(len)` 确认——未确认累计 >500KB 时 Rust 暂停读取（内核反压子进程 / russh channel）。
+- **输入**：普通 `pty_write` / `ssh_write`（JSON number[]），无流控。
 
 ## 前端时序约束（改动 IPC 前必读）
 

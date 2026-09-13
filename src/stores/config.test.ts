@@ -113,4 +113,22 @@ describe('profiles from shells', () => {
     it('provides a /bin/zsh fallback profile', () => {
         expect(fallbackProfile()).toMatchObject({ type: 'local', command: '/bin/zsh', loginShell: true, isDefault: true })
     })
+
+    it('keeps SSH profile fields intact through deepMerge (profiles array replaces wholesale)', () => {
+        const sshProfile = {
+            id: 'ssh-abc123',
+            type: 'ssh',
+            name: 'build box',
+            host: 'build.example.com',
+            port: 2222,
+            user: 'deploy',
+            auth: 'publicKey',
+            privateKeyPath: '/Users/scx/.ssh/id_ed25519',
+            password: null,
+            colorScheme: null,
+            isDefault: false,
+        }
+        const merged = deepMerge({ profiles: [] as TerminalProfile[] }, { profiles: [sshProfile] })
+        expect(merged.profiles).toEqual([sshProfile])
+    })
 })

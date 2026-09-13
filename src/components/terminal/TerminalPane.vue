@@ -2,13 +2,16 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronUp, ChevronDown, X } from 'lucide-vue-next'
-import { LocalSession } from '@/lib/sessions/localSession'
+import { BaseSession } from '@/lib/sessions/baseSession'
+import { createSessionForProfile } from '@/lib/sessions'
 import { XTermWebGLFrontend } from '@/lib/frontends/xtermFrontend'
 import { createFrontendContext, readClipboardText, writeClipboardText } from '@/lib/frontendContext'
 import { resolveColorScheme } from '@/lib/colorSchemes'
 import type { TerminalProfile } from '@/stores/config'
 import { encodeUTF8 } from '@/lib/utils/bytes'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
+import HostKeyDialog from '@/components/terminal/HostKeyDialog.vue'
+import type { HostKeyChallenge } from '@/services/ssh'
 import { useConfigStore } from '@/stores/config'
 import { useThemeStore } from '@/stores/theme'
 
@@ -28,9 +31,34 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const paneRoot = ref<HTMLElement>()
 const mountError = ref('')
-let session: LocalSession | null = null
+let session: BaseSession | null = null
 let frontend: XTermWebGLFrontend | null = null
 let disposed = false
+
+// ---- SSH 主机指纹确认（TOFU）：SshSession 回调 → 对话框 → resolve 应答 ----
+const hostKeyChallenge = ref<HostKeyChallenge | null>(null)
+let hostKeyResolver: ((accepted: boolean) => void) | null = null
+
+/**
+ * @description SSH 首连/指纹失配时的确认回调：挂起等待用户在对话框中接受/拒绝
+ * @param challenge 指纹确认请求（指纹/算法/是否失配）
+ * @returns Promise<boolean> 是否信任该主机密钥
+ *
+ * @example await onHostKey({ fingerprint: 'SHA256:xxx', keyType: 'ssh-ed25519', changed: false })
+ *
+ */
+function onHostKey (challenge: HostKeyChallenge): Promise<boolean> {
+    return new Promise(resolve => {
+        hostKeyResolver = resolve
+        hostKeyChallenge.value = challenge
+    })
+}
+
+function resolveHostKey (accepted: boolean): void {
+    hostKeyChallenge.value = null
+    hostKeyResolver?.(accepted)
+    hostKeyResolver = null
+}
 
 /**
  * @description 解析 xterm 宿主元素。不能用模板 ref：宿主 div 位于 ContextMenu 插槽内，
@@ -210,11 +238,12 @@ onMounted(async () => {
     try {
         const context = createFrontendContext()
         // 中间件配置在会话构造期读取（退格/换行/OSC 52），配置变更对新窗格生效
-        session = new LocalSession({
+        session = createSessionForProfile(props.profile, {
             setClipboard: writeClipboardText,
             backspace: configStore.store.terminal.backspace,
             inputNewlines: configStore.store.terminal.inputNewlines,
             outputNewlines: configStore.store.terminal.outputNewlines,
+            onHostKey,
         })
         frontend = new XTermWebGLFrontend(context)
         frontend.configure({ terminalColorScheme: paneColorScheme.value })
@@ -234,16 +263,30 @@ onMounted(async () => {
         if (disposed) {
             return
         }
-        // 启动参数全部来自配置档案；登录 shell（-l）加载 ~/.zprofile 等登录配置。
-        // 初始目录优先级：档案显式配置 cwd > 继承的源窗格 cwd（新标签/分屏）> Rust 兜底 HOME
-        await session.start({
-            command: props.profile.command,
-            args: props.profile.loginShell ? [...props.profile.args, '-l'] : props.profile.args,
-            env: { ...props.profile.env },
-            cwd: props.profile.cwd ?? props.initialCwd ?? null,
-            width: null,
-            height: null,
-        })
+        // 启动参数按档案类型组装：local 走 shell 命令（登录 shell 追加 -l，
+        // 初始目录 = 档案 cwd > 继承 cwd > HOME 兜底）；ssh 走远端连接
+        // （russh：连接/认证/PTY 由 Rust 完成，cwd 继承对远端无意义、忽略）
+        if (props.profile.type === 'ssh') {
+            await session.start({
+                host: props.profile.host,
+                port: props.profile.port,
+                user: props.profile.user,
+                auth: props.profile.auth,
+                privateKeyPath: props.profile.privateKeyPath,
+                password: props.profile.password,
+                width: null,
+                height: null,
+            })
+        } else {
+            await session.start({
+                command: props.profile.command,
+                args: props.profile.loginShell ? [...props.profile.args, '-l'] : props.profile.args,
+                env: { ...props.profile.env },
+                cwd: props.profile.cwd ?? props.initialCwd ?? null,
+                width: null,
+                height: null,
+            })
+        }
         session.releaseInitialDataBuffer()
         if (props.active) {
             frontend.focus()
@@ -279,6 +322,12 @@ onBeforeUnmount(() => {
             <div class="terminal-host"></div>
         </ContextMenu>
         <div v-if="mountError" class="mount-error">{{ mountError }}</div>
+        <HostKeyDialog
+            v-if="hostKeyChallenge"
+            :challenge="hostKeyChallenge"
+            @accept="resolveHostKey(true)"
+            @reject="resolveHostKey(false)"
+        />
         <div v-if="searchOpen" class="search-bar">
             <input
                 ref="searchInputEl"

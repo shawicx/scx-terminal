@@ -6,7 +6,7 @@
 
 - `terminal`：font/fontSize/linePadding/cursor/cursorBlink/altIsMeta/scrollbackLines/wordSeparator/drawBoldTextInBrightColors/fontWeight(Bold)/minimumContrastRatio/copyOnSelect/paletteGenerate/paletteHarmonious/backspace/inputNewlines/outputNewlines/loginShell（仅作档案生成种子，运行期看档案字段）。
 - `appearance`：`colorScheme: string`（`'auto'` | 旧值 `'dark'`/`'light'` | 内置配色名，默认 `'auto'`）、`tabBarPosition`（死键）、`theme`（死键）、`language`。
-- `profiles`：`TerminalProfile[]`——`{ id, type: 'local', name, command, args, env, cwd, colorScheme(null=跟随全局), loginShell, isDefault }`；`type` 判别字段为 SSH 等远程档案预留。
+- `profiles`：`TerminalProfile = LocalProfile | SshProfile`（type 判别联合）。`LocalProfile = { id, type: 'local', name, command, args, env, cwd, colorScheme(null=跟随全局), loginShell, isDefault }`；`SshProfile = { id, type: 'ssh', name, host, port(默认22), user, auth('auto'|'agent'|'publicKey'|'password'), privateKeyPath(null=自动尝试 ~/.ssh/id_*), password(明文存储，UI 有风险提示), colorScheme, isDefault }`。profiles 数组在 deepMerge 中整体替换——SSH 字段原样存活（回归测试覆盖）。
 - `colorSchemes`：`TerminalColorScheme[]`——用户自定义配色（详见下文配色库）。
 - `hotkeys`：`Record<hotkeyId, string[][]>`（每个热键多组按键序列；macOS 默认含 ⌘ 前缀，见 `defaultHotkeys()`，平台判断来自 `src/lib/platform.ts`）。
 

@@ -105,14 +105,16 @@ struct QueueState {
     closed: bool,
 }
 
-struct PtyDataQueue {
+/// 输出数据队列：背压（100KB 块 / 500KB 未确认窗口）+ UTF-8 安全切分 + Tauri Channel 直发。
+/// pty 与 ssh 会话共用（字段/方法 crate 内可见）
+pub(crate) struct PtyDataQueue {
     state: Mutex<QueueState>,
     resume: Condvar,
     channel: Channel<InvokeResponseBody>,
 }
 
 impl PtyDataQueue {
-    fn new(channel: Channel<InvokeResponseBody>) -> Self {
+    pub(crate) fn new(channel: Channel<InvokeResponseBody>) -> Self {
         Self {
             state: Mutex::new(QueueState {
                 buffers: VecDeque::new(),
@@ -136,13 +138,13 @@ impl PtyDataQueue {
         !state.closed
     }
 
-    fn push(&self, data: Vec<u8>) {
+    pub(crate) fn push(&self, data: Vec<u8>) {
         let mut state = self.state.lock().unwrap();
         state.buffers.push_back(data);
         maybe_emit(&mut state, &self.channel);
     }
 
-    fn ack(&self, length: usize) {
+    pub(crate) fn ack(&self, length: usize) {
         let mut state = self.state.lock().unwrap();
         state.delta = state.delta.saturating_sub(length);
         if state.delta <= MAX_DELTA && state.paused {
@@ -154,7 +156,7 @@ impl PtyDataQueue {
 
     /// Flushes a stuck partial UTF-8 sequence once output has settled.
     /// Returns true if anything was sent.
-    fn flush_stale_partial(&self) -> bool {
+    pub(crate) fn flush_stale_partial(&self) -> bool {
         let mut state = self.state.lock().unwrap();
         if state.closed || !state.splitter.has_partial() || state.last_emit.elapsed() < SPLITTER_FLUSH_DELAY {
             return false;
@@ -168,7 +170,7 @@ impl PtyDataQueue {
         true
     }
 
-    fn close(&self) {
+    pub(crate) fn close(&self) {
         let mut state = self.state.lock().unwrap();
         state.closed = true;
         self.resume.notify_all();

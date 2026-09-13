@@ -28,12 +28,13 @@ scx-terminal 是一个 macOS 桌面终端应用（Tauri v2 + Vue 3 + @xterm/xter
 | 中英双语（跟随系统） | 可用 | `src/i18n/index.ts` |
 | 工作目录跟踪（M4）：OSC 7 + OSC 1337 双协议解析 + Rust 进程探测（`pty_get_cwd`）三级回退 | 可用 | `src/lib/middleware/oscProcessing.ts`、`src-tauri/src/proc_cwd.rs` |
 | 新标签/分屏窗格继承当前目录（档案显式 cwd 优先，同 Tabby 语义）；「复制当前路径」命令 | 可用 | `src/services/commands.ts`、`src/components/terminal/TerminalTabContent.vue`、`src/stores/tabs.ts` |
+| SSH 远程会话（M5）：russh 0.63、agent/私钥/密码认证、TOFU 指纹确认（读写系统 known_hosts）、keepalive、SSH 档案管理 | 可用 | `src-tauri/src/ssh.rs`、`src/services/ssh.ts`、`src/lib/sessions/sshSession.ts`、`ui/Dialog.vue`+`terminal/HostKeyDialog.vue` |
 
 ## 技术栈
 
 **前端**（`package.json`）：Vue 3.5、Pinia 4、rxjs 7（会话/前端事件流全部基于 Subject）、@xterm/xterm 5.5（addon-canvas / webgl / fit / search / unicode11）、Tailwind CSS 4（`@theme inline` token 体系）、reka-ui + class-variance-authority（UI 组件）、vue-i18n 11、yaml、nanoid。构建 Vite 8（端口 1420，`strictPort`，别名 `@` → `src/`），类型检查 `vue-tsc`，Lint `oxlint`，测试 `vitest`（node 环境）。
 
-**后端**（`src-tauri/Cargo.toml`）：tauri 2（feature `macos-private-api`）、portable-pty 0.9、tauri-plugin-opener、tauri-plugin-clipboard-manager、serde/serde_json、uuid、font-loader 0.11（系统字体枚举）。Release profile：`lto`、`opt-level = "s"`、`strip`。
+**后端**（`src-tauri/Cargo.toml`）：tauri 2（feature `macos-private-api`）、portable-pty 0.9、russh 0.63（SSH 客户端）、tauri-plugin-opener、tauri-plugin-clipboard-manager、serde/serde_json、uuid、font-loader 0.11（系统字体枚举）。Release profile：`lto`、`opt-level = "s"`、`strip`。
 
 **语言分布**（来自 codebase-memory 索引）：TypeScript 37 文件、Vue 15、Rust 6。
 

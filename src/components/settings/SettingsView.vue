@@ -82,10 +82,16 @@ const selectedProfile = computed<TerminalProfile | null>(() =>
     ?? profiles.value[0]
     ?? null)
 
+// 仅 local 档案存在这些字段；编辑器在 SSH 档案下隐藏对应区块
+const selectedLocalProfile = computed(() => {
+    const profile = selectedProfile.value
+    return profile?.type === 'local' ? profile : null
+})
+
 const argsText = computed({
-    get: () => selectedProfile.value?.args.join(' ') ?? '',
+    get: () => selectedLocalProfile.value?.args.join(' ') ?? '',
     set: (value: string) => {
-        const profile = selectedProfile.value
+        const profile = selectedLocalProfile.value
         if (profile) {
             profile.args = value.split(/\s+/).filter(Boolean)
         }
@@ -93,9 +99,9 @@ const argsText = computed({
 })
 
 const cwdModel = computed({
-    get: () => selectedProfile.value?.cwd ?? '',
+    get: () => selectedLocalProfile.value?.cwd ?? '',
     set: (value: string) => {
-        const profile = selectedProfile.value
+        const profile = selectedLocalProfile.value
         if (profile) {
             profile.cwd = value.trim() || null
         }
@@ -103,9 +109,9 @@ const cwdModel = computed({
 })
 
 const envText = computed({
-    get: () => Object.entries(selectedProfile.value?.env ?? {}).map(([key, value]) => `${key}=${value}`).join('\n'),
+    get: () => Object.entries(selectedLocalProfile.value?.env ?? {}).map(([key, value]) => `${key}=${value}`).join('\n'),
     set: (value: string) => {
-        const profile = selectedProfile.value
+        const profile = selectedLocalProfile.value
         if (!profile) {
             return
         }
@@ -127,6 +133,39 @@ const profileColorSchemeOptions = computed(() => [
     ...builtinColorSchemes.map(scheme => ({ value: scheme.name, label: scheme.name })),
 ])
 
+const sshAuthOptions = computed(() => [
+    { value: 'auto', label: t('settings.sshAuthAuto') },
+    { value: 'agent', label: t('settings.sshAuthAgent') },
+    { value: 'publicKey', label: t('settings.sshAuthPublicKey') },
+    { value: 'password', label: t('settings.sshAuthPassword') },
+])
+
+// 仅 SSH 档案存在这些字段
+const selectedSshProfile = computed(() => {
+    const profile = selectedProfile.value
+    return profile?.type === 'ssh' ? profile : null
+})
+
+const privateKeyModel = computed({
+    get: () => selectedSshProfile.value?.privateKeyPath ?? '',
+    set: (value: string) => {
+        const profile = selectedSshProfile.value
+        if (profile) {
+            profile.privateKeyPath = value.trim() || null
+        }
+    },
+})
+
+const passwordModel = computed({
+    get: () => selectedSshProfile.value?.password ?? '',
+    set: (value: string) => {
+        const profile = selectedSshProfile.value
+        if (profile) {
+            profile.password = value || null
+        }
+    },
+})
+
 const profileColorSchemeModel = computed({
     get: () => selectedProfile.value?.colorScheme ?? '',
     set: (value: string) => {
@@ -138,24 +177,43 @@ const profileColorSchemeModel = computed({
 })
 
 /**
- * @description 新建配置档案（以当前默认档案的命令与登录 shell 设置为模板）并选中
+ * @description 新建配置档案并选中：local 以默认档案为模板；ssh 为远端连接模板
+ * @param type 档案类型（local / ssh）
  * @returns void
  *
- * @example createProfile() // 列表新增并选中新档案
+ * @example createProfile('ssh') // 列表新增并选中新 SSH 档案
  *
  */
-function createProfile (): void {
+function createProfile (type: 'local' | 'ssh'): void {
+    if (type === 'ssh') {
+        const profile: TerminalProfile = {
+            id: `ssh-${nanoid(8)}`,
+            type: 'ssh',
+            name: `${t('settings.profileTypeSsh')} ${store.profiles.length + 1}`,
+            host: '',
+            port: 22,
+            user: 'root',
+            auth: 'auto',
+            privateKeyPath: null,
+            password: null,
+            colorScheme: null,
+            isDefault: false,
+        }
+        store.profiles.push(profile)
+        selectedProfileId.value = profile.id
+        return
+    }
     const template = config.defaultProfile()
     const profile: TerminalProfile = {
         id: `local-${nanoid(8)}`,
         type: 'local',
         name: `${t('settings.profiles')} ${store.profiles.length + 1}`,
-        command: template?.command ?? '/bin/zsh',
+        command: (template?.type === 'local' ? template.command : undefined) ?? '/bin/zsh',
         args: [],
         env: {},
         cwd: null,
         colorScheme: null,
-        loginShell: template?.loginShell ?? true,
+        loginShell: (template?.type === 'local' ? template.loginShell : undefined) ?? true,
         isDefault: false,
     }
     store.profiles.push(profile)
@@ -502,10 +560,16 @@ async function openConfigDir (): Promise<void> {
                 <h2>{{ t('settings.profiles') }}</h2>
                 <div class="profiles-layout">
                     <div class="profiles-list">
-                        <button class="profile-new-button" @click="createProfile">
-                            <Plus :size="14" />
-                            <span>{{ t('settings.profileNew') }}</span>
-                        </button>
+                        <div class="profile-new-group">
+                            <button class="profile-new-button" @click="createProfile('local')">
+                                <Plus :size="14" />
+                                <span>{{ t('settings.profileNew') }}</span>
+                            </button>
+                            <button class="profile-new-button" @click="createProfile('ssh')">
+                                <Plus :size="14" />
+                                <span>{{ t('settings.profileNewSsh') }}</span>
+                            </button>
+                        </div>
                         <button
                             v-for="p in profiles"
                             :key="p.id"
@@ -517,7 +581,7 @@ async function openConfigDir (): Promise<void> {
                                 <span class="profile-item-name">{{ p.name }}</span>
                                 <span v-if="p.isDefault" class="profile-default-badge">{{ t('tab.defaultProfile') }}</span>
                             </span>
-                            <span class="profile-item-command">{{ p.command }}</span>
+                            <span class="profile-item-command">{{ p.type === 'ssh' ? `${p.user}@${p.host}${p.port === 22 ? '' : `:${p.port}`}` : p.command }}</span>
                         </button>
                     </div>
                     <div v-if="selectedProfile" class="profile-editor">
@@ -525,22 +589,54 @@ async function openConfigDir (): Promise<void> {
                             <Label>{{ t('settings.profileName') }}</Label>
                             <Input v-model="selectedProfile.name" class="w-60" />
                         </div>
-                        <div class="settings-field">
-                            <Label>{{ t('settings.profileCommand') }}</Label>
-                            <Input v-model="selectedProfile.command" class="w-60" />
-                        </div>
-                        <div class="settings-field">
-                            <Label>{{ t('settings.profileArgs') }} <span class="value-hint">{{ t('settings.profileArgsHint') }}</span></Label>
-                            <Input v-model="argsText" class="w-60" />
-                        </div>
-                        <div class="settings-field">
-                            <Label>{{ t('settings.profileCwd') }}</Label>
-                            <Input v-model="cwdModel" class="w-60" />
-                        </div>
-                        <div class="settings-field">
-                            <Label>{{ t('settings.profileEnv') }} <span class="value-hint">{{ t('settings.profileEnvHint') }}</span></Label>
-                            <textarea v-model="envText" class="profile-env" rows="4" spellcheck="false"></textarea>
-                        </div>
+                        <template v-if="selectedProfile.type === 'local'">
+                            <div class="settings-field">
+                                <Label>{{ t('settings.profileCommand') }}</Label>
+                                <Input v-model="selectedProfile.command" class="w-60" />
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.profileArgs') }} <span class="value-hint">{{ t('settings.profileArgsHint') }}</span></Label>
+                                <Input v-model="argsText" class="w-60" />
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.profileCwd') }}</Label>
+                                <Input v-model="cwdModel" class="w-60" />
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.profileEnv') }} <span class="value-hint">{{ t('settings.profileEnvHint') }}</span></Label>
+                                <textarea v-model="envText" class="profile-env" rows="4" spellcheck="false"></textarea>
+                            </div>
+                            <div class="settings-field row">
+                                <Label>{{ t('settings.profileLoginShell') }}</Label>
+                                <Switch v-model="selectedProfile.loginShell" />
+                            </div>
+                        </template>
+                        <template v-else>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.sshHost') }}</Label>
+                                <Input v-model="selectedProfile.host" class="w-60" placeholder="example.com" />
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.sshPort') }}</Label>
+                                <Input v-model.number="selectedProfile.port" type="number" class="w-24" />
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.sshUser') }}</Label>
+                                <Input v-model="selectedProfile.user" class="w-60" />
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.sshAuth') }}</Label>
+                                <Select v-model="selectedProfile.auth" :options="sshAuthOptions" class="w-44" />
+                            </div>
+                            <div v-if="selectedProfile.auth === 'publicKey' || selectedProfile.auth === 'auto'" class="settings-field">
+                                <Label>{{ t('settings.sshPrivateKeyPath') }} <span class="value-hint">{{ t('settings.sshPrivateKeyHint') }}</span></Label>
+                                <Input v-model="privateKeyModel" class="w-60" placeholder="~/.ssh/id_ed25519" />
+                            </div>
+                            <div v-if="selectedProfile.auth === 'password' || selectedProfile.auth === 'auto'" class="settings-field">
+                                <Label>{{ t('settings.sshPassword') }} <span class="value-hint">{{ t('settings.sshPasswordHint') }}</span></Label>
+                                <Input v-model="passwordModel" type="password" class="w-60" />
+                            </div>
+                        </template>
                         <div class="settings-field">
                             <Label>{{ t('settings.profileColorScheme') }}</Label>
                             <SearchableSelect
@@ -549,10 +645,6 @@ async function openConfigDir (): Promise<void> {
                                 class="w-60"
                                 :placeholder="t('settings.searchPlaceholder')"
                             />
-                        </div>
-                        <div class="settings-field row">
-                            <Label>{{ t('settings.profileLoginShell') }}</Label>
-                            <Switch v-model="selectedProfile.loginShell" />
                         </div>
                         <Separator />
                         <div class="settings-field row profile-actions">
@@ -826,6 +918,17 @@ async function openConfigDir (): Promise<void> {
     display: flex;
     flex-direction: column;
     gap: 2px;
+}
+
+.profile-new-group {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.profile-new-group .profile-new-button {
+    flex: 1 1 0;
+    margin-bottom: 0;
 }
 
 .profile-new-button {

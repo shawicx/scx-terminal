@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useTabsStore } from './tabs'
-import { useConfigStore, type TerminalProfile } from './config'
+import { useConfigStore, type LocalProfile } from './config'
 
-function localProfile (overrides: Partial<TerminalProfile> = {}): TerminalProfile {
+function localProfile (overrides: Partial<LocalProfile> = {}): LocalProfile {
     return {
         id: 'local-test',
         type: 'local',

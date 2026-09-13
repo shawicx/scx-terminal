@@ -6,7 +6,10 @@
 | --- | --- |
 | `src/lib/sessions/baseSession.ts` | `BaseSession` 抽象基类：拥有中间件栈、输出/关闭/销毁流、首屏缓冲、销毁管线（移植 tabby-terminal）；构造期按 `BaseSessionOptions` 挂载中间件 |
 | `src/lib/sessions/localSession.ts` | `LocalSession`：本地 shell 会话（移植 tabby-local），对接 `TauriPTYProxy` |
+| `src/lib/sessions/sshSession.ts` | `SshSession`：SSH 远程会话（russh 后端），对接 `SshProxy`；失败文本进终端缓冲；cwd 仅 OSC 上报 |
+| `src/lib/sessions/index.ts` | `createSessionForProfile(profile, options)` 工厂：按 `profile.type`（local/ssh）创建会话，TerminalPane 统一构造入口 |
 | `src/services/pty.ts` | `TauriPTYProxy`：Rust PTY 的前端句柄（移植 tabby-electron 的 pty 代理，Electron IPC → Tauri IPC） |
+| `src/services/ssh.ts` | `SshProxy`：Rust SSH 会话前端句柄；**id 前端生成、事件监听先于 invoke 注册**（hostkey 事件在连接期间发出，事后注册=死锁） |
 | `src/lib/middleware/middleware.ts` | `SessionMiddleware` / `SessionMiddlewareStack`：会话与前端之间的 I/O 处理链 |
 | `src/lib/middleware/oscProcessing.ts` | `OSCProcessor`：拦截 OSC 7（`file://host/path` cwd 上报，percent-decode）、OSC 1337（`CurrentDir=` cwd 上报）与 OSC 52（剪贴板写入：base64 解码 → 注入的 `setClipboard`，100KB 上限，不响应 `?` 查询）；三者均吞掉序列不上屏 |
 | `src/lib/middleware/inputProcessing.ts` | `InputProcessor`：退格重映射（`terminal.backspace` 为 `ctrl-h`/`delete` 时挂载） |
@@ -39,7 +42,11 @@
 
 **输出链**：`pty.subscribe('data')` → 每块先 `ackData(len)`（驱动 Rust 侧背压）再 `emitOutput`。
 
-**工作目录（三级回退，M4）**：`getWorkingDirectory()` = `reportedCWD`（OSC 7/1337 上报优先，tmux 内嵌场景靠 OSC 7）→ `pty.getWorkingDirectory()`（Rust `pty_get_cwd` 进程探测，读 shell 子进程 cwd，零配置全 shell 通用；libproc crate 无高层封装，`proc_cwd.rs` 自包含 FFI `PROC_PIDVNODEPATHINFO`）→ null。消费方：新标签/分屏继承 cwd、`copy-current-path` 命令。
+**工作目录（三级回退，M4）**：`getWorkingDirectory()` = `reportedCWD`（OSC 7/1337 上报优先，tmux 内嵌场景靠 OSC 7）→ `pty.getWorkingDirectory()`（Rust `pty_get_cwd` 进程探测，读 shell 子进程 cwd，零配置全 shell 通用；libproc crate 无高层封装，`proc_cwd.rs` 自包含 FFI `PROC_PIDVNODEPATHINFO`）→ null。消费方：新标签/分屏继承 cwd、`copy-current-path` 命令。`SshSession` 无进程探测，仅 `reportedCWD`（远端 shell 配了上报 hook 时可用）。
+
+## SshSession（`sshSession.ts`，M5）
+
+对接 Rust russh 会话（`src-tauri/src/ssh.rs`：连接 → TOFU 指纹（系统 `~/.ssh/known_hosts`，未知弹 HostKeyDialog 确认、首次接受写回、失配拒绝）→ 认证（auto = agent → 私钥 → 密码；keepalive 5s×10）→ PTY+shell → 输出泵复用 `PtyDataQueue`）。连接/认证失败以文本打进终端缓冲（同 Local `Could not start` 模式）；`onHostKey` 回调由 TerminalPane 注入（挂起 HostKeyDialog 等 Promise）。
 
 **退出处理**：监听 `pty:{id}:exit` / `pty:{id}:close` 事件；`pauseAfterExit` 模式下显示 "Press any key to close"，否则直接销毁会话。
 

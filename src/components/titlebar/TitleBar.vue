@@ -37,7 +37,7 @@ const TAB_COLORS = [
  *
  */
 const newTabMenuItems = computed<ContextMenuItemSpec[]>(() => defaultFirstProfiles(config.store.profiles)
-    .filter(profile => profile.type === 'local')
+    .filter(profile => profile.type === 'local' || profile.type === 'ssh')
     .map(profile => ({
         key: profile.id,
         label: profile.isDefault ? `${profile.name} · ${t('tab.defaultProfile')}` : profile.name,
