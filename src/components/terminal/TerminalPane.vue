@@ -272,8 +272,8 @@ onMounted(async () => {
                 port: props.profile.port,
                 user: props.profile.user,
                 auth: props.profile.auth,
-                privateKeyPath: props.profile.privateKeyPath,
-                password: props.profile.password,
+                profileId: props.profile.id,
+                keyId: props.profile.keyId,
                 width: null,
                 height: null,
             })

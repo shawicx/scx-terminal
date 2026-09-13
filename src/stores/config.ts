@@ -35,10 +35,8 @@ export interface SshProfile {
     port: number
     user: string
     auth: SshAuthMethod
-    /** 私钥文件绝对路径（auth 含 publicKey/auto 时使用）；null = 未配置 */
-    privateKeyPath: string | null
-    /** 密码（明文存储于 config.yaml，UI 有风险提示）；null = 未配置 */
-    password: string | null
+    /** 密钥链条目 id（加密存 SQLite，见 services/secrets.ts）；null = 不用密钥链 */
+    keyId: string | null
     /** 档案专属配色名；null 跟随全局 */
     colorScheme: string | null
     isDefault: boolean
@@ -285,6 +283,7 @@ export const useConfigStore = defineStore('config', () => {
                 if (userConfig) {
                     deepMerge(store, userConfig)
                     store.hotkeys = normalizeHotkeysConfig(store.hotkeys)
+                    sanitizeProfiles()
                 }
             }
         } catch (error) {
@@ -295,6 +294,25 @@ export const useConfigStore = defineStore('config', () => {
         // 首次运行/旧配置（用户配置无 profiles 键）：由 /etc/shells 生成默认档案并持久化；
         // 键存在（即使空数组）视为用户已管理，不再生成
         await generateProfilesIfAbsent(userConfig)
+    }
+
+    /**
+     * @description 清理 SSH 档案上已废弃的明文敏感字段（旧版 password/privateKeyPath——
+     *              敏感数据已改加密存 SQLite，不允许在 yaml 中残留明文副本）
+     * @returns void
+     *
+     * @example sanitizeProfiles()
+     *
+     */
+    function sanitizeProfiles (): void {
+        for (const profile of store.profiles) {
+            if (profile.type !== 'ssh') {
+                continue
+            }
+            const legacy = profile as Record<string, unknown>
+            delete legacy.password
+            delete legacy.privateKeyPath
+        }
     }
 
     /**

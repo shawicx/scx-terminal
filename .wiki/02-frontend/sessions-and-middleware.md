@@ -10,6 +10,7 @@
 | `src/lib/sessions/index.ts` | `createSessionForProfile(profile, options)` 工厂：按 `profile.type`（local/ssh）创建会话，TerminalPane 统一构造入口 |
 | `src/services/pty.ts` | `TauriPTYProxy`：Rust PTY 的前端句柄（移植 tabby-electron 的 pty 代理，Electron IPC → Tauri IPC） |
 | `src/services/ssh.ts` | `SshProxy`：Rust SSH 会话前端句柄；**id 前端生成、事件监听先于 invoke 注册**（hostkey 事件在连接期间发出，事后注册=死锁） |
+| `src/services/secrets.ts` | SSH 密钥链/凭据前端封装（`key_*`/`cred_*`/`key_inspect`）；私钥/口令/密码明文永不经过前端——认证时 Rust 按 keyId/profileId 从加密库解密。添加密钥为 Termius 式表单：粘贴私钥 textarea（防抖 `key_inspect` 自动推导公钥+指纹）、拖放文件走 Tauri drop 事件路径导入、「从密钥文件导入」按钮走内容 |
 | `src/lib/middleware/middleware.ts` | `SessionMiddleware` / `SessionMiddlewareStack`：会话与前端之间的 I/O 处理链 |
 | `src/lib/middleware/oscProcessing.ts` | `OSCProcessor`：拦截 OSC 7（`file://host/path` cwd 上报，percent-decode）、OSC 1337（`CurrentDir=` cwd 上报）与 OSC 52（剪贴板写入：base64 解码 → 注入的 `setClipboard`，100KB 上限，不响应 `?` 查询）；三者均吞掉序列不上屏 |
 | `src/lib/middleware/inputProcessing.ts` | `InputProcessor`：退格重映射（`terminal.backspace` 为 `ctrl-h`/`delete` 时挂载） |
@@ -46,7 +47,9 @@
 
 ## SshSession（`sshSession.ts`，M5）
 
-对接 Rust russh 会话（`src-tauri/src/ssh.rs`：连接 → TOFU 指纹（系统 `~/.ssh/known_hosts`，未知弹 HostKeyDialog 确认、首次接受写回、失配拒绝）→ 认证（auto = agent → 私钥 → 密码；keepalive 5s×10）→ PTY+shell → 输出泵复用 `PtyDataQueue`）。连接/认证失败以文本打进终端缓冲（同 Local `Could not start` 模式）；`onHostKey` 回调由 TerminalPane 注入（挂起 HostKeyDialog 等 Promise）。
+对接 Rust russh 会话（`src-tauri/src/ssh.rs`：连接 → TOFU 指纹（系统 `~/.ssh/known_hosts`，未知弹 HostKeyDialog 确认、首次接受写回、失配拒绝）→ 认证（auto = agent → 密钥链条目 → `~/.ssh/id_*` → 库中密码；keepalive 5s×10）→ PTY+shell → 输出泵复用 `PtyDataQueue`）。连接/认证失败以文本打进终端缓冲（同 Local `Could not start` 模式）；`onHostKey` 回调由 TerminalPane 注入（挂起 HostKeyDialog 等 Promise）。
+
+**敏感数据存储（M5.5）**：`src-tauri/src/secrets.rs`——SQLite（`app_data_dir/secrets.db`）+ AES-256-GCM 字段级加密（nonce 前置密文），主密钥 32 字节存 macOS 钥匙串（keyring，`scx-terminal/master-key`）。范围：密钥链私钥/口令（`ssh_keys` 表）、档案密码（`ssh_credentials` 表，profileId 引用）。`SshProfile` 无明文凭据字段（`keyId` 引用密钥链条目；load 时 sanitize 删除旧版 password/privateKeyPath 残留）。
 
 **退出处理**：监听 `pty:{id}:exit` / `pty:{id}:close` 事件；`pauseAfterExit` 模式下显示 "Press any key to close"，否则直接销毁会话。
 

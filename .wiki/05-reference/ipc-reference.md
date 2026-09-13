@@ -1,12 +1,20 @@
 # IPC 契约总表（前端 ↔ Rust）
 
-注册处：`src-tauri/src/lib.rs` `invoke_handler`。前端调用方：`src/services/pty.ts`（pty_*）、`src/services/ssh.ts`（ssh_*）、`src/services/shells.ts`（list_shells）、`src/services/fonts.ts`（list_fonts）、`src/stores/config.ts`（config_*）、`src/main.ts` 与 `SettingsView.vue`（dev_log / config_dir_path / opener 插件）。
+注册处：`src-tauri/src/lib.rs` `invoke_handler`。前端调用方：`src/services/pty.ts`（pty_*）、`src/services/ssh.ts`（ssh_*）、`src/services/secrets.ts`（key_*/cred_*）、`src/services/shells.ts`（list_shells）、`src/services/fonts.ts`（list_fonts）、`src/stores/config.ts`（config_*）、`src/main.ts` 与 `SettingsView.vue`（dev_log / config_dir_path / opener 插件）。
 
 ## invoke 命令
 
 | 命令 | 方向 | 参数 | 返回 | 执行方式 | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| `ssh_connect` | JS→Rust | `options: SshConnectOptions`（camelCase：**id（前端生成）**/host/port/user/auth/privateKeyPath/password/cols/rows）、`dataChannel: Channel` | `()` | **async** | 连接 + TOFU 指纹 + 认证 + PTY/shell；输出经 channel 回传；指纹确认期间挂起等待 `ssh_confirm_host_key` |
+| `ssh_connect` | JS→Rust | `options: SshConnectOptions`（camelCase：**id（前端生成）**/**profileId**/host/port/user/auth/**keyId**/cols/rows）、`dataChannel: Channel`、`secrets: State<SecretsState>` | `()` | **async** | 连接 + TOFU 指纹 + 认证（私钥/口令/密码按 id 从加密库解密，明文不经前端）+ PTY/shell；指纹确认期间挂起等待 `ssh_confirm_host_key` |
+| `key_generate` | JS→Rust | `options`（id/name/algorithm/passphrase?/comment?） | `SshKeyMeta` | sync | 生成 ed25519/rsa，私钥（可选口令加密）AES-GCM 加密入库 |
+| `key_import` | JS→Rust | `options`（id/name/**content**/passphrase?/comment?） | `SshKeyMeta` | sync | 导入私钥内容（File API 无路径），`decode_secret_key` 验证后加密入库 |
+| `key_list` | JS→Rust | 无 | `SshKeyMeta[]` | sync | 密钥链条目元数据（私钥不出库） |
+| `key_update` | JS→Rust | `options`（id/name?/comment?） | `()` | sync | 重命名/备注 |
+| `key_delete` | JS→Rust | `id` | `()` | sync | 删除条目（引用档案由前端同步置空 keyId） |
+| `cred_set_password` | JS→Rust | `profileId`、`password` | `()` | sync | 档案密码加密入库 |
+| `cred_remove` | JS→Rust | `profileId` | `()` | sync | 清除档案密码 |
+| `cred_has_password` | JS→Rust | `profileId` | `bool` | sync | 查询密码状态（不返回内容） |
 | `ssh_write` | JS→Rust | `id`、`data: number[]` | `()` 或错误 | **async** | `channel.data_bytes` 写远端 |
 | `ssh_resize` | JS→Rust | `id`、`cols: u32`、`rows: u32` | `()` 或错误 | **async** | `window_change` |
 | `ssh_kill` | JS→Rust | `id` | `()` 或错误 | **async** | 关 channel + `disconnect` + 停队列 |

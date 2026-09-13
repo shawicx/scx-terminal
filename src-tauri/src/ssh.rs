@@ -15,19 +15,22 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::oneshot;
 
 use crate::pty::PtyDataQueue;
+use crate::secrets::{self, SecretsState};
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshConnectOptions {
     /// 会话 id（前端生成：使 hostkey 等事件可在 connect 返回前被前端监听）
     pub id: String,
+    /// 档案 id：Rust 据此从加密库解密已存密码（敏感数据不经前端）
+    pub profile_id: String,
     pub host: String,
     pub port: u16,
     pub user: String,
     /// auto | agent | publicKey | password
     pub auth: String,
-    pub private_key_path: Option<String>,
-    pub password: Option<String>,
+    /// 密钥链条目 id（Rust 据此解密私钥与口令）；null = 不用密钥链
+    pub key_id: Option<String>,
     pub cols: u32,
     pub rows: u32,
 }
@@ -152,10 +155,15 @@ async fn try_agent(handle: &mut client::Handle<ScxHandler>, user: &str) -> Resul
     Ok(false)
 }
 
-/// 私钥文件认证（不支持加密私钥的 passphrase 交互，错误信息直接提示）
-async fn try_private_key(handle: &mut client::Handle<ScxHandler>, user: &str, path: &str) -> Result<bool, String> {
-    let key = keys::load_secret_key(path, None)
-        .map_err(|e| format!("failed to load private key {path}: {e}"))?;
+/// 私钥认证：pem 已解密（密钥链解密或默认路径直读），passphrase 为加密私钥口令
+async fn try_private_key_pem(
+    handle: &mut client::Handle<ScxHandler>,
+    user: &str,
+    pem: &str,
+    passphrase: Option<&str>,
+) -> Result<bool, String> {
+    let key = keys::decode_secret_key(pem, passphrase)
+        .map_err(|e| format!("failed to decode private key (wrong passphrase?): {e}"))?;
     let hash = rsa_hash_for(handle, key.algorithm()).await;
     let key = PrivateKeyWithHashAlg::new(Arc::new(key), hash);
     match handle.authenticate_publickey(user.to_string(), key).await {
@@ -164,8 +172,28 @@ async fn try_private_key(handle: &mut client::Handle<ScxHandler>, user: &str, pa
     }
 }
 
-/// 按档案 auth 策略认证；auto = agent → 显式私钥或常见默认私钥 → 密码（若配置）
-async fn authenticate(handle: &mut client::Handle<ScxHandler>, options: &SshConnectOptions) -> Result<(), String> {
+/// 无口令默认私钥（~/.ssh/id_ed25519 等）尝试
+async fn try_default_private_keys(handle: &mut client::Handle<ScxHandler>, user: &str) -> Result<bool, String> {
+    for name in ["id_ed25519", "id_rsa", "id_ecdsa"] {
+        if let Some(home) = std::env::var("HOME").ok() {
+            let path = format!("{home}/.ssh/{name}");
+            if std::path::Path::new(&path).is_file() {
+                let pem = std::fs::read_to_string(&path).map_err(|e| format!("failed to read {path}: {e}"))?;
+                if try_private_key_pem(handle, user, &pem, None).await? {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// 按档案 auth 策略认证；auto = agent → 密钥链条目 → 默认私钥 → 库中密码（若有）
+async fn authenticate(
+    handle: &mut client::Handle<ScxHandler>,
+    secrets: &SecretsState,
+    options: &SshConnectOptions,
+) -> Result<(), String> {
     match options.auth.as_str() {
         "agent" => {
             if try_agent(handle, &options.user).await? {
@@ -174,15 +202,17 @@ async fn authenticate(handle: &mut client::Handle<ScxHandler>, options: &SshConn
             Err("authentication failed (agent)".to_string())
         }
         "publicKey" => {
-            let path = options.private_key_path.as_deref().ok_or("no private key configured")?;
-            if try_private_key(handle, &options.user, path).await? {
+            let key_id = options.key_id.as_deref().ok_or("no keychain key selected")?;
+            let loaded = secrets::load_private_key(secrets, key_id)?;
+            if try_private_key_pem(handle, &options.user, &loaded.private_key_pem, loaded.passphrase.as_deref()).await? {
                 return Ok(());
             }
             Err("authentication failed (publicKey)".to_string())
         }
         "password" => {
-            let password = options.password.as_deref().ok_or("no password configured")?;
-            match handle.authenticate_password(options.user.clone(), password.to_string()).await {
+            let password = secrets::load_password(secrets, &options.profile_id)?
+                .ok_or("no password configured")?;
+            match handle.authenticate_password(options.user.clone(), password).await {
                 Ok(result) if result.success() => Ok(()),
                 Ok(_) => Err("authentication failed (password)".to_string()),
                 Err(e) => Err(format!("password auth failed: {e}")),
@@ -192,22 +222,16 @@ async fn authenticate(handle: &mut client::Handle<ScxHandler>, options: &SshConn
             if try_agent(handle, &options.user).await.unwrap_or(false) {
                 return Ok(());
             }
-            if let Some(explicit) = options.private_key_path.as_deref() {
-                if try_private_key(handle, &options.user, explicit).await? {
+            if let Some(key_id) = options.key_id.as_deref() {
+                let loaded = secrets::load_private_key(secrets, key_id)?;
+                if try_private_key_pem(handle, &options.user, &loaded.private_key_pem, loaded.passphrase.as_deref()).await? {
                     return Ok(());
                 }
-            } else {
-                for name in ["id_ed25519", "id_rsa", "id_ecdsa"] {
-                    if let Some(home) = std::env::var("HOME").ok() {
-                        let path = format!("{home}/.ssh/{name}");
-                        if std::path::Path::new(&path).is_file() && try_private_key(handle, &options.user, &path).await? {
-                            return Ok(());
-                        }
-                    }
-                }
+            } else if try_default_private_keys(handle, &options.user).await.unwrap_or(false) {
+                return Ok(());
             }
-            if let Some(password) = options.password.as_deref() {
-                if let Ok(result) = handle.authenticate_password(options.user.clone(), password.to_string()).await {
+            if let Ok(Some(password)) = secrets::load_password(secrets, &options.profile_id) {
+                if let Ok(result) = handle.authenticate_password(options.user.clone(), password).await {
                     if result.success() {
                         return Ok(());
                     }
@@ -239,6 +263,7 @@ async fn authenticate(handle: &mut client::Handle<ScxHandler>, options: &SshConn
 pub async fn ssh_connect(
     app: AppHandle,
     manager: State<'_, SshManager>,
+    secrets: State<'_, SecretsState>,
     data_channel: Channel<InvokeResponseBody>,
     options: SshConnectOptions,
 ) -> Result<String, String> {
@@ -269,7 +294,7 @@ pub async fn ssh_connect(
         let mut handle = client::connect(config, address, handler)
             .await
             .map_err(|e| format!("could not connect to {}:{}: {e}", options.host, options.port))?;
-        authenticate(&mut handle, &options).await?;
+        authenticate(&mut handle, &secrets, &options).await?;
 
         let channel: russh::Channel<client::Msg> = handle
             .channel_open_session()

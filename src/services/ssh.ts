@@ -9,12 +9,14 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 export interface SSHConnectOptions {
     /** 会话 id：由前端生成，使事件监听可在 invoke 返回前注册（hostkey 事件在连接期间发出） */
     id: string
+    /** 档案 id：Rust 据此从加密库解密已存密码 */
+    profileId: string
     host: string
     port: number
     user: string
     auth: string
-    privateKeyPath: string | null
-    password: string | null
+    /** 密钥链条目 id（Rust 据此解密私钥）；null = 不用密钥链 */
+    keyId: string | null
     cols: number
     rows: number
 }

@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { nanoid } from 'nanoid'
-import { Terminal, Palette, Keyboard, Info, FolderOpen, Layers, Plus, Trash2, Upload } from 'lucide-vue-next'
+import { writeClipboardText } from '@/lib/frontendContext'
+import { Terminal, Palette, Keyboard, Info, FolderOpen, Layers, KeyRound, Copy, Plus, Trash2, Upload } from 'lucide-vue-next'
+import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
+import type { Event as TauriEvent, UnlistenFn } from '@tauri-apps/api/event'
+import type { SshKeyMeta, SshKeyInspection } from '@/services/secrets'
+import { generateSshKey, importSshKey, inspectSshKey, listSshKeys, updateSshKey, deleteSshKey, setProfilePassword, removeProfilePassword, hasProfilePassword } from '@/services/secrets'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import Label from '@/components/ui/Label.vue'
@@ -13,7 +18,7 @@ import Slider from '@/components/ui/Slider.vue'
 import Select from '@/components/ui/Select.vue'
 import Separator from '@/components/ui/Separator.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import { useConfigStore, defaultFirstProfiles, type TerminalProfile } from '@/stores/config'
+import { useConfigStore, defaultFirstProfiles, type SshProfile, type TerminalProfile } from '@/stores/config'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { builtinColorSchemes, defaultDarkColorScheme, type TerminalColorScheme } from '@/lib/colorSchemes'
@@ -25,7 +30,7 @@ const { t } = useI18n()
 const config = useConfigStore()
 const store = config.store
 
-const page = ref<'terminal' | 'profiles' | 'appearance' | 'hotkeys' | 'about'>('profiles')
+const page = ref<'terminal' | 'profiles' | 'keys' | 'appearance' | 'hotkeys' | 'about'>('profiles')
 
 const { sortedCommands } = useCommands()
 const hotkeyCommands = computed(() => sortedCommands.value.filter(command => command.hotkeyId))
@@ -68,6 +73,7 @@ onMounted(() => {
 
 const pages = computed(() => [
     { id: 'profiles' as const, label: t('settings.profiles'), icon: Layers },
+    { id: 'keys' as const, label: t('settings.keychainPage'), icon: KeyRound },
     { id: 'terminal' as const, label: t('settings.terminal'), icon: Terminal },
     { id: 'appearance' as const, label: t('settings.appearance'), icon: Palette },
     { id: 'hotkeys' as const, label: t('settings.hotkeys'), icon: Keyboard },
@@ -146,25 +152,290 @@ const selectedSshProfile = computed(() => {
     return profile?.type === 'ssh' ? profile : null
 })
 
-const privateKeyModel = computed({
-    get: () => selectedSshProfile.value?.privateKeyPath ?? '',
+// ---- SSH 密钥链（元数据存加密 SQLite，私钥明文不出库） ----
+const sshKeys = ref<SshKeyMeta[]>([])
+const selectedKeyId = ref<string | null>(null)
+const selectedKey = computed(() => sshKeys.value.find(key => key.id === selectedKeyId.value) ?? null)
+
+/**
+ * @description 复制密钥条目公钥到剪贴板（公钥非敏感，可直接展示）
+ * @param key 条目元数据
+ * @returns void
+ *
+ */
+function copyKeyPublic (key: SshKeyMeta): void {
+    void writeClipboardText(key.publicKey)
+}
+
+onMounted(async () => {
+    try {
+        sshKeys.value = await listSshKeys()
+    } catch (error) {
+        console.error('could not load ssh keys', error)
+    }
+    // Tauri 拖放：drop 事件给绝对路径（dragDropEnabled 默认 true 时 HTML5 drop 不触发）
+    unlistenDragDrop = await getCurrentWebview().onDragDropEvent(onDragDropEvent)
+})
+
+onBeforeUnmount(() => {
+    unlistenDragDrop?.()
+})
+
+function refreshSshKeys (): void {
+    void listSshKeys().then(keys => (sshKeys.value = keys)).catch(() => {})
+}
+
+const keyIdModel = computed({
+    get: () => selectedSshProfile.value?.keyId ?? '',
     set: (value: string) => {
         const profile = selectedSshProfile.value
         if (profile) {
-            profile.privateKeyPath = value.trim() || null
+            profile.keyId = value || null
         }
     },
 })
 
-const passwordModel = computed({
-    get: () => selectedSshProfile.value?.password ?? '',
-    set: (value: string) => {
-        const profile = selectedSshProfile.value
-        if (profile) {
-            profile.password = value || null
-        }
-    },
+const sshKeyOptions = computed(() => [
+    { value: '', label: t('settings.keychainNone') },
+    ...sshKeys.value.map(key => ({
+        value: key.id,
+        label: `${key.name} (${key.fingerprint.slice(0, 19)}…)`,
+    })),
+])
+
+// ---- 档案密码（加密存 SQLite；表单只显示"已设置"状态） ----
+const profilePasswordSet = ref(false)
+const passwordEditorOpen = ref(false)
+const passwordDraft = ref('')
+
+watch(selectedSshProfile, async (profile: SshProfile | null) => {
+    passwordEditorOpen.value = false
+    passwordDraft.value = ''
+    profilePasswordSet.value = profile ? await hasProfilePassword(profile.id).catch(() => false) : false
 })
+
+async function saveProfilePassword (): Promise<void> {
+    const profile = selectedSshProfile.value
+    if (!profile) {
+        return
+    }
+    if (passwordDraft.value) {
+        await setProfilePassword(profile.id, passwordDraft.value)
+        profilePasswordSet.value = true
+    }
+    passwordEditorOpen.value = false
+    passwordDraft.value = ''
+}
+
+async function clearProfilePassword (): Promise<void> {
+    const profile = selectedSshProfile.value
+    if (!profile) {
+        return
+    }
+    await removeProfilePassword(profile.id)
+    profilePasswordSet.value = false
+    passwordEditorOpen.value = false
+    passwordDraft.value = ''
+}
+
+// ---- 密钥链分页操作 ----
+const keyAlgorithmOptions = computed(() => [
+    { value: 'ed25519', label: 'Ed25519（推荐）' },
+    { value: 'rsa', label: 'RSA 4096' },
+])
+
+const keyGenAlgorithm = ref<'ed25519' | 'rsa'>('ed25519')
+const keyGenName = ref('')
+const keyGenPassphrase = ref('')
+const keysError = ref('')
+
+/**
+ * @description 应用内生成密钥对（ed25519/rsa，可选口令加密）并刷新列表
+ * @returns Promise<void>
+ *
+ * @example await generateKeyEntry()
+ *
+ */
+async function generateKeyEntry (): Promise<void> {
+    keysError.value = ''
+    const name = keyGenName.value.trim() || `key-${nanoid(4)}`
+    try {
+        await generateSshKey({
+            id: `key-${nanoid(10)}`,
+            name,
+            algorithm: keyGenAlgorithm.value,
+            passphrase: keyGenPassphrase.value || null,
+            comment: '',
+        })
+        keyGenName.value = ''
+        keyGenPassphrase.value = ''
+        refreshSshKeys()
+    } catch (error) {
+        keysError.value = String(error instanceof Error ? error.message : error)
+    }
+}
+
+// ---- 添加密钥表单（Termius 式：粘贴私钥 → 公钥自动推导 → 拖放/文件填充） ----
+const keyAddOpen = ref(false)
+const keyAddName = ref('')
+const keyAddPrivatePem = ref('')
+const keyAddPassphrase = ref('')
+const keyAddInspection = ref<SshKeyInspection | null>(null)
+const keyAddError = ref('')
+const keyDropActive = ref(false)
+const keyDropFileName = ref('')
+let keyInspectTimer: ReturnType<typeof setTimeout> | null = null
+let unlistenDragDrop: UnlistenFn | null = null
+
+/**
+ * @description 打开「添加密钥」表单（清空上次输入）
+ * @returns void
+ *
+ */
+function openKeyAddForm (): void {
+    keyAddOpen.value = true
+    keyAddName.value = ''
+    keyAddPrivatePem.value = ''
+    keyAddPassphrase.value = ''
+    keyAddInspection.value = null
+    keyAddError.value = ''
+    keyDropFileName.value = ''
+}
+
+/**
+ * @description 私钥/口令变化后防抖验证：调 key_inspect 推导公钥与指纹（不存储）
+ * @returns void
+ *
+ */
+function scheduleKeyInspect (): void {
+    if (keyInspectTimer) {
+        clearTimeout(keyInspectTimer)
+    }
+    keyAddInspection.value = null
+    keyAddError.value = ''
+    keyInspectTimer = setTimeout(() => {
+        const pem = keyAddPrivatePem.value
+        if (!pem.trim()) {
+            return
+        }
+        void inspectSshKey(pem, keyAddPassphrase.value || null)
+            .then(inspection => (keyAddInspection.value = inspection))
+            .catch(error => {
+                keyAddError.value = String(error instanceof Error ? error.message : error)
+            })
+    }, 600)
+}
+
+/**
+ * @description 保存添加的密钥：content（粘贴/文件填充）或 sourcePath（拖放）导入加密入库
+ * @returns Promise<void>
+ *
+ */
+async function saveKeyEntry (): Promise<void> {
+    keysError.value = ''
+    if (!keyAddPrivatePem.value.trim() && !keyDropFileName.value) {
+        keyAddError.value = t('settings.keychainAddEmpty')
+        return
+    }
+    try {
+        await importSshKey({
+            id: `key-${nanoid(10)}`,
+            name: keyAddName.value.trim() || `key-${nanoid(4)}`,
+            content: keyAddPrivatePem.value.trim() || null,
+            sourcePath: keyDropFileName.value && !keyAddPrivatePem.value.trim() ? keyDropSourcePath.value : null,
+            passphrase: keyAddPassphrase.value || null,
+            comment: '',
+        })
+        keyAddOpen.value = false
+        refreshSshKeys()
+    } catch (error) {
+        keyAddError.value = String(error instanceof Error ? error.message : error)
+    }
+}
+
+const keyDropSourcePath = ref('')
+
+/**
+ * @description 「从密钥文件导入」按钮：读文件内容填入私钥 textarea（粘贴式，可见可改）
+ * @param event 文件 input 的 change 事件
+ * @returns Promise<void>
+ *
+ */
+async function onKeyFileChosen (event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement
+    const file = input.files?.[0]
+    input.value = ''
+    if (!file) {
+        return
+    }
+    keyDropFileName.value = file.name
+    keyDropSourcePath.value = ''
+    keyAddPrivatePem.value = await file.text()
+    keyAddError.value = ''
+    scheduleKeyInspect()
+}
+
+/**
+ * @description 处理 Tauri 拖放事件：拖入私钥文件记录路径（保存时 Rust 按路径读，内容不经前端）
+ * @param event 拖放事件（over/drop/cancel）
+ * @returns void
+ *
+ */
+function onDragDropEvent (event: TauriEvent<DragDropEvent>): void {
+    if (event.payload.type === 'drop') {
+        const path = event.payload.paths[0]
+        if (!path) {
+            return
+        }
+        keyDropActive.value = false
+        keyDropFileName.value = path.split('/').pop() ?? path
+        keyDropSourcePath.value = path
+        keyAddPrivatePem.value = ''
+        keyAddError.value = ''
+        scheduleKeyInspect()
+    } else if (event.payload.type === 'over') {
+        keyDropActive.value = true
+    } else {
+        keyDropActive.value = false
+    }
+}
+
+/**
+ * @description 删除密钥条目：引用中的档案同步置空 keyId
+ * @param key 条目元数据
+ * @returns Promise<void>
+ *
+ */
+async function deleteKeyEntry (key: SshKeyMeta): Promise<void> {
+    keysError.value = ''
+    try {
+        await deleteSshKey(key.id)
+        for (const profile of store.profiles) {
+            if (profile.type === 'ssh' && profile.keyId === key.id) {
+                profile.keyId = null
+            }
+        }
+        refreshSshKeys()
+    } catch (error) {
+        keysError.value = String(error instanceof Error ? error.message : error)
+    }
+}
+
+/**
+ * @description 重命名密钥条目（失焦提交）
+ * @param key 条目元数据
+ * @param name 新名称
+ * @returns Promise<void>
+ *
+ */
+async function renameKeyEntry (key: SshKeyMeta, name: string): Promise<void> {
+    const trimmed = name.trim()
+    if (!trimmed || trimmed === key.name) {
+        return
+    }
+    key.name = trimmed
+    await updateSshKey({ id: key.id, name: trimmed }).catch(() => {})
+}
 
 const profileColorSchemeModel = computed({
     get: () => selectedProfile.value?.colorScheme ?? '',
@@ -194,8 +465,7 @@ function createProfile (type: 'local' | 'ssh'): void {
             port: 22,
             user: 'root',
             auth: 'auto',
-            privateKeyPath: null,
-            password: null,
+            keyId: null,
             colorScheme: null,
             isDefault: false,
         }
@@ -629,12 +899,24 @@ async function openConfigDir (): Promise<void> {
                                 <Select v-model="selectedProfile.auth" :options="sshAuthOptions" class="w-44" />
                             </div>
                             <div v-if="selectedProfile.auth === 'publicKey' || selectedProfile.auth === 'auto'" class="settings-field">
-                                <Label>{{ t('settings.sshPrivateKeyPath') }} <span class="value-hint">{{ t('settings.sshPrivateKeyHint') }}</span></Label>
-                                <Input v-model="privateKeyModel" class="w-60" placeholder="~/.ssh/id_ed25519" />
+                                <Label>{{ t('settings.keychain') }} <span class="value-hint">{{ t('settings.keychainHint') }}</span></Label>
+                                <Select v-model="keyIdModel" :options="sshKeyOptions" class="w-60" />
                             </div>
                             <div v-if="selectedProfile.auth === 'password' || selectedProfile.auth === 'auto'" class="settings-field">
-                                <Label>{{ t('settings.sshPassword') }} <span class="value-hint">{{ t('settings.sshPasswordHint') }}</span></Label>
-                                <Input v-model="passwordModel" type="password" class="w-60" />
+                                <Label>{{ t('settings.sshPassword') }}</Label>
+                                <div class="ssh-password-row">
+                                    <Button variant="outline" size="sm" @click="passwordEditorOpen = !passwordEditorOpen">
+                                        {{ profilePasswordSet ? t('settings.sshPasswordReplace') : t('settings.sshPasswordSet') }}
+                                    </Button>
+                                    <span v-if="profilePasswordSet" class="value-hint">{{ t('settings.sshPasswordStored') }}</span>
+                                    <Button v-if="profilePasswordSet" variant="ghost" size="sm" class="profile-delete" @click="clearProfilePassword">
+                                        {{ t('settings.sshPasswordClear') }}
+                                    </Button>
+                                </div>
+                                <div v-if="passwordEditorOpen" class="ssh-password-editor">
+                                    <Input v-model="passwordDraft" type="password" class="w-60" :placeholder="t('settings.sshPasswordPlaceholder')" />
+                                    <Button size="sm" @click="saveProfilePassword">{{ t('settings.sshPasswordSave') }}</Button>
+                                </div>
                             </div>
                         </template>
                         <div class="settings-field">
@@ -661,6 +943,129 @@ async function openConfigDir (): Promise<void> {
                                 {{ t('settings.profileDelete') }}
                             </Button>
                         </div>
+                    </div>
+                </div>
+            </template>
+
+            <template v-else-if="page === 'keys'">
+                <h2>{{ t('settings.keychainPage') }}</h2>
+                <p class="hint">{{ t('settings.keychainHint') }}</p>
+                <p v-if="keysError" class="import-error">{{ keysError }}</p>
+                <div class="keys-layout">
+                    <div class="keys-list">
+                        <p v-if="sshKeys.length === 0" class="hint">{{ t('settings.keychainEmpty') }}</p>
+                        <button
+                            v-for="key in sshKeys"
+                            :key="key.id"
+                            class="profile-item"
+                            @click="selectedKeyId = selectedKeyId === key.id ? null : key.id"
+                        >
+                            <span class="profile-item-head">
+                                <input
+                                    class="key-name-input"
+                                    :value="key.name"
+                                    spellcheck="false"
+                                    @click.stop
+                                    @change="renameKeyEntry(key, ($event.target as HTMLInputElement).value)"
+                                />
+                                <span v-if="key.hasPassphrase" class="value-hint">{{ t('settings.keychainHasPassphrase') }}</span>
+                            </span>
+                            <span class="profile-item-command">{{ key.algorithm }} · {{ key.fingerprint.slice(0, 19) }}…</span>
+                        </button>
+                    </div>
+                    <div class="keys-editor">
+                        <div class="keys-actions">
+                            <Button variant="outline" size="sm" @click="openKeyAddForm">
+                                <Plus :size="14" />
+                                {{ t('settings.keychainAdd') }}
+                            </Button>
+                            <label class="import-label">
+                                <span class="import-trigger">
+                                    <Upload :size="14" />
+                                    {{ t('settings.keychainImportFile') }}
+                                </span>
+                                <input type="file" hidden @change="onKeyFileChosen" />
+                            </label>
+                        </div>
+                        <div v-if="keyAddOpen" class="keys-form key-add-form">
+                            <div class="settings-field">
+                                <Label>{{ t('settings.keychainName') }}</Label>
+                                <Input v-model="keyAddName" class="w-full" :placeholder="t('settings.keychainNamePlaceholder')" />
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.keychainPrivateKey') }} *</Label>
+                                <textarea
+                                    v-model="keyAddPrivatePem"
+                                    class="key-pem-input"
+                                    rows="7"
+                                    spellcheck="false"
+                                    :placeholder="t('settings.keychainPrivatePlaceholder')"
+                                    @input="scheduleKeyInspect"
+                                ></textarea>
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.keychainPassphrase') }} <span class="value-hint">{{ t('settings.keychainPassphraseHint') }}</span></Label>
+                                <Input v-model="keyAddPassphrase" type="password" class="w-60" @input="scheduleKeyInspect" />
+                            </div>
+                            <div v-if="keyAddInspection" class="settings-field">
+                                <Label>{{ t('settings.keychainPublicKey') }}</Label>
+                                <div class="ssh-password-row">
+                                    <span class="value-hint mono key-public">{{ keyAddInspection.publicKey }}</span>
+                                    <Button variant="ghost" size="sm" @click="copyKeyPublic({ publicKey: keyAddInspection.publicKey } as SshKeyMeta)">
+                                        <Copy :size="14" />
+                                    </Button>
+                                </div>
+                                <span class="value-hint">{{ keyAddInspection.algorithm }} · {{ keyAddInspection.fingerprint }}</span>
+                            </div>
+                            <div
+                                class="key-drop-zone"
+                                :class="{ active: keyDropActive }"
+                            >
+                                <span class="value-hint">{{ keyDropFileName || t('settings.keychainDropHint') }}</span>
+                            </div>
+                            <div class="settings-field row">
+                                <Button size="sm" @click="saveKeyEntry">{{ t('settings.keychainSave') }}</Button>
+                                <Button variant="ghost" size="sm" @click="keyAddOpen = false">{{ t('settings.keychainCancel') }}</Button>
+                            </div>
+                            <p v-if="keyAddError" class="import-error">{{ keyAddError }}</p>
+                        </div>
+                        <div class="keys-form">
+                            <p class="keys-form-title">{{ t('settings.keychainGenerate') }}</p>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.keychainAlgorithm') }}</Label>
+                                <Select v-model="keyGenAlgorithm" :options="keyAlgorithmOptions" class="w-44" />
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.keychainName') }}</Label>
+                                <Input v-model="keyGenName" class="w-60" :placeholder="t('settings.keychainNamePlaceholder')" />
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.keychainPassphrase') }} <span class="value-hint">{{ t('settings.keychainPassphraseOptional') }}</span></Label>
+                                <Input v-model="keyGenPassphrase" type="password" class="w-60" />
+                            </div>
+                            <Button variant="outline" size="sm" @click="generateKeyEntry">
+                                <Plus :size="14" />
+                                {{ t('settings.keychainGenerateAction') }}
+                            </Button>
+                        </div>
+                        <template v-if="selectedKey">
+                            <Separator />
+                            <div class="settings-field">
+                                <Label>{{ t('settings.keychainPublicKey') }}</Label>
+                                <div class="ssh-password-row">
+                                    <span class="value-hint mono key-public">{{ selectedKey.publicKey }}</span>
+                                    <Button variant="ghost" size="sm" @click="copyKeyPublic(selectedKey)">
+                                        <Copy :size="14" />
+                                    </Button>
+                                </div>
+                            </div>
+                            <div class="settings-field row profile-actions">
+                                <Button variant="ghost" size="sm" class="profile-delete" @click="deleteKeyEntry(selectedKey)">
+                                    <Trash2 :size="14" />
+                                    {{ t('settings.keychainDelete') }}
+                                </Button>
+                            </div>
+                        </template>
                     </div>
                 </div>
             </template>
@@ -904,6 +1309,108 @@ async function openConfigDir (): Promise<void> {
 
 .hotkey-row {
     max-width: 560px;
+}
+
+.keys-layout {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+}
+
+.keys-list {
+    width: 320px;
+    flex-shrink: 0;
+}
+
+.keys-editor {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 520px;
+}
+
+.keys-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.keys-form {
+    margin-bottom: 16px;
+}
+
+.keys-form-title {
+    margin: 0 0 10px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.key-name-input {
+    min-width: 0;
+    flex: 1 1 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    outline: none;
+}
+
+.key-public {
+    word-break: break-all;
+}
+
+.ssh-password-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.ssh-password-editor {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.key-add-form {
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 14px;
+}
+
+.key-pem-input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--color-input);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-foreground);
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    line-height: 1.5;
+    outline: none;
+    resize: vertical;
+}
+
+.key-pem-input:focus {
+    border-color: var(--color-ring);
+    box-shadow: 0 0 0 1px var(--color-ring);
+}
+
+.key-drop-zone {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 56px;
+    margin-bottom: 12px;
+    border: 1px dashed var(--color-border);
+    border-radius: 8px;
+    transition: all 0.15s;
+}
+
+.key-drop-zone.active {
+    border-color: var(--color-ring);
+    background: var(--color-accent);
 }
 
 .profiles-layout {

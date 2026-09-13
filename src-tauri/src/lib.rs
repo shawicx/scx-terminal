@@ -2,6 +2,7 @@ mod config;
 mod fonts;
 pub mod proc_cwd;
 mod pty;
+mod secrets;
 mod shells;
 mod ssh;
 
@@ -34,6 +35,15 @@ pub fn run() {
             config::config_load,
             config::config_save,
             config::config_dir_path,
+            secrets::key_generate,
+            secrets::key_import,
+            secrets::key_inspect,
+            secrets::key_list,
+            secrets::key_update,
+            secrets::key_delete,
+            secrets::cred_set_password,
+            secrets::cred_remove,
+            secrets::cred_has_password,
             ssh::ssh_connect,
             ssh::ssh_write,
             ssh::ssh_resize,
@@ -43,6 +53,10 @@ pub fn run() {
             dev_log,
         ])
         .setup(|app| {
+            // 敏感数据加密库（SSH 密钥链/档案密码）：初始化失败直接终止——
+            // 无加密库时 SSH 凭据功能全不可用，宁可 fast-fail 也不静默降级
+            let data_dir = app.path().app_data_dir().expect("app data dir unavailable");
+            app.manage(secrets::SecretsState::new(&data_dir));
             // the webview owns keyboard shortcuts (⌘T/⌘W are handled in-app),
             // and removing the menu keeps ⌘W from closing the window
             app.remove_menu()?;

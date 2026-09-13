@@ -14,8 +14,10 @@ export interface SshSessionOptions {
     port: number
     user: string
     auth: string
-    privateKeyPath: string | null
-    password: string | null
+    /** 档案 id（Rust 据此解密已存密码） */
+    profileId: string
+    /** 密钥链条目 id（Rust 据此解密私钥）；null = 不用密钥链 */
+    keyId: string | null
     width: number | null
     height: number | null
 }
@@ -50,12 +52,12 @@ export class SshSession extends BaseSession {
         try {
             await proxy.start({
                 id: `ssh-${nanoid(10)}`,
+                profileId: options.profileId,
                 host: options.host,
                 port: options.port,
                 user: options.user,
                 auth: options.auth,
-                privateKeyPath: options.privateKeyPath,
-                password: options.password,
+                keyId: options.keyId,
                 cols: initialSize?.columns ?? options.width ?? 80,
                 rows: initialSize?.rows ?? options.height ?? 24,
             })
