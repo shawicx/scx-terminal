@@ -35,7 +35,7 @@
 
 ## LocalSession（`localSession.ts`）
 
-**启动参数**：注入环境 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=scx-terminal`；cwd 为 `null`（Rust 侧回退 `$HOME`）；`terminal.loginShell`（默认开）时在 shell 参数后追加 `-l`，加载 `~/.zprofile` 等登录配置（PATH 行为与 Terminal.app/Tabby 一致）；**初始尺寸竞态修复**——`resize$` 是 ReplaySubject，fit 尺寸可能在 spawn 前到达，此时存入 `pendingResize`，`start()` 用它作为 spawn 尺寸（避免 PTY 固定 80×30 导致输入行第 80 列提前换行）；spawn 往返期间新到的 resize 在启动后立即补发。
+**启动参数**：注入环境 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=scx-terminal`（与档案 env 合并）；command/args/env/cwd 由调用方（`TerminalPane`）从配置档案传入，档案 `loginShell` 开启时在参数后追加 `-l`（加载 `~/.zprofile` 等登录配置）；**初始尺寸竞态修复**——`resize$` 是 ReplaySubject，fit 尺寸可能在 spawn 前到达，此时存入 `pendingResize`，`start()` 用它作为 spawn 尺寸（避免 PTY 固定 80×30 导致输入行第 80 列提前换行）；spawn 往返期间新到的 resize 在启动后立即补发。
 
 **输出链**：`pty.subscribe('data')` → 每块先 `ackData(len)`（驱动 Rust 侧背压）再 `emitOutput`。
 

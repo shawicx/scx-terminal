@@ -2,7 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
-import { Terminal, Palette, Keyboard, Info, FolderOpen } from 'lucide-vue-next'
+import { nanoid } from 'nanoid'
+import { Terminal, Palette, Keyboard, Info, FolderOpen, Layers, Plus, Trash2 } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import Label from '@/components/ui/Label.vue'
@@ -10,7 +11,7 @@ import Switch from '@/components/ui/Switch.vue'
 import Slider from '@/components/ui/Slider.vue'
 import Select from '@/components/ui/Select.vue'
 import Separator from '@/components/ui/Separator.vue'
-import { useConfigStore } from '@/stores/config'
+import { useConfigStore, type TerminalProfile } from '@/stores/config'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { builtinColorSchemes } from '@/lib/colorSchemes'
@@ -20,7 +21,7 @@ const { t } = useI18n()
 const config = useConfigStore()
 const store = config.store
 
-const page = ref<'terminal' | 'appearance' | 'hotkeys' | 'about'>('terminal')
+const page = ref<'terminal' | 'profiles' | 'appearance' | 'hotkeys' | 'about'>('profiles')
 
 const { sortedCommands } = useCommands()
 const hotkeyCommands = computed(() => sortedCommands.value.filter(command => command.hotkeyId))
@@ -62,11 +63,122 @@ onMounted(() => {
 })
 
 const pages = computed(() => [
+    { id: 'profiles' as const, label: t('settings.profiles'), icon: Layers },
     { id: 'terminal' as const, label: t('settings.terminal'), icon: Terminal },
     { id: 'appearance' as const, label: t('settings.appearance'), icon: Palette },
     { id: 'hotkeys' as const, label: t('settings.hotkeys'), icon: Keyboard },
     { id: 'about' as const, label: t('settings.about'), icon: Info },
 ])
+
+// ---- profiles page ----
+const profiles = computed(() => store.profiles)
+const selectedProfileId = ref<string | null>(null)
+const selectedProfile = computed<TerminalProfile | null>(() =>
+    profiles.value.find(p => p.id === selectedProfileId.value)
+    ?? profiles.value[0]
+    ?? null)
+
+const argsText = computed({
+    get: () => selectedProfile.value?.args.join(' ') ?? '',
+    set: (value: string) => {
+        const profile = selectedProfile.value
+        if (profile) {
+            profile.args = value.split(/\s+/).filter(Boolean)
+        }
+    },
+})
+
+const cwdModel = computed({
+    get: () => selectedProfile.value?.cwd ?? '',
+    set: (value: string) => {
+        const profile = selectedProfile.value
+        if (profile) {
+            profile.cwd = value.trim() || null
+        }
+    },
+})
+
+const envText = computed({
+    get: () => Object.entries(selectedProfile.value?.env ?? {}).map(([key, value]) => `${key}=${value}`).join('\n'),
+    set: (value: string) => {
+        const profile = selectedProfile.value
+        if (!profile) {
+            return
+        }
+        const env: Record<string, string> = {}
+        for (const line of value.split('\n')) {
+            const trimmed = line.trim()
+            const eq = trimmed.indexOf('=')
+            if (eq > 0) {
+                env[trimmed.slice(0, eq)] = trimmed.slice(eq + 1)
+            }
+        }
+        profile.env = env
+    },
+})
+
+const profileColorSchemeOptions = computed(() => [
+    { value: '', label: t('settings.profileColorSchemeGlobal') },
+    { value: 'auto', label: t('settings.colorSchemeAuto') },
+    ...builtinColorSchemes.map(scheme => ({ value: scheme.name, label: scheme.name })),
+])
+
+const profileColorSchemeModel = computed({
+    get: () => selectedProfile.value?.colorScheme ?? '',
+    set: (value: string) => {
+        const profile = selectedProfile.value
+        if (profile) {
+            profile.colorScheme = value || null
+        }
+    },
+})
+
+/**
+ * @description 新建配置档案（以当前默认档案的命令与登录 shell 设置为模板）并选中
+ * @returns void
+ *
+ * @example createProfile() // 列表新增并选中新档案
+ *
+ */
+function createProfile (): void {
+    const template = config.defaultProfile()
+    const profile: TerminalProfile = {
+        id: `local-${nanoid(8)}`,
+        type: 'local',
+        name: `${t('settings.profiles')} ${store.profiles.length + 1}`,
+        command: template?.command ?? '/bin/zsh',
+        args: [],
+        env: {},
+        cwd: null,
+        colorScheme: null,
+        loginShell: template?.loginShell ?? true,
+        isDefault: false,
+    }
+    store.profiles.push(profile)
+    selectedProfileId.value = profile.id
+}
+
+/**
+ * @description 删除配置档案；删除的是默认档案时把第一个剩余档案提升为默认
+ * @param id 档案 id
+ * @returns void
+ *
+ * @example deleteProfile('local-abc123')
+ *
+ */
+function deleteProfile (id: string): void {
+    const index = store.profiles.findIndex(p => p.id === id)
+    if (index === -1) {
+        return
+    }
+    const [removed] = store.profiles.splice(index, 1)
+    if (removed?.isDefault && store.profiles.length > 0) {
+        config.setDefaultProfile(store.profiles[0]!.id)
+    }
+    if (selectedProfileId.value === id) {
+        selectedProfileId.value = store.profiles[0]?.id ?? null
+    }
+}
 
 const cursorOptions = computed(() => [
     { value: 'block', label: t('settings.cursorStyleBlock') },
@@ -182,10 +294,6 @@ function openConfigDir (): void {
                     <Slider v-model="store.terminal.minimumContrastRatio" :min="1" :max="7" :step="0.5" />
                 </div>
                 <Separator />
-                <div class="settings-field row">
-                    <Label>{{ t('settings.loginShell') }}</Label>
-                    <Switch v-model="store.terminal.loginShell" />
-                </div>
                 <p class="hint">{{ t('settings.middlewareHint') }}</p>
                 <div class="settings-field">
                     <Label>{{ t('settings.backspace') }}</Label>
@@ -207,6 +315,76 @@ function openConfigDir (): void {
                 <div class="settings-field row">
                     <Label>{{ t('settings.boldInBright') }}</Label>
                     <Switch v-model="store.terminal.drawBoldTextInBrightColors" />
+                </div>
+            </template>
+
+            <template v-else-if="page === 'profiles'">
+                <h2>{{ t('settings.profiles') }}</h2>
+                <div class="profiles-layout">
+                    <div class="profiles-list">
+                        <button class="profile-new-button" @click="createProfile">
+                            <Plus :size="14" />
+                            <span>{{ t('settings.profileNew') }}</span>
+                        </button>
+                        <button
+                            v-for="p in profiles"
+                            :key="p.id"
+                            class="profile-item"
+                            :class="{ active: p.id === selectedProfile?.id }"
+                            @click="selectedProfileId = p.id"
+                        >
+                            <span class="profile-item-head">
+                                <span class="profile-item-name">{{ p.name }}</span>
+                                <span v-if="p.isDefault" class="profile-default-badge">{{ t('tab.defaultProfile') }}</span>
+                            </span>
+                            <span class="profile-item-command">{{ p.command }}</span>
+                        </button>
+                    </div>
+                    <div v-if="selectedProfile" class="profile-editor">
+                        <div class="settings-field">
+                            <Label>{{ t('settings.profileName') }}</Label>
+                            <Input v-model="selectedProfile.name" class="w-60" />
+                        </div>
+                        <div class="settings-field">
+                            <Label>{{ t('settings.profileCommand') }}</Label>
+                            <Input v-model="selectedProfile.command" class="w-60" />
+                        </div>
+                        <div class="settings-field">
+                            <Label>{{ t('settings.profileArgs') }} <span class="value-hint">{{ t('settings.profileArgsHint') }}</span></Label>
+                            <Input v-model="argsText" class="w-60" />
+                        </div>
+                        <div class="settings-field">
+                            <Label>{{ t('settings.profileCwd') }}</Label>
+                            <Input v-model="cwdModel" class="w-60" />
+                        </div>
+                        <div class="settings-field">
+                            <Label>{{ t('settings.profileEnv') }} <span class="value-hint">{{ t('settings.profileEnvHint') }}</span></Label>
+                            <textarea v-model="envText" class="profile-env" rows="4" spellcheck="false"></textarea>
+                        </div>
+                        <div class="settings-field">
+                            <Label>{{ t('settings.profileColorScheme') }}</Label>
+                            <Select v-model="profileColorSchemeModel" :options="profileColorSchemeOptions" class="w-44" />
+                        </div>
+                        <div class="settings-field row">
+                            <Label>{{ t('settings.profileLoginShell') }}</Label>
+                            <Switch v-model="selectedProfile.loginShell" />
+                        </div>
+                        <Separator />
+                        <div class="settings-field row profile-actions">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                :disabled="selectedProfile.isDefault"
+                                @click="config.setDefaultProfile(selectedProfile.id)"
+                            >
+                                {{ t('settings.profileSetDefault') }}
+                            </Button>
+                            <Button variant="ghost" size="sm" class="profile-delete" @click="deleteProfile(selectedProfile.id)">
+                                <Trash2 :size="14" />
+                                {{ t('settings.profileDelete') }}
+                            </Button>
+                        </div>
+                    </div>
                 </div>
             </template>
 
@@ -352,6 +530,126 @@ function openConfigDir (): void {
 
 .hotkey-row {
     max-width: 560px;
+}
+
+.profiles-layout {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+}
+
+.profiles-list {
+    width: 220px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.profile-new-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    margin-bottom: 6px;
+    border: 1px dashed var(--color-border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-muted-foreground);
+    font-size: 13px;
+    cursor: default;
+    transition: all 0.25s ease;
+}
+
+.profile-new-button:hover {
+    color: var(--color-foreground);
+    border-color: var(--color-ring);
+}
+
+.profile-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 7px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    text-align: left;
+    cursor: default;
+    transition: all 0.25s ease;
+}
+
+.profile-item:hover {
+    background: var(--color-accent);
+}
+
+.profile-item.active {
+    background: var(--color-accent);
+    color: var(--color-foreground);
+}
+
+.profile-item-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.profile-item-name {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.profile-default-badge {
+    flex-shrink: 0;
+    padding: 0 5px;
+    border-radius: 4px;
+    background: var(--color-primary);
+    color: var(--color-primary-foreground);
+    font-size: 10px;
+    line-height: 16px;
+}
+
+.profile-item-command {
+    font-size: 11px;
+    color: var(--color-muted-foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.profile-editor {
+    flex: 1;
+    min-width: 0;
+    max-width: 480px;
+}
+
+.profile-env {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--color-input);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-foreground);
+    font-family: monospace;
+    font-size: 12px;
+    resize: vertical;
+    outline: none;
+}
+
+.profile-env:focus-visible {
+    border-color: var(--color-ring);
+    box-shadow: 0 0 0 1px var(--color-ring);
+}
+
+.profile-actions {
+    gap: 8px;
+    justify-content: flex-start;
+}
+
+.profile-delete {
+    color: var(--color-destructive);
 }
 
 .hotkey-binding {

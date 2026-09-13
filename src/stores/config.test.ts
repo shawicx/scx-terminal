@@ -7,8 +7,9 @@ vi.mock('@/lib/platform', () => ({
     platform: 'macos' as const,
 }))
 
-import { deepMerge, defaultHotkeys } from './config'
+import { deepMerge, defaultHotkeys, profilesFromShells, fallbackProfile } from './config'
 import { getKeyName, metaKeyName, altKeyName, normalizeHotkeysConfig } from '@/lib/hotkeys/hotkeys'
+import type { Shell } from '@/services/shells'
 
 /** 模拟按下带修饰键的物理按键，返回 getKeyName 产出的键名 */
 function pressedKeyName (key: string, code?: string): string {
@@ -63,5 +64,32 @@ describe('default hotkeys', () => {
 
     it('defaults stay normalized (idempotent under normalizeHotkeysConfig)', () => {
         expect(normalizeHotkeysConfig(defaultHotkeys())).toEqual(defaultHotkeys())
+    })
+})
+
+describe('profiles from shells', () => {
+    const shells: Shell[] = [
+        { id: 'zsh', name: 'zsh', command: '/bin/zsh', args: [], default: true },
+        { id: 'bash', name: 'bash', command: '/bin/bash', args: [], default: false },
+    ]
+
+    it('creates one local profile per shell with a unique id', () => {
+        const profiles = profilesFromShells(shells, true)
+        expect(profiles).toHaveLength(2)
+        expect(profiles.every(p => p.type === 'local')).toBe(true)
+        expect(new Set(profiles.map(p => p.id)).size).toBe(2)
+        expect(profiles[0]).toMatchObject({ name: 'zsh', command: '/bin/zsh', loginShell: true, isDefault: true })
+        expect(profiles[1]).toMatchObject({ name: 'bash', command: '/bin/bash', isDefault: false })
+    })
+
+    it('marks only the first default shell as the default profile', () => {
+        const double = [...shells, { ...shells[0]!, id: 'zsh2' }]
+        const profiles = profilesFromShells(double, false)
+        expect(profiles.filter(p => p.isDefault)).toHaveLength(1)
+        expect(profiles[0]!.loginShell).toBe(false)
+    })
+
+    it('provides a /bin/zsh fallback profile', () => {
+        expect(fallbackProfile()).toMatchObject({ type: 'local', command: '/bin/zsh', loginShell: true, isDefault: true })
     })
 })

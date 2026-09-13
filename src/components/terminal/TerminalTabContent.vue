@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import SplitContainer from '@/components/split/SplitContainer.vue'
 import {
     listLeaves,
@@ -10,18 +10,29 @@ import {
     type SplitNode,
 } from '@/components/split/splitTree'
 import { useTabsStore } from '@/stores/tabs'
+import { fallbackProfile, useConfigStore, type TerminalProfile } from '@/stores/config'
 import { terminalTabApi } from '@/services/terminalTabsApi'
 
 const props = defineProps<{
     tabId: string
     tabActive: boolean
+    profileId?: string
 }>()
 
 const tabs = useTabsStore()
+const config = useConfigStore()
 const tree = ref<SplitNode>(makeLeaf())
 const activeLeafId = ref(tree.value.id)
 const rootContainer = ref<InstanceType<typeof SplitContainer>>()
 const paneTitles = reactive(new Map<string, string>())
+
+// 本标签使用的配置档案：profileId 精确匹配 → 默认档案 → 兜底档案；
+// 档案被编辑后此处响应式更新，新分屏窗格取新值（已运行会话不受影响）
+const profile = computed<TerminalProfile>(() => {
+    return config.store.profiles.find(p => p.id === props.profileId)
+        ?? config.defaultProfile()
+        ?? fallbackProfile()
+})
 
 function applyActiveTitle () {
     const title = paneTitles.get(activeLeafId.value)
@@ -109,6 +120,7 @@ onBeforeUnmount(() => {
             :node="tree"
             :active-leaf-id="activeLeafId"
             :tab-active="tabActive"
+            :profile="profile"
             @leaf-activated="id => (activeLeafId = id)"
             @leaf-title="setPaneTitle"
             @pane-closed="closePane"

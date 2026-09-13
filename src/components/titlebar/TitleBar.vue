@@ -5,10 +5,13 @@ import { Plus, Settings, X } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { platform } from '@/lib/platform'
 import { useTabsStore, type Tab } from '@/stores/tabs'
+import { useConfigStore } from '@/stores/config'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
+import DropdownMenu from '@/components/ui/DropdownMenu.vue'
 
 const { t } = useI18n()
 const store = useTabsStore()
+const config = useConfigStore()
 const appWindow = getCurrentWindow()
 
 const dragOverIndex = ref<number | null>(null)
@@ -26,6 +29,28 @@ const TAB_COLORS = [
     { name: 'purple', color: '#c678dd' },
     { name: 'gray', color: '#7f848e' },
 ] as const
+
+/**
+ * @description 「+」按钮的档案菜单项：列出全部 local 档案，默认档案带标记
+ * @returns ContextMenuItemSpec[] 菜单项列表
+ *
+ */
+const newTabMenuItems = computed<ContextMenuItemSpec[]>(() => config.store.profiles
+    .filter(profile => profile.type === 'local')
+    .map(profile => ({
+        key: profile.id,
+        label: profile.isDefault ? `${profile.name} · ${t('tab.defaultProfile')}` : profile.name,
+    })))
+
+/**
+ * @description 处理「+」档案菜单选择：按档案开新标签
+ * @param key 档案 id
+ * @returns void
+ *
+ */
+function onNewTabMenuSelect (key: string): void {
+    store.openTerminalTab(key)
+}
 
 function toggleMaximize () {
     void appWindow.toggleMaximize()
@@ -221,9 +246,11 @@ function onDragEnd () {
                 </div>
             </ContextMenu>
 
-            <button class="new-tab-button" title="New Tab" @click="store.openTerminalTab()">
-                <Plus :size="14" />
-            </button>
+            <DropdownMenu :items="newTabMenuItems" @select="onNewTabMenuSelect">
+                <button class="new-tab-button" :title="t('commands.newTab')">
+                    <Plus :size="14" />
+                </button>
+            </DropdownMenu>
         </div>
 
         <div class="drag-area" data-tauri-drag-region @dblclick.stop="toggleMaximize"></div>

@@ -14,13 +14,15 @@
 
 ## 标签模型
 
-`Tab = { id: nanoid(), type: 'terminal' | 'settings', title, manualTitle?, color? }`（`src/stores/tabs.ts`）。要点：
+`Tab = { id: nanoid(), type: 'terminal' | 'settings', title, manualTitle?, color?, profileId? }`（`src/stores/tabs.ts`）。要点：
 
+- `openTerminalTab(profileId?)`：绑定所用配置档案（缺省 = 默认档案），初始标题为档案名（OSC 上报后覆盖）。
 - `openSettingsTab()` 是单例（已有设置标签则激活）。
 - `closeTab()` 关闭最后一个标签时自动开一个新终端标签；`closeOtherTabs(id)` 只保留指定标签。
-- 所有标签的 DOM 常驻（`App.vue` 用 `v-show`），后台会话不中断——对标 Tabby 行为。
+- 所有标签的 DOM 常驻（`App.vue` 用 `v-show`），后台会话不中断——对标 Tabby 行为。`App.vue` 以 `:profile-id` 传给 `TerminalTabContent`，其内部解析档案对象（精确匹配 → 默认档案 → `fallbackProfile()` 兜底）。
 - 标签标题来源：shell OSC 0/2 → `frontend.title$` → `TerminalTabContent.setPaneTitle` → `tabs.setTitle`；显示优先级为 `manualTitle`（右键"重命名"，行内输入，Enter/失焦提交、Esc 取消、空串清除）> `title`（OSC 上报）> 回退文案。`setTitle` 不会覆盖 `manualTitle`。
 - 标签右键菜单（TitleBar 内 `ContextMenu`）：重命名 / 关闭标签页 / 关闭其他标签页 / 颜色标记（7 色预设色板小圆点，同色再点清除；`Tab.color` 在标签上渲染为色点）。
+- 标题栏「+」按钮为档案下拉菜单（`ui/DropdownMenu.vue`）：列出全部 local 档案（默认档案带标记），点击按该档案开新标签。
 
 ## 布局层级（曾出过 0 宽度坍塌 bug，改动前先读）
 

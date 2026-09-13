@@ -13,7 +13,7 @@ import { hotkeys } from '@/services/hotkeysSingleton'
 
 const store = useTabsStore()
 const config = useConfigStore()
-const { registerDefaults, bindHotkeys } = useCommands()
+const { registerDefaults, registerProfileCommands, bindHotkeys } = useCommands()
 const { locale } = useI18n()
 
 function isEditableTarget (target: EventTarget | null): boolean {
@@ -42,6 +42,7 @@ onMounted(() => {
     }
 
     registerDefaults()
+    registerProfileCommands(config.store.profiles)
     bindHotkeys()
 
     document.addEventListener('keydown', onKeydown)
@@ -52,6 +53,11 @@ onBeforeUnmount(() => {
     document.removeEventListener('keydown', onKeydown)
     document.removeEventListener('keyup', onKeyup)
 })
+
+// 档案增删改后同步命令面板里的"按档案新建标签"命令
+watch(() => config.store.profiles, profiles => {
+    registerProfileCommands(profiles)
+}, { deep: true })
 
 // follow the configured UI language ('auto' follows the OS)
 watch(() => config.store.appearance.language, language => {
@@ -77,6 +83,7 @@ watch(() => config.store.appearance.language, language => {
                     v-if="tab.type === 'terminal'"
                     :tab-id="tab.id"
                     :tab-active="tab.id === store.activeId"
+                    :profile-id="tab.profileId"
                 />
                 <SettingsView v-else />
             </div>

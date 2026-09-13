@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { nanoid } from 'nanoid'
+import { useConfigStore } from '@/stores/config'
 
 export type TabType = 'terminal' | 'settings'
 
@@ -11,6 +12,8 @@ export interface Tab {
     manualTitle?: string
     /** 标签颜色标记（CSS 颜色值） */
     color?: string
+    /** 开标签所用配置档案；缺省 = 默认档案 */
+    profileId?: string
 }
 
 /**
@@ -28,11 +31,16 @@ export const useTabsStore = defineStore('tabs', {
         },
     },
     actions: {
-        openTerminalTab (): Tab {
+        openTerminalTab (profileId?: string): Tab {
+            const config = useConfigStore()
+            const profile = profileId
+                ? config.store.profiles.find(p => p.id === profileId)
+                : (config.defaultProfile() ?? undefined)
             const tab: Tab = {
                 id: nanoid(),
                 type: 'terminal',
-                title: '',
+                title: profile?.name ?? '',
+                profileId: profile?.id,
             }
             this.tabs.push(tab)
             this.activeId = tab.id

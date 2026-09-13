@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTabsStore } from '@/stores/tabs'
-import { useConfigStore } from '@/stores/config'
+import { useConfigStore, type TerminalProfile } from '@/stores/config'
 import { terminalTabApi } from './terminalTabsApi'
 import { hotkeys } from './hotkeysSingleton'
 import { defaultDarkColorScheme, defaultLightColorScheme } from '@/lib/colorSchemes'
@@ -26,6 +26,27 @@ export function useCommands () {
     function register (command: Command): void {
         if (!commands.value.some(c => c.id === command.id)) {
             commands.value.push(command)
+        }
+    }
+
+    const PROFILE_COMMAND_PREFIX = 'new-tab-profile:'
+
+    /**
+     * 同步式注册"按档案新建标签"命令：先移除全部旧命令再按当前档案重建
+     * （档案增删改名后由 App.vue 的 watch 调用）
+     */
+    function registerProfileCommands (profiles: TerminalProfile[]): void {
+        commands.value = commands.value.filter(c => !c.id.startsWith(PROFILE_COMMAND_PREFIX))
+        for (const profile of profiles) {
+            if (profile.type !== 'local') {
+                continue
+            }
+            register({
+                id: `${PROFILE_COMMAND_PREFIX}${profile.id}`,
+                group: 'tab',
+                label: () => t('commands.newTabWithProfile', { name: profile.name }),
+                handler: () => tabs.openTerminalTab(profile.id),
+            })
         }
     }
 
@@ -154,5 +175,5 @@ export function useCommands () {
             groups.indexOf(a.group) - groups.indexOf(b.group) || a.id.localeCompare(b.id))
     })
 
-    return { register, registerDefaults, dispatchHotkey, bindHotkeys, sortedCommands, commands }
+    return { register, registerDefaults, registerProfileCommands, dispatchHotkey, bindHotkeys, sortedCommands, commands }
 }

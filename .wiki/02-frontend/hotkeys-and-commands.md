@@ -24,9 +24,11 @@
 
 ## 命令注册表（`src/services/commands.ts`）
 
-命令对象 `{ id, group, label(): string, hotkeyId?, enabled?, handler() }`；`useCommands()` 提供 `register/registerDefaults/bindHotkeys/dispatchHotkey/sortedCommands`。
+命令对象 `{ id, group, label(): string, hotkeyId?, enabled?, handler() }`；`useCommands()` 提供 `register/registerDefaults/registerProfileCommands/bindHotkeys/dispatchHotkey/sortedCommands`。
 
 默认命令（`registerDefaults`）：`new-tab`、`close-tab`、`next-tab`、`prev-tab`、`split-right`、`split-down`、`close-pane`、`pane-forward`、`pane-back`、`copy`、`paste`、`clear`、`find`、`command-palette`、`open-settings`、`toggle-color-scheme`。标签/窗格类命令经 `terminalTabApi.current`（见 [app-shell-and-tabs](app-shell-and-tabs.md)）驱动当前激活的终端标签；`toggle-color-scheme` 在两套默认配色间切换。
+
+`registerProfileCommands(profiles)`（M2）：同步式为每个 local 档案注册 `new-tab-profile:{id}` 命令（label「新建标签页：{档案名}」，无默认热键）；`App.vue` 在启动与 `config.store.profiles` 变化时调用（先清旧再重建）。
 
 `bindHotkeys()` 订阅 `hotkeys.hotkey$` → `dispatchHotkey(id)`。
 

@@ -8,7 +8,8 @@ scx-terminal 是一个 macOS 桌面终端应用（Tauri v2 + Vue 3 + @xterm/xter
 
 | 功能 | 状态 | 关键代码 |
 | --- | --- | --- |
-| 本地终端（zsh/bash 等，取自 `/etc/shells`），默认以登录 shell（`-l`）启动 | 可用 | `src/lib/sessions/localSession.ts`、`src-tauri/src/pty.rs` |
+| 本地终端（配置档案驱动；默认以登录 shell `-l` 启动） | 可用 | `src/lib/sessions/localSession.ts`、`src/stores/config.ts` |
+| Profiles 配置档案：`profiles[]`（`type: 'local'` 判别字段预留 SSH）、首次从 /etc/shells 自动生成、设置页 CRUD、标签栏「+」下拉与命令面板按档案开标签、按档案专属配色 | 可用 | `src/stores/config.ts`、`src/components/settings/SettingsView.vue`、`src/components/titlebar/TitleBar.vue`、`src/services/commands.ts` |
 | 多标签（后台标签保持会话运行，`v-show` 不卸载；中键关闭、拖拽排序） | 可用 | `src/stores/tabs.ts`、`src/App.vue` |
 | 标签右键菜单：重命名（手动标题优先于 OSC 上报）、关闭其他、颜色标记 | 可用 | `src/components/titlebar/TitleBar.vue`、`src/components/ui/ContextMenu.vue` |
 | 分屏（水平/垂直、拖拽调整比例、键盘导航） | 可用 | `src/components/split/` |
@@ -40,7 +41,8 @@ scx-terminal 是一个 macOS 桌面终端应用（Tauri v2 + Vue 3 + @xterm/xter
 - `terminal.fontWeight` / `fontWeightBold` / `wordSeparator` / `drawBoldTextInBrightColors` 由 xterm 消费；后两者已上设置 UI，字重两项仍无 UI。
 - cwd 跟踪管道（`BaseSession.reportedCWD` → `getWorkingDirectory()`）无调用方；新标签不会继承工作目录（需要 shell 集成脚本上报才有数据源）。
 - 自定义配色编辑器、iTerm2 配色导入、字体列表选择器未实现（当前仅内置配色 + 下拉选择、字体为自由文本输入）。
-- Profiles 多配置档案（多 shell/命令档案、按档案新建标签）未实现——`LocalSession.start` 已支持 command/args/env/cwd，缺存储与 UI；为 SSH 预留 `type` 判别字段扩展点。
+- SSH 等远程档案未实现——Profiles 框架已按 `type` 判别字段预留扩展点，后续接入 `type: 'ssh'`。
+- `services/shells.ts` 的 `defaultShell()` 已无调用方（档案化后由 config 的 `defaultProfile()` 取代）；`listShells()` 仍被首次档案生成使用。`terminal.loginShell` 配置键保留作为新档案生成的种子值，运行期生效项为各档案的 `loginShell` 字段。
 - 窗口 vibrancy/透明已写代码但被 `#[cfg(any())]` 编译关闭（`src-tauri/src/lib.rs`，WKWebView 下渲染空白，待主题阶段重试）。
 - 终端粘贴仍固定做 `\r\n → \n` 归一化（`TerminalPane.vue`），叠加在 `inputNewlines` 转换之前，防多行粘贴被 shell 逐行执行。
 

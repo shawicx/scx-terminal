@@ -5,7 +5,8 @@ import { ChevronUp, ChevronDown, X } from 'lucide-vue-next'
 import { LocalSession } from '@/lib/sessions/localSession'
 import { XTermWebGLFrontend } from '@/lib/frontends/xtermFrontend'
 import { createFrontendContext, readClipboardText, writeClipboardText } from '@/lib/frontendContext'
-import { defaultShell } from '@/services/shells'
+import { resolveColorScheme } from '@/lib/colorSchemes'
+import type { TerminalProfile } from '@/stores/config'
 import { encodeUTF8 } from '@/lib/utils/bytes'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
 import { useConfigStore } from '@/stores/config'
@@ -13,6 +14,7 @@ import { useThemeStore } from '@/stores/theme'
 
 const props = defineProps<{
     active: boolean
+    profile: TerminalProfile
 }>()
 
 const emit = defineEmits<{
@@ -165,14 +167,20 @@ function onMenuSelect (key: string): void {
 
 // live-apply config changes (font, colors, scrollback, …)
 const configStore = useConfigStore()
+
+// 档案专属配色：档案指定配色名时解析后经 terminalColorScheme 通道下发，null 跟随全局
+const paneColorScheme = computed(() => props.profile.colorScheme
+    ? resolveColorScheme(props.profile.colorScheme, window.matchMedia('(prefers-color-scheme: light)').matches)
+    : null)
+
 watch(() => configStore.store, () => {
-    frontend?.configure({ terminalColorScheme: null })
+    frontend?.configure({ terminalColorScheme: paneColorScheme.value })
 }, { deep: true })
 
 // re-apply the terminal palette when the app theme (or OS scheme) changes
 const themeStore = useThemeStore()
 watch(() => themeStore.epoch, () => {
-    frontend?.configure({ terminalColorScheme: null })
+    frontend?.configure({ terminalColorScheme: paneColorScheme.value })
 })
 
 const searchNoResults = computed(() => searchOpen.value && !!searchQuery.value && searchResultCount.value === 0)
@@ -188,9 +196,9 @@ onMounted(async () => {
             outputNewlines: configStore.store.terminal.outputNewlines,
         })
         frontend = new XTermWebGLFrontend(context)
-        frontend.configure({ terminalColorScheme: null })
+        frontend.configure({ terminalColorScheme: paneColorScheme.value })
 
-        await frontend.attach(resolveHostElement(), { terminalColorScheme: null })
+        await frontend.attach(resolveHostElement(), { terminalColorScheme: paneColorScheme.value })
         if (disposed) {
             return
         }
@@ -202,17 +210,15 @@ onMounted(async () => {
         frontend.bell$.subscribe(() => frontend!.visualBell())
         session.destroyed$.subscribe(() => emit('closed'))
 
-        const shell = await defaultShell()
         if (disposed) {
             return
         }
-        // 登录 shell（-l）：加载 ~/.zprofile 等登录配置，PATH 行为与 Terminal.app 一致
-        const loginShell = configStore.store.terminal.loginShell
+        // 启动参数全部来自配置档案；登录 shell（-l）加载 ~/.zprofile 等登录配置
         await session.start({
-            command: shell.command,
-            args: loginShell ? [...shell.args, '-l'] : shell.args,
-            env: {},
-            cwd: null,
+            command: props.profile.command,
+            args: props.profile.loginShell ? [...props.profile.args, '-l'] : props.profile.args,
+            env: { ...props.profile.env },
+            cwd: props.profile.cwd,
             width: null,
             height: null,
         })

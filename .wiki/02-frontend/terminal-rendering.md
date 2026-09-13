@@ -47,9 +47,9 @@ xterm 的 `write` 是异步分批渲染的；前端维护发送/确认计数做�
 
 `onMounted`（整体 try/catch，失败在面板上显示错误信息而不是静默空白）：
 
-1. `new LocalSession()` + `new XTermWebGLFrontend(createFrontendContext())` + `configure({ terminalColorScheme: null })`。
-2. `await frontend.attach(host)` → 依次接线：`input$ → session.feedFromTerminal`、`session.output$ → frontend.write`、`resize$ → session.resize`、`title$ → emit('title')`、`bell$ → visualBell`、`destroyed$ → emit('closed')`。
-3. `await defaultShell()`（见 [03-backend/commands-and-config](../03-backend/commands-and-config.md)）→ `session.start({ command, args, env: {}, cwd: null, width/height: null })`。
+1. `new LocalSession({...全局中间件配置})` + `new XTermWebGLFrontend(createFrontendContext())` + `configure({ terminalColorScheme: 档案配色 })`（档案 `colorScheme` 非空时 `resolveColorScheme` 后下发，null 跟随全局）。
+2. `await frontend.attach(host)`（host 经 `resolveHostElement()` 从窗格根元素查询——不能用模板 ref，reka-ui `as-child` 触发器会删除插槽根元素的 ref）→ 依次接线：`input$ → session.feedFromTerminal`、`session.output$ → frontend.write`、`resize$ → session.resize`、`title$ → emit('title')`、`bell$ → visualBell`、`destroyed$ → emit('closed')`。
+3. `session.start({ command/args/env/cwd 全部来自 props.profile（TerminalTabContent 解析：profileId → 默认档案 → fallbackProfile），loginShell 时追加 -l })`。
 4. `session.releaseInitialDataBuffer()` 放行首屏 → 活动叶 `focus()`。
 
 `props.active` 变化（标签切换回来）时 `reactivate() + focus()`；卸载时销毁 session 与 frontend。搜索条（⌘F）是覆盖在终端上的浮层，输入不进 shell。

@@ -3,11 +3,13 @@ import { ref } from 'vue'
 import TerminalPane from '@/components/terminal/TerminalPane.vue'
 import SplitSpanner from './SplitSpanner.vue'
 import { resizeChildren, type SplitNode } from './splitTree'
+import type { TerminalProfile } from '@/stores/config'
 
 const props = defineProps<{
     node: SplitNode
     activeLeafId: string
     tabActive: boolean
+    profile: TerminalProfile
 }>()
 
 const emit = defineEmits<{
@@ -82,6 +84,7 @@ function onSpannerResize (index: number, delta: number) {
         <TerminalPane
             :ref="el => registerPane(node.id, el)"
             :active="tabActive && node.id === activeLeafId"
+            :profile="profile"
             @title="title => emit('leafTitle', node.id, title)"
             @closed="emit('paneClosed', node.id)"
             @request-split="direction => emit('leafSplit', node.id, direction)"
@@ -99,6 +102,7 @@ function onSpannerResize (index: number, delta: number) {
                 :node="child"
                 :active-leaf-id="activeLeafId"
                 :tab-active="tabActive"
+                :profile="profile"
                 class="split-child"
                 :style="{ flexGrow: node.ratios[index] ?? 1, flexBasis: 0 }"
                 @leaf-activated="id => emit('leafActivated', id)"

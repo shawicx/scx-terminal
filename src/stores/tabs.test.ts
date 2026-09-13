@@ -1,6 +1,23 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useTabsStore } from './tabs'
+import { useConfigStore, type TerminalProfile } from './config'
+
+function localProfile (overrides: Partial<TerminalProfile> = {}): TerminalProfile {
+    return {
+        id: 'local-test',
+        type: 'local',
+        name: 'Test Shell',
+        command: '/bin/zsh',
+        args: [],
+        env: {},
+        cwd: null,
+        colorScheme: null,
+        loginShell: true,
+        isDefault: false,
+        ...overrides,
+    }
+}
 
 describe('tabs store', () => {
     beforeEach(() => {
@@ -88,5 +105,24 @@ describe('tabs store', () => {
         expect(store.tabs.map(t => t.id)).toEqual([t2.id])
         expect(store.activeId).toBe(t2.id)
         expect(t1.id).not.toBe(t3.id)
+    })
+
+    it('opens tabs bound to a profile and falls back to the default profile', () => {
+        const config = useConfigStore()
+        const bash = localProfile({ id: 'local-bash', name: 'bash', command: '/bin/bash', isDefault: true })
+        config.store.profiles = [localProfile({ id: 'local-zsh' }), bash]
+
+        const store = useTabsStore()
+        const t1 = store.openTerminalTab()
+        expect(t1.profileId).toBe('local-bash')       // 缺省 = 默认档案
+        expect(t1.title).toBe('bash')                  // 初始标题为档案名
+
+        const t2 = store.openTerminalTab('local-zsh')
+        expect(t2.profileId).toBe('local-zsh')
+        expect(t2.title).toBe('Test Shell')
+
+        // 未知档案 id：不绑定，仍可打开（窗格侧回退默认档案）
+        const t3 = store.openTerminalTab('local-missing')
+        expect(t3.profileId).toBeUndefined()
     })
 })
