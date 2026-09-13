@@ -2,8 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
+import { openPath } from '@tauri-apps/plugin-opener'
 import { nanoid } from 'nanoid'
-import { Terminal, Palette, Keyboard, Info, FolderOpen, Layers, Plus, Trash2 } from 'lucide-vue-next'
+import { Terminal, Palette, Keyboard, Info, FolderOpen, Layers, Plus, Trash2, Upload } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import Label from '@/components/ui/Label.vue'
@@ -11,10 +12,13 @@ import Switch from '@/components/ui/Switch.vue'
 import Slider from '@/components/ui/Slider.vue'
 import Select from '@/components/ui/Select.vue'
 import Separator from '@/components/ui/Separator.vue'
-import { useConfigStore, type TerminalProfile } from '@/stores/config'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import { useConfigStore, defaultFirstProfiles, type TerminalProfile } from '@/stores/config'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
-import { builtinColorSchemes } from '@/lib/colorSchemes'
+import { builtinColorSchemes, defaultDarkColorScheme, type TerminalColorScheme } from '@/lib/colorSchemes'
+import { parseItermColorsFile } from '@/lib/itermColors'
+import { listSystemFonts } from '@/services/fonts'
 import type { NewlineMode } from '@/lib/middleware/streamProcessing'
 
 const { t } = useI18n()
@@ -71,7 +75,7 @@ const pages = computed(() => [
 ])
 
 // ---- profiles page ----
-const profiles = computed(() => store.profiles)
+const profiles = computed(() => defaultFirstProfiles(store.profiles))
 const selectedProfileId = ref<string | null>(null)
 const selectedProfile = computed<TerminalProfile | null>(() =>
     profiles.value.find(p => p.id === selectedProfileId.value)
@@ -173,10 +177,10 @@ function deleteProfile (id: string): void {
     }
     const [removed] = store.profiles.splice(index, 1)
     if (removed?.isDefault && store.profiles.length > 0) {
-        config.setDefaultProfile(store.profiles[0]!.id)
+        config.setDefaultProfile(profiles.value[0]!.id)
     }
     if (selectedProfileId.value === id) {
-        selectedProfileId.value = store.profiles[0]?.id ?? null
+        selectedProfileId.value = profiles.value[0]?.id ?? null
     }
 }
 
@@ -225,14 +229,182 @@ const outputNewlinesModel = newlineModel('outputNewlines')
 const colorSchemeOptions = computed(() => [
     { value: 'auto', label: t('settings.colorSchemeAuto') },
     ...builtinColorSchemes.map(scheme => ({ value: scheme.name, label: scheme.name })),
+    ...store.colorSchemes.map(scheme => ({ value: scheme.name, label: scheme.name, hint: t('settings.customTag') })),
+])
+
+// ---- custom color schemes editor ----
+type SchemeColorKey = 'foreground' | 'background' | 'cursor' | 'cursorAccent' | 'selection' | 'selectionForeground'
+
+const customSchemes = computed(() => store.colorSchemes)
+const selectedCustomIndex = ref(0)
+const selectedCustom = computed<TerminalColorScheme | null>(() => customSchemes.value[selectedCustomIndex.value] ?? null)
+const importError = ref('')
+
+const specialSlots = computed<{ key: SchemeColorKey, label: string }[]>(() => [
+    { key: 'foreground', label: t('settings.schemeColorForeground') },
+    { key: 'background', label: t('settings.schemeColorBackground') },
+    { key: 'cursor', label: t('settings.schemeColorCursor') },
+    { key: 'cursorAccent', label: t('settings.schemeColorCursorAccent') },
+    { key: 'selection', label: t('settings.schemeColorSelection') },
+    { key: 'selectionForeground', label: t('settings.schemeColorSelectionForeground') },
+])
+
+/** 16 个 ANSI 槽位的 i18n key（黑红绿黄蓝洋红青白 × 常规/亮色） */
+const ANSI_COLOR_KEYS = [
+    'colorBlack', 'colorRed', 'colorGreen', 'colorYellow', 'colorBlue', 'colorMagenta', 'colorCyan', 'colorWhite',
+    'colorBrightBlack', 'colorBrightRed', 'colorBrightGreen', 'colorBrightYellow', 'colorBrightBlue', 'colorBrightMagenta', 'colorBrightCyan', 'colorBrightWhite',
+] as const
+
+const ansiSlots = computed(() => ANSI_COLOR_KEYS.map((key, index) => ({
+    key: index,
+    label: t(`settings.${key}`),
+})))
+
+/**
+ * @description 读取槽位颜色（可缺省字段回退前景色以便 color input 显示）
+ * @param scheme 配色对象
+ * @param key 槽位键
+ * @returns string #rrggbb 形式颜色
+ *
+ */
+function schemeSlotColor (scheme: TerminalColorScheme, key: SchemeColorKey): string {
+    return (scheme[key] ?? scheme.foreground).slice(0, 7)
+}
+
+/**
+ * @description 写入槽位颜色；若现有值带 alpha 后缀（#rrggbbaa）则保留
+ * @param scheme 配色对象
+ * @param key 槽位键
+ * @param hex #rrggbb 颜色
+ * @returns void
+ *
+ */
+function setSchemeSlotColor (scheme: TerminalColorScheme, key: SchemeColorKey, hex: string): void {
+    const current = scheme[key] ?? ''
+    const alpha = current.length === 9 ? current.slice(7) : ''
+    scheme[key] = `${hex}${alpha}`
+}
+
+/**
+ * @description 以名称写入槽位颜色（hex 文本输入），非法值忽略
+ * @param scheme 配色对象
+ * @param key 槽位键
+ * @param text 用户输入的 hex 文本
+ * @returns void
+ *
+ */
+function setSchemeSlotColorText (scheme: TerminalColorScheme, key: SchemeColorKey, text: string): void {
+    const value = text.trim().toLowerCase()
+    if (/^#[0-9a-f]{6}([0-9a-f]{2})?$/.test(value)) {
+        scheme[key] = value
+    }
+}
+
+/**
+ * @description 以文本写入 16 色 ANSI 槽位（hex 文本输入），非法值忽略
+ * @param scheme 配色对象
+ * @param index ANSI 槽位下标（0-15）
+ * @param text 用户输入的 hex 文本
+ * @returns void
+ *
+ */
+function setAnsiColorText (scheme: TerminalColorScheme, index: number, text: string): void {
+    const value = text.trim().toLowerCase()
+    if (/^#[0-9a-f]{6}$/.test(value)) {
+        scheme.colors[index] = value
+    }
+}
+
+/**
+ * @description 新建自定义配色（克隆 Tabby Default）并进入编辑
+ * @returns void
+ *
+ */
+function newCustomScheme (): void {
+    const base = toRawScheme(defaultDarkColorScheme)
+    base.name = `${t('settings.customSchemes')} ${customSchemes.value.length + 1}`
+    store.colorSchemes.push(base)
+    selectedCustomIndex.value = store.colorSchemes.length - 1
+}
+
+/**
+ * @description 深拷贝配色对象（structuredClone 需要纯对象，去掉响应式代理）
+ * @param scheme 源配色
+ * @returns TerminalColorScheme 拷贝
+ *
+ */
+function toRawScheme (scheme: TerminalColorScheme): TerminalColorScheme {
+    return JSON.parse(JSON.stringify(scheme)) as TerminalColorScheme
+}
+
+/**
+ * @description 删除自定义配色并收敛选中索引
+ * @param index 列表索引
+ * @returns void
+ *
+ */
+function deleteCustomScheme (index: number): void {
+    store.colorSchemes.splice(index, 1)
+    if (selectedCustomIndex.value >= store.colorSchemes.length) {
+        selectedCustomIndex.value = Math.max(store.colorSchemes.length - 1, 0)
+    }
+}
+
+/**
+ * @description 处理 iTerm2 配色文件选择：解析后加入自定义配色并选中
+ * @param event 文件 input 的 change 事件
+ * @returns void
+ *
+ */
+function onImportFile (event: Event): void {
+    const input = event.target as HTMLInputElement
+    const file = input.files?.[0]
+    input.value = ''
+    if (!file) {
+        return
+    }
+    void file.text().then(text => {
+        const name = file.name.replace(/\.itermcolors$/i, '')
+        const scheme = parseItermColorsFile(text, name)
+        importError.value = ''
+        store.colorSchemes.push(scheme)
+        selectedCustomIndex.value = store.colorSchemes.length - 1
+    }).catch(() => {
+        importError.value = t('settings.importFailed')
+    })
+}
+
+// ---- font picker ----
+const systemFonts = ref<string[]>([])
+
+onMounted(async () => {
+    systemFonts.value = await listSystemFonts()
+})
+
+const fontOptions = computed(() => [
+    { value: 'monospace', label: 'monospace' },
+    ...systemFonts.value.map(font => ({ value: font, label: font })),
 ])
 
 const configDir = ref('')
 invoke<string>('config_dir_path').then(path => (configDir.value = path)).catch(() => {})
 
-function openConfigDir (): void {
-    if (configDir.value) {
-        void invoke('plugin:opener|open_path', { path: configDir.value }).catch(() => {})
+/**
+ * @description 在 Finder 中打开配置目录（opener 插件 open_path，capabilities 已放行 $APPDATA 范围）
+ * @returns Promise<void>
+ *
+ * @example await openConfigDir() // 打开 ~/Library/Application Support/scx-terminal
+ *
+ */
+async function openConfigDir (): Promise<void> {
+    if (!configDir.value) {
+        return
+    }
+    try {
+        await openPath(configDir.value)
+    } catch (error) {
+        console.error('[settings] open config dir failed:', error)
+        void invoke('dev_log', { message: `[settings] open config dir failed: ${String(error)}` }).catch(() => {})
     }
 }
 </script>
@@ -261,7 +433,15 @@ function openConfigDir (): void {
                 </div>
                 <div class="settings-field">
                     <Label>{{ t('settings.fontFamily') }}</Label>
-                    <Input v-model="store.terminal.font" placeholder="monospace" />
+                    <SearchableSelect
+                        v-if="systemFonts.length > 0"
+                        v-model="store.terminal.font"
+                        :options="fontOptions"
+                        class="w-60"
+                        :placeholder="t('settings.searchPlaceholder')"
+                    />
+                    <!-- list_fonts 不可用时回退自由文本输入 -->
+                    <Input v-else v-model="store.terminal.font" placeholder="monospace" />
                 </div>
                 <div class="settings-field">
                     <Label>{{ t('settings.linePadding') }} <span class="value-hint">{{ store.terminal.linePadding }}</span></Label>
@@ -363,7 +543,12 @@ function openConfigDir (): void {
                         </div>
                         <div class="settings-field">
                             <Label>{{ t('settings.profileColorScheme') }}</Label>
-                            <Select v-model="profileColorSchemeModel" :options="profileColorSchemeOptions" class="w-44" />
+                            <SearchableSelect
+                                v-model="profileColorSchemeModel"
+                                :options="profileColorSchemeOptions"
+                                class="w-60"
+                                :placeholder="t('settings.searchPlaceholder')"
+                            />
                         </div>
                         <div class="settings-field row">
                             <Label>{{ t('settings.profileLoginShell') }}</Label>
@@ -392,7 +577,104 @@ function openConfigDir (): void {
                 <h2>{{ t('settings.appearance') }}</h2>
                 <div class="settings-field">
                     <Label>{{ t('settings.colorScheme') }}</Label>
-                    <Select v-model="store.appearance.colorScheme" :options="colorSchemeOptions" class="w-44" />
+                    <SearchableSelect
+                        v-model="store.appearance.colorScheme"
+                        :options="colorSchemeOptions"
+                        class="w-60"
+                        :placeholder="t('settings.searchPlaceholder')"
+                    />
+                </div>
+                <Separator />
+                <div class="custom-schemes-section">
+                    <div class="custom-schemes-toolbar">
+                        <h3 class="custom-schemes-title">{{ t('settings.customSchemes') }}</h3>
+                        <Button variant="outline" size="sm" @click="newCustomScheme">
+                            <Plus :size="14" />
+                            {{ t('settings.customSchemeNew') }}
+                        </Button>
+                        <label class="import-label">
+                            <span class="import-trigger">
+                                <Upload :size="14" />
+                                {{ t('settings.customSchemeImport') }}
+                            </span>
+                            <input type="file" accept=".itermcolors" hidden @change="onImportFile" />
+                        </label>
+                    </div>
+                    <p v-if="importError" class="import-error">{{ importError }}</p>
+                    <p v-if="customSchemes.length === 0" class="hint">{{ t('settings.customSchemeEmpty') }}</p>
+                    <template v-else>
+                        <div class="custom-scheme-chips">
+                            <button
+                                v-for="(scheme, index) in customSchemes"
+                                :key="index"
+                                class="custom-scheme-chip"
+                                :class="{ active: index === selectedCustomIndex }"
+                                @click="selectedCustomIndex = index"
+                            >
+                                {{ scheme.name }}
+                            </button>
+                        </div>
+                        <div v-if="selectedCustom" class="custom-scheme-editor">
+                            <div class="settings-field">
+                                <Label>{{ t('settings.profileName') }}</Label>
+                                <Input v-model="selectedCustom.name" class="w-60" />
+                            </div>
+                            <div
+                                class="scheme-preview"
+                                :style="{
+                                    background: selectedCustom.background,
+                                    color: selectedCustom.foreground,
+                                    borderColor: selectedCustom.cursor,
+                                }"
+                            >
+                                <span>AaBb 命令输出 <b>bold</b> <i>italic</i> → $</span>
+                                <span class="scheme-preview-colors">
+                                    <span
+                                        v-for="(color, index) in selectedCustom.colors"
+                                        :key="index"
+                                        class="scheme-preview-swatch"
+                                        :style="{ background: color }"
+                                    ></span>
+                                </span>
+                            </div>
+                            <div class="scheme-slots">
+                                <div v-for="slot in specialSlots" :key="slot.key" class="scheme-slot">
+                                    <Label class="scheme-slot-label">{{ slot.label }}</Label>
+                                    <input
+                                        type="color"
+                                        class="scheme-color-input"
+                                        :value="schemeSlotColor(selectedCustom, slot.key)"
+                                        @input="setSchemeSlotColor(selectedCustom, slot.key, ($event.target as HTMLInputElement).value)"
+                                    />
+                                    <input
+                                        class="scheme-hex-input"
+                                        :value="selectedCustom[slot.key] ?? ''"
+                                        @change="setSchemeSlotColorText(selectedCustom, slot.key, ($event.target as HTMLInputElement).value)"
+                                    />
+                                </div>
+                                <div v-for="slot in ansiSlots" :key="`ansi-${slot.key}`" class="scheme-slot">
+                                    <Label class="scheme-slot-label">{{ slot.label }}</Label>
+                                    <input
+                                        type="color"
+                                        class="scheme-color-input"
+                                        :value="selectedCustom.colors[slot.key]!"
+                                        @input="selectedCustom.colors[slot.key] = ($event.target as HTMLInputElement).value"
+                                    />
+                                    <input
+                                        class="scheme-hex-input"
+                                        :value="selectedCustom.colors[slot.key]!"
+                                        @change="setAnsiColorText(selectedCustom, slot.key, ($event.target as HTMLInputElement).value)"
+                                    />
+                                </div>
+                            </div>
+                            <div class="settings-field row profile-actions">
+                                <Button variant="ghost" size="sm" class="profile-delete" @click="deleteCustomScheme(selectedCustomIndex)">
+                                    <Trash2 :size="14" />
+                                    {{ t('settings.customSchemeDelete') }}
+                                </Button>
+                            </div>
+                        </div>
+                    </template>
                 </div>
                 <Separator />
                 <div class="settings-field">
@@ -650,6 +932,160 @@ function openConfigDir (): void {
 
 .profile-delete {
     color: var(--color-destructive);
+}
+
+.custom-schemes-section {
+    max-width: 560px;
+}
+
+.custom-schemes-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.custom-schemes-title {
+    margin: 0;
+    margin-right: auto;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.import-label {
+    display: inline-flex;
+    cursor: pointer;
+}
+
+/* 与 Button outline/sm 同视觉，但保持非交互元素（label 才能激活隐藏的 file input） */
+.import-trigger {
+    display: inline-flex;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    white-space: nowrap;
+    padding: 0 12px;
+    border: 1px solid var(--color-input);
+    border-radius: 6px;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 500;
+    transition: background-color 0.15s;
+}
+
+.import-label:hover .import-trigger {
+    background: var(--color-accent);
+}
+
+.import-error {
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: var(--color-destructive);
+}
+
+.custom-scheme-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.custom-scheme-chip {
+    padding: 3px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--color-muted-foreground);
+    font-size: 12px;
+    cursor: default;
+    transition: all 0.25s ease;
+}
+
+.custom-scheme-chip:hover {
+    color: var(--color-foreground);
+    border-color: var(--color-ring);
+}
+
+.custom-scheme-chip.active {
+    background: var(--color-accent);
+    border-color: var(--color-ring);
+    color: var(--color-foreground);
+}
+
+.custom-scheme-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.scheme-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    font-family: monospace;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.scheme-preview-colors {
+    display: inline-flex;
+    gap: 3px;
+}
+
+.scheme-preview-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+}
+
+.scheme-slots {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+    gap: 6px 16px;
+}
+
+.scheme-slot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.scheme-slot-label {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.scheme-color-input {
+    width: 28px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.scheme-hex-input {
+    width: 84px;
+    height: 22px;
+    padding: 0 6px;
+    border: 1px solid var(--color-input);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-foreground);
+    font-family: monospace;
+    font-size: 11px;
+    outline: none;
 }
 
 .hotkey-binding {

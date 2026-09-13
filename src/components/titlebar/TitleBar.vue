@@ -5,7 +5,7 @@ import { Plus, Settings, X } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { platform } from '@/lib/platform'
 import { useTabsStore, type Tab } from '@/stores/tabs'
-import { useConfigStore } from '@/stores/config'
+import { useConfigStore, defaultFirstProfiles } from '@/stores/config'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
 import DropdownMenu from '@/components/ui/DropdownMenu.vue'
 
@@ -31,11 +31,11 @@ const TAB_COLORS = [
 ] as const
 
 /**
- * @description 「+」按钮的档案菜单项：列出全部 local 档案，默认档案带标记
+ * @description 「+」按钮的档案菜单项：列出全部 local 档案（默认档案置顶），默认档案带标记
  * @returns ContextMenuItemSpec[] 菜单项列表
  *
  */
-const newTabMenuItems = computed<ContextMenuItemSpec[]>(() => config.store.profiles
+const newTabMenuItems = computed<ContextMenuItemSpec[]>(() => defaultFirstProfiles(config.store.profiles)
     .filter(profile => profile.type === 'local')
     .map(profile => ({
         key: profile.id,

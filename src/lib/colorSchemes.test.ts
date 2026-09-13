@@ -16,7 +16,8 @@ import {
 
 describe('colorSchemes', () => {
     it('provides a non-empty builtin scheme library with unique names', () => {
-        expect(builtinColorSchemes.length).toBeGreaterThanOrEqual(10)
+        // 严格复刻 Tabby：2 套核心默认 + 社区全集（191 套）
+        expect(builtinColorSchemes.length).toBe(193)
         const names = new Set(builtinColorSchemes.map(scheme => scheme.name))
         expect(names.size).toBe(builtinColorSchemes.length)
         for (const scheme of builtinColorSchemes) {
@@ -24,9 +25,29 @@ describe('colorSchemes', () => {
         }
     })
 
+    it('keeps the Tabby core defaults first and community schemes sorted', () => {
+        expect(builtinColorSchemes[0]).toBe(defaultDarkColorScheme)
+        expect(builtinColorSchemes[1]).toBe(defaultLightColorScheme)
+        expect(builtinColorSchemes[0]!.name).toBe('Tabby Default')
+        // 社区方案颜色均为合法 6 位 hex
+        expect(builtinColorSchemes[2]!.colors.every(color => /^#[0-9a-f]{6}$/.test(color))).toBe(true)
+    })
+
     it('finds schemes by exact name and returns null otherwise', () => {
-        expect(findColorScheme('Dracula')?.background).toBe('#282a36')
+        expect(findColorScheme('Dracula')?.background).toBe('#1e1f29')
         expect(findColorScheme('no-such-scheme')).toBeNull()
+    })
+
+    it('prefers custom schemes over builtin ones with the same name', () => {
+        const custom = {
+            name: 'Dracula',
+            foreground: '#ffffff',
+            background: '#000000',
+            cursor: '#ffffff',
+            colors: Array.from({ length: 16 }, () => '#123456'),
+        }
+        expect(findColorScheme('Dracula', [custom])).toBe(custom)
+        expect(resolveColorScheme('Dracula', false, [custom])).toBe(custom)
     })
 
     it('resolves legacy preferences and named schemes with fallback', () => {
@@ -37,6 +58,7 @@ describe('colorSchemes', () => {
         expect(resolveColorScheme('Nord', true).name).toBe('Nord')
         // 未知名称回退到系统深浅对应的默认配色
         expect(resolveColorScheme('bogus', false)).toBe(defaultDarkColorScheme)
+        expect(resolveColorScheme('Tokyo Night', false)).toBe(defaultDarkColorScheme) // 已被严格复刻口径移除
     })
 })
 

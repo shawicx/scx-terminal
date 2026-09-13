@@ -30,7 +30,7 @@ export const useThemeStore = defineStore('theme', () => {
     function apply (): void {
         const config = useConfigStore()
         const media = window.matchMedia('(prefers-color-scheme: light)')
-        const scheme = resolveColorScheme(config.store.appearance.colorScheme, media.matches)
+        const scheme = resolveColorScheme(config.store.appearance.colorScheme, media.matches, config.store.colorSchemes)
         // UI 深浅跟随配色背景亮度：具名配色取其背景，auto/dark/light 解析出的
         // 默认配色背景与系统深浅一致
         isDark.value = isColorSchemeDark(scheme)
@@ -42,7 +42,8 @@ export const useThemeStore = defineStore('theme', () => {
 
     function init (): void {
         const config = useConfigStore()
-        watch(() => config.store.appearance.colorScheme, apply)
+        // 自定义配色内容编辑（如正在使用的方案改色）也需要重派生界面 token
+        watch(() => [config.store.appearance.colorScheme, config.store.colorSchemes] as const, apply, { deep: true })
         window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', apply)
         apply()
     }

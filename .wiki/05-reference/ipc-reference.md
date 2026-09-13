@@ -1,6 +1,6 @@
 # IPC 契约总表（前端 ↔ Rust）
 
-注册处：`src-tauri/src/lib.rs` `invoke_handler`。前端调用方：`src/services/pty.ts`（pty_*）、`src/services/shells.ts`（list_shells）、`src/stores/config.ts`（config_*）、`src/main.ts` 与 `SettingsView.vue`（dev_log / config_dir_path / opener 插件）。
+注册处：`src-tauri/src/lib.rs` `invoke_handler`。前端调用方：`src/services/pty.ts`（pty_*）、`src/services/shells.ts`（list_shells）、`src/services/fonts.ts`（list_fonts）、`src/stores/config.ts`（config_*）、`src/main.ts` 与 `SettingsView.vue`（dev_log / config_dir_path / opener 插件）。
 
 ## invoke 命令
 
@@ -13,6 +13,7 @@
 | `pty_ack_data` | JS→Rust | `id`、`length: usize` | `()` | sync | 输出流确认，驱动背压 |
 | `pty_exists` | JS→Rust | `id` | `bool` | sync | 存在且未退出 |
 | `list_shells` | JS→Rust | 无 | `ShellInfo[]`（path/name/default/args） | sync | 解析 `/etc/shells` |
+| `list_fonts` | JS→Rust | 无 | `Vec<String>`（字体族名，去重排序） | sync | `font-loader` 枚举系统字体（macOS CoreText）；失败前端回退自由文本输入 |
 | `config_load` | JS→Rust | 无 | `string`（YAML 原文，可空） | sync | 读配置文件 |
 | `config_save` | JS→Rust | `content: string` | `()` | sync | 原子写 + `.backup` |
 | `config_dir_path` | JS→Rust | 无 | `string` | sync | 配置目录绝对路径 |
@@ -20,7 +21,7 @@
 
 类型映射注意：JS `number[]` ↔ Rust `Vec<u8>`；`SpawnOptions` 用 `#[serde(rename_all = "camelCase")]`；id 两侧都是字符串。
 
-插件命令（经 capability 授权）：`plugin:opener|open_path` / `plugin:opener|reveal_item_in_dir`（设置页打开配置目录）；剪贴板 `readText/writeText`（`@tauri-apps/plugin-clipboard-manager`）。
+插件命令（经 capability 授权）：设置页用 `@tauri-apps/plugin-opener` 的 `openPath`（底层 `plugin:opener|open_path`，capabilities 中需带 `$APPDATA` 路径 scope——裸权限无 scope 时所有路径都会被插件拒绝）、链接打开用 `openUrl`；剪贴板 `readText/writeText`（`@tauri-apps/plugin-clipboard-manager`）。
 
 ## 事件（Rust → JS，`listen`）
 

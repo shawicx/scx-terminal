@@ -13,7 +13,7 @@
 
 - `core:default`（含事件 listen/emit 等 core 权限——`listen('pty:{id}:…')` 依赖它）
 - `core:window:allow-start-dragging / minimize / toggle-maximize / is-maximized / close / set-focus`
-- `opener:default` + `opener:allow-open-path` + `opener:allow-reveal-item-in-dir`（设置页打开配置目录）
+- `opener:default` + `opener:allow-open-path`（**带 `$APPDATA` 与 `$APPDATA/**` 路径 scope**，插件对无 scope 的 open-path 拒绝所有路径）+ `opener:allow-reveal-item-in-dir`（设置页打开配置目录）
 - `clipboard-manager:allow-read-text / write-text`
 
 自定义应用命令（`pty_*`、`list_shells`、`config_*`、`dev_log`）不需要 capability 条目。新增权限必须在此文件显式追加。

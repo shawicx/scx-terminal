@@ -34,6 +34,7 @@ export function createFrontendContext (): FrontendContext {
             return resolveColorScheme(
                 config.store.appearance.colorScheme,
                 window.matchMedia('(prefers-color-scheme: light)').matches,
+                config.store.colorSchemes,
             )
         },
         async setClipboard (text: string) {

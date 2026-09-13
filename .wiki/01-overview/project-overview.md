@@ -20,7 +20,9 @@ scx-terminal 是一个 macOS 桌面终端应用（Tauri v2 + Vue 3 + @xterm/xter
 | OSC 52 剪贴板写入（base64 解码 + 100KB 上限，只写不读） | 可用 | `src/lib/middleware/oscProcessing.ts` |
 | 可点击 URL（WebLinks addon + opener 插件；OSC 8 由 xterm 核心支持） | 可用 | `src/lib/frontends/xtermFrontend.ts` |
 | 命令面板（模糊搜索）+ 可配置热键（加载时对旧键名做归一化） | 可用 | `src/components/palette/CommandPalette.vue`、`src/services/` |
-| 配色主题：16 套内置配色 + 界面跟随配色 + 亮暗跟随系统 | 可用 | `src/lib/colorSchemes.ts`、`src/lib/schemeColors.ts`、`src/stores/theme.ts` |
+| 配色主题：严格复刻 Tabby 候选列表（Tabby Default/Light + 社区全集 191 套，共 193）+ 界面跟随配色 + 亮暗跟随系统 | 可用 | `src/lib/colorSchemes.ts`、`src/lib/communityColorSchemes.ts`（生成产物）、`src/lib/schemeColors.ts`、`src/stores/theme.ts` |
+| 自定义配色：逐色编辑器（16 ANSI + 前景/背景/光标/选区等 22 槽）、iTerm2 .itermcolors 导入 | 可用 | `src/lib/itermColors.ts`、`src/components/settings/SettingsView.vue`（外观页）、`ui/SearchableSelect.vue` |
+| 字体列表选择器（系统字体枚举可搜索下拉，命令失败回退自由文本） | 可用 | `src-tauri/src/fonts.rs`（font-loader）、`src/services/fonts.ts` |
 | 设置页（终端/外观/快捷键/关于），YAML 持久化；含退格行为、输入/输出换行转换、wordSeparator、粗体亮色、登录 shell 开关 | 可用 | `src/components/settings/SettingsView.vue`、`src/stores/config.ts` |
 | 退格重映射与换行转换中间件（会话构造期按配置挂载，对新标签生效） | 可用 | `src/lib/sessions/baseSession.ts`、`src/lib/middleware/{inputProcessing,streamProcessing}.ts` |
 | 中英双语（跟随系统） | 可用 | `src/i18n/index.ts` |
@@ -30,7 +32,7 @@ scx-terminal 是一个 macOS 桌面终端应用（Tauri v2 + Vue 3 + @xterm/xter
 
 **前端**（`package.json`）：Vue 3.5、Pinia 4、rxjs 7（会话/前端事件流全部基于 Subject）、@xterm/xterm 5.5（addon-canvas / webgl / fit / search / unicode11）、Tailwind CSS 4（`@theme inline` token 体系）、reka-ui + class-variance-authority（UI 组件）、vue-i18n 11、yaml、nanoid。构建 Vite 8（端口 1420，`strictPort`，别名 `@` → `src/`），类型检查 `vue-tsc`，Lint `oxlint`，测试 `vitest`（node 环境）。
 
-**后端**（`src-tauri/Cargo.toml`）：tauri 2（feature `macos-private-api`）、portable-pty 0.9、tauri-plugin-opener、tauri-plugin-clipboard-manager、serde/serde_json、uuid。Release profile：`lto`、`opt-level = "s"`、`strip`。
+**后端**（`src-tauri/Cargo.toml`）：tauri 2（feature `macos-private-api`）、portable-pty 0.9、tauri-plugin-opener、tauri-plugin-clipboard-manager、serde/serde_json、uuid、font-loader 0.11（系统字体枚举）。Release profile：`lto`、`opt-level = "s"`、`strip`。
 
 **语言分布**（来自 codebase-memory 索引）：TypeScript 37 文件、Vue 15、Rust 6。
 
@@ -40,7 +42,7 @@ scx-terminal 是一个 macOS 桌面终端应用（Tauri v2 + Vue 3 + @xterm/xter
 - `terminal.paletteGenerate` / `paletteHarmonious`（256 色扩展调色板生成，`src/lib/generatePalette.ts`）有效但未暴露到设置 UI。
 - `terminal.fontWeight` / `fontWeightBold` / `wordSeparator` / `drawBoldTextInBrightColors` 由 xterm 消费；后两者已上设置 UI，字重两项仍无 UI。
 - cwd 跟踪管道（`BaseSession.reportedCWD` → `getWorkingDirectory()`）无调用方；新标签不会继承工作目录（需要 shell 集成脚本上报才有数据源）。
-- 自定义配色编辑器、iTerm2 配色导入、字体列表选择器未实现（当前仅内置配色 + 下拉选择、字体为自由文本输入）。
+- 内置配色采用**严格复刻 Tabby 口径**（2026-09-13 用户确认）：原第三方 14 套（Tokyo Night、Catppuccin Mocha、Solarized、One Dark 等）已从内置列表移除，旧配置引用这些名称时回退系统深浅默认配色。
 - SSH 等远程档案未实现——Profiles 框架已按 `type` 判别字段预留扩展点，后续接入 `type: 'ssh'`。
 - `services/shells.ts` 的 `defaultShell()` 已无调用方（档案化后由 config 的 `defaultProfile()` 取代）；`listShells()` 仍被首次档案生成使用。`terminal.loginShell` 配置键保留作为新档案生成的种子值，运行期生效项为各档案的 `loginShell` 字段。
 - 窗口 vibrancy/透明已写代码但被 `#[cfg(any())]` 编译关闭（`src-tauri/src/lib.rs`，WKWebView 下渲染空白，待主题阶段重试）。

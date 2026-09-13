@@ -6,6 +6,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { platform } from '@/lib/platform'
 import { normalizeHotkeysConfig } from '@/lib/hotkeys/hotkeys'
 import { listShells, type Shell } from '@/services/shells'
+import type { TerminalColorScheme } from '@/lib/colorSchemes'
 
 /** 终端配置档案；type 为判别字段，为将来 SSH 等远程档案预留扩展点 */
 export interface TerminalProfile {
@@ -62,6 +63,8 @@ export interface ConfigStore {
     appearance: AppearanceConfig
     hotkeys: HotkeysConfig
     profiles: TerminalProfile[]
+    /** 用户自定义配色方案（名称与内置重复时优先于内置生效） */
+    colorSchemes: TerminalColorScheme[]
 }
 
 function defaultConfig (): ConfigStore {
@@ -95,22 +98,23 @@ function defaultConfig (): ConfigStore {
             language: 'auto',
         },
         profiles: [],
+        colorSchemes: [],
         hotkeys: defaultHotkeys(),
     }
 }
 
 /**
- * @description 由系统 shell 列表（/etc/shells）生成默认的 local 配置档案
+ * @description 由系统 shell 列表（/etc/shells）生成默认的 local 配置档案；默认 shell 档案置顶
  * @param shells Rust list_shells 返回的 shell 列表
  * @param loginShell 生成的档案是否以登录 shell 启动（取全局 terminal.loginShell 当前值）
- * @returns TerminalProfile[] 档案列表（系统默认 shell 标 isDefault，仅首个默认生效）
+ * @returns TerminalProfile[] 档案列表（系统默认 shell 标 isDefault 且排首位，仅首个默认生效）
  *
- * @example profilesFromShells([{ id: 'zsh', name: 'zsh', command: '/bin/zsh', args: [], default: true }], true)
+ * @example profilesFromShells([{ id: 'zsh', name: 'zsh', command: '/bin/zsh', args: [], default: true }], true)[0].isDefault // true
  *
  */
 export function profilesFromShells (shells: Shell[], loginShell: boolean): TerminalProfile[] {
     let defaultAssigned = false
-    return shells.map(shell => {
+    const profiles: TerminalProfile[] = shells.map(shell => {
         const isDefault = shell.default && !defaultAssigned
         if (isDefault) {
             defaultAssigned = true
@@ -128,6 +132,26 @@ export function profilesFromShells (shells: Shell[], loginShell: boolean): Termi
             isDefault,
         }
     })
+    return defaultFirstProfiles(profiles)
+}
+
+/**
+ * @description 档案展示排序：默认档案置顶，其余保持原顺序（用于设置页档案列表与「+」新建标签下拉）
+ * @param profiles 待排序档案列表（原数组不被修改）
+ * @returns TerminalProfile[] 默认档案在首位的新数组
+ *
+ * @example defaultFirstProfiles([{ name: 'bash', isDefault: false }, { name: 'zsh', isDefault: true }])[0].name // 'zsh'
+ *
+ */
+export function defaultFirstProfiles (profiles: TerminalProfile[]): TerminalProfile[] {
+    const index = profiles.findIndex(profile => profile.isDefault)
+    if (index <= 0) {
+        return [...profiles]
+    }
+    const sorted = [...profiles]
+    const [defaultProfile] = sorted.splice(index, 1)
+    sorted.unshift(defaultProfile!)
+    return sorted
 }
 
 /**

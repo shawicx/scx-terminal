@@ -1,4 +1,5 @@
 mod config;
+mod fonts;
 mod pty;
 mod shells;
 
@@ -25,6 +26,7 @@ pub fn run() {
             pty::pty_ack_data,
             pty::pty_exists,
             shells::list_shells,
+            fonts::list_fonts,
             config::config_load,
             config::config_save,
             config::config_dir_path,

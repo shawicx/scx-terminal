@@ -170,7 +170,11 @@ const configStore = useConfigStore()
 
 // 档案专属配色：档案指定配色名时解析后经 terminalColorScheme 通道下发，null 跟随全局
 const paneColorScheme = computed(() => props.profile.colorScheme
-    ? resolveColorScheme(props.profile.colorScheme, window.matchMedia('(prefers-color-scheme: light)').matches)
+    ? resolveColorScheme(
+        props.profile.colorScheme,
+        window.matchMedia('(prefers-color-scheme: light)').matches,
+        configStore.store.colorSchemes,
+    )
     : null)
 
 watch(() => configStore.store, () => {

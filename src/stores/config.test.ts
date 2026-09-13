@@ -7,7 +7,7 @@ vi.mock('@/lib/platform', () => ({
     platform: 'macos' as const,
 }))
 
-import { deepMerge, defaultHotkeys, profilesFromShells, fallbackProfile } from './config'
+import { deepMerge, defaultHotkeys, profilesFromShells, defaultFirstProfiles, fallbackProfile, type TerminalProfile } from './config'
 import { getKeyName, metaKeyName, altKeyName, normalizeHotkeysConfig } from '@/lib/hotkeys/hotkeys'
 import type { Shell } from '@/services/shells'
 
@@ -87,6 +87,27 @@ describe('profiles from shells', () => {
         const profiles = profilesFromShells(double, false)
         expect(profiles.filter(p => p.isDefault)).toHaveLength(1)
         expect(profiles[0]!.loginShell).toBe(false)
+    })
+
+    it('places the default shell profile first regardless of /etc/shells order', () => {
+        const etcShellsOrder: Shell[] = [
+            { id: 'bash', name: 'bash', command: '/bin/bash', args: [], default: false },
+            { id: 'csh', name: 'csh', command: '/bin/csh', args: [], default: false },
+            { id: 'zsh', name: 'zsh', command: '/bin/zsh', args: [], default: true },
+        ]
+        const profiles = profilesFromShells(etcShellsOrder, true)
+        expect(profiles[0]).toMatchObject({ name: 'zsh', isDefault: true })
+        expect(profiles.slice(1).map(p => p.name)).toEqual(['bash', 'csh'])
+    })
+
+    it('defaultFirstProfiles moves the default profile first without mutating the input', () => {
+        const input: TerminalProfile[] = [
+            { id: 'p-bash', type: 'local', name: 'bash', command: '/bin/bash', args: [], env: {}, cwd: null, colorScheme: null, loginShell: true, isDefault: false },
+            { id: 'p-zsh', type: 'local', name: 'zsh', command: '/bin/zsh', args: [], env: {}, cwd: null, colorScheme: null, loginShell: true, isDefault: true },
+        ]
+        const sorted = defaultFirstProfiles(input)
+        expect(sorted[0]!.name).toBe('zsh')
+        expect(input[0]!.name).toBe('bash')
     })
 
     it('provides a /bin/zsh fallback profile', () => {
