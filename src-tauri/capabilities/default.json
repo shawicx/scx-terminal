@@ -14,7 +14,10 @@
     "opener:default",
     {
       "identifier": "opener:allow-open-path",
-      "allow": [{ "path": "$APPDATA" }, { "path": "$APPDATA/**" }]
+      "allow": [
+        { "path": "$HOME/Library/Application Support/scx-terminal" },
+        { "path": "$HOME/Library/Application Support/scx-terminal/**" }
+      ]
     },
     "opener:allow-reveal-item-in-dir",
     "clipboard-manager:allow-read-text", "clipboard-manager:allow-write-text",
