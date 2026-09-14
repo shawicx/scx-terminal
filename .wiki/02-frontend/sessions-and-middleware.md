@@ -10,6 +10,7 @@
 | `src/lib/sessions/index.ts` | `createSessionForProfile(profile, options)` 工厂：按 `profile.type`（local/ssh）创建会话，TerminalPane 统一构造入口 |
 | `src/services/pty.ts` | `TauriPTYProxy`：Rust PTY 的前端句柄（移植 tabby-electron 的 pty 代理，Electron IPC → Tauri IPC） |
 | `src/services/ssh.ts` | `SshProxy`：Rust SSH 会话前端句柄；**id 前端生成、事件监听先于 invoke 注册**（hostkey 事件在连接期间发出，事后注册=死锁） |
+| `src/services/sftp.ts` | SFTP 文件面板前端封装（浏览/文件管理/传输；进度经 Channel） |
 | `src/services/secrets.ts` | SSH 密钥链/凭据前端封装（`key_*`/`cred_*`/`key_inspect`）；私钥/口令/密码明文永不经过前端——认证时 Rust 按 keyId/profileId 从加密库解密。添加密钥为 Termius 式表单：粘贴私钥 textarea（防抖 `key_inspect` 自动推导公钥+指纹）、拖放文件走 Tauri drop 事件路径导入、「从密钥文件导入」按钮走内容 |
 | `src/lib/middleware/middleware.ts` | `SessionMiddleware` / `SessionMiddlewareStack`：会话与前端之间的 I/O 处理链 |
 | `src/lib/middleware/oscProcessing.ts` | `OSCProcessor`：拦截 OSC 7（`file://host/path` cwd 上报，percent-decode）、OSC 1337（`CurrentDir=` cwd 上报）与 OSC 52（剪贴板写入：base64 解码 → 注入的 `setClipboard`，100KB 上限，不响应 `?` 查询）；三者均吞掉序列不上屏 |

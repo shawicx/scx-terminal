@@ -112,6 +112,17 @@ export class SshSession extends BaseSession {
         this.kill()
     }
 
+    /**
+     * @description 本会话的 SSH 连接 id（SFTP 面板等按 id 定位 Rust 侧连接）
+     * @returns string | null 会话 id；未启动为 null
+     *
+     * @example const sshId = session.sshSessionId
+     *
+     */
+    get sshSessionId (): string | null {
+        return this.proxy?.getID() ?? null
+    }
+
     supportsWorkingDirectory (): boolean {
         return !!this.reportedCWD
     }

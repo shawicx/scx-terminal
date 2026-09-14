@@ -19,6 +19,7 @@ scx-terminal 是一个 macOS 桌面终端应用（Tauri v2 + Vue 3 + @xterm/xter
 | 复制/粘贴（Tauri 剪贴板插件，降级 `navigator.clipboard`） | 可用 | `src/lib/frontendContext.ts` |
 | OSC 52 剪贴板写入（base64 解码 + 100KB 上限，只写不读） | 可用 | `src/lib/middleware/oscProcessing.ts` |
 | 可点击 URL（WebLinks addon + opener 插件；OSC 8 由 xterm 核心支持） | 可用 | `src/lib/frontends/xtermFrontend.ts` |
+| 系统文件/保存对话框（SFTP 上传/下载目标选择） | 可用 | `tauri-plugin-dialog`（capabilities `dialog:default`） |
 | 命令面板（模糊搜索）+ 可配置热键（加载时对旧键名做归一化） | 可用 | `src/components/palette/CommandPalette.vue`、`src/services/` |
 | 配色主题：严格复刻 Tabby 候选列表（Tabby Default/Light + 社区全集 191 套，共 193）+ 界面跟随配色 + 亮暗跟随系统 | 可用 | `src/lib/colorSchemes.ts`、`src/lib/communityColorSchemes.ts`（生成产物）、`src/lib/schemeColors.ts`、`src/stores/theme.ts` |
 | 自定义配色：逐色编辑器（16 ANSI + 前景/背景/光标/选区等 22 槽）、iTerm2 .itermcolors 导入 | 可用 | `src/lib/itermColors.ts`、`src/components/settings/SettingsView.vue`（外观页）、`ui/SearchableSelect.vue` |
@@ -30,12 +31,13 @@ scx-terminal 是一个 macOS 桌面终端应用（Tauri v2 + Vue 3 + @xterm/xter
 | 新标签/分屏窗格继承当前目录（档案显式 cwd 优先，同 Tabby 语义）；「复制当前路径」命令 | 可用 | `src/services/commands.ts`、`src/components/terminal/TerminalTabContent.vue`、`src/stores/tabs.ts` |
 | SSH 远程会话（M5）：russh 0.63、agent/私钥/密码认证、TOFU 指纹确认（读写系统 known_hosts）、keepalive、SSH 档案管理 | 可用 | `src-tauri/src/ssh.rs`、`src/services/ssh.ts`、`src/lib/sessions/sshSession.ts`、`ui/Dialog.vue`+`terminal/HostKeyDialog.vue` |
 | SSH 密钥链（M5.5，Termius 式）：密钥导入/应用内生成/管理，敏感内容 AES-256-GCM 加密存 SQLite（主密钥在系统钥匙串），档案按 keyId 直连 | 可用 | `src-tauri/src/secrets.rs`、`src/services/secrets.ts`、设置页「密钥」分页 |
+| SFTP 面板（M6）：SSH 窗格内右侧抽屉，目录浏览/上传/下载（进度）/删除/重命名/新建目录，复用已认证连接的第二 channel | 可用 | `src-tauri/src/sftp.rs`（russh-sftp 3.0）、`src/components/terminal/SftpPanel.vue`、`src/services/sftp.ts` |
 
 ## 技术栈
 
 **前端**（`package.json`）：Vue 3.5、Pinia 4、rxjs 7（会话/前端事件流全部基于 Subject）、@xterm/xterm 5.5（addon-canvas / webgl / fit / search / unicode11）、Tailwind CSS 4（`@theme inline` token 体系）、reka-ui + class-variance-authority（UI 组件）、vue-i18n 11、yaml、nanoid。构建 Vite 8（端口 1420，`strictPort`，别名 `@` → `src/`），类型检查 `vue-tsc`，Lint `oxlint`，测试 `vitest`（node 环境）。
 
-**后端**（`src-tauri/Cargo.toml`）：tauri 2（feature `macos-private-api`）、portable-pty 0.9、russh 0.63（SSH 客户端）、rusqlite 0.40 bundled + aes-gcm + keyring + getrandom（敏感数据加密库）、tauri-plugin-opener、tauri-plugin-clipboard-manager、serde/serde_json、uuid、font-loader 0.11（系统字体枚举）。Release profile：`lto`、`opt-level = "s"`、`strip`。
+**后端**（`src-tauri/Cargo.toml`）：tauri 2（feature `macos-private-api`）、portable-pty 0.9、russh 0.63（SSH 客户端）、russh-sftp 3.0（SFTP）、rusqlite 0.40 bundled + aes-gcm + keyring + getrandom（敏感数据加密库）、tauri-plugin-opener、tauri-plugin-clipboard-manager、serde/serde_json、uuid、font-loader 0.11（系统字体枚举）。Release profile：`lto`、`opt-level = "s"`、`strip`。
 
 **语言分布**（来自 codebase-memory 索引）：TypeScript 37 文件、Vue 15、Rust 6。
 

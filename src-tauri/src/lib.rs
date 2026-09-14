@@ -3,6 +3,7 @@ mod fonts;
 pub mod proc_cwd;
 mod pty;
 mod secrets;
+mod sftp;
 mod shells;
 mod ssh;
 
@@ -20,8 +21,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(pty::PtyManager::new())
         .manage(ssh::SshManager::new())
+        .manage(sftp::SftpManager::new())
         .invoke_handler(tauri::generate_handler![
             pty::pty_spawn,
             pty::pty_write,
@@ -44,6 +47,15 @@ pub fn run() {
             secrets::cred_set_password,
             secrets::cred_remove,
             secrets::cred_has_password,
+            sftp::sftp_open,
+            sftp::sftp_read_dir,
+            sftp::sftp_mkdir,
+            sftp::sftp_rename,
+            sftp::sftp_remove_file,
+            sftp::sftp_remove_dir,
+            sftp::sftp_download,
+            sftp::sftp_upload,
+            sftp::sftp_close,
             ssh::ssh_connect,
             ssh::ssh_write,
             ssh::ssh_resize,

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { ChevronUp, ChevronDown, X } from 'lucide-vue-next'
 import { BaseSession } from '@/lib/sessions/baseSession'
 import { createSessionForProfile } from '@/lib/sessions'
+import { SshSession } from '@/lib/sessions/sshSession'
 import { XTermWebGLFrontend } from '@/lib/frontends/xtermFrontend'
 import { createFrontendContext, readClipboardText, writeClipboardText } from '@/lib/frontendContext'
 import { resolveColorScheme } from '@/lib/colorSchemes'
@@ -11,6 +12,7 @@ import type { TerminalProfile } from '@/stores/config'
 import { encodeUTF8 } from '@/lib/utils/bytes'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
 import HostKeyDialog from '@/components/terminal/HostKeyDialog.vue'
+import SftpPanel from '@/components/terminal/SftpPanel.vue'
 import type { HostKeyChallenge } from '@/services/ssh'
 import { useConfigStore } from '@/stores/config'
 import { useThemeStore } from '@/stores/theme'
@@ -34,6 +36,10 @@ const mountError = ref('')
 let session: BaseSession | null = null
 let frontend: XTermWebGLFrontend | null = null
 let disposed = false
+
+// ---- SFTP 文件面板（SSH 档案专属）：右键菜单/expose 开关，随窗格销毁清理 ----
+const sftpOpen = ref(false)
+const sshSessionId = computed(() => (session instanceof SshSession ? session.sshSessionId : null))
 
 // ---- SSH 主机指纹确认（TOFU）：SshSession 回调 → 对话框 → resolve 应答 ----
 const hostKeyChallenge = ref<HostKeyChallenge | null>(null)
@@ -147,6 +153,11 @@ defineExpose({
     clear: () => frontend?.clear(),
     find: () => openSearch(),
     getWorkingDirectory,
+    toggleSftp: () => {
+        if (props.profile.type === 'ssh') {
+            sftpOpen.value = !sftpOpen.value
+        }
+    },
 })
 
 // ---- context menu ----
@@ -170,6 +181,9 @@ const menuItems = computed<ContextMenuItemSpec[]>(() => [
     { key: 'select-all', label: t('commands.selectAll') },
     { key: 'clear', label: t('commands.clear'), separatorBefore: true },
     { key: 'find', label: t('commands.find') },
+    ...(props.profile.type === 'ssh'
+        ? [{ key: 'sftp', label: t('sftp.menuToggle'), separatorBefore: true }]
+        : []),
     { key: 'split-right', label: t('commands.splitRight'), separatorBefore: true },
     { key: 'split-down', label: t('commands.splitDown') },
     { key: 'close-pane', label: t('commands.closePane'), danger: true },
@@ -203,6 +217,9 @@ function onMenuSelect (key: string): void {
             break
         case 'split-down':
             emit('requestSplit', 'down')
+            break
+        case 'sftp':
+            sftpOpen.value = !sftpOpen.value
             break
         case 'close-pane':
             emit('closed')
@@ -258,7 +275,10 @@ onMounted(async () => {
         frontend.resize$.subscribe(({ columns, rows }) => session!.resize(columns, rows))
         frontend.title$.subscribe(title => emit('title', title))
         frontend.bell$.subscribe(() => frontend!.visualBell())
-        session.destroyed$.subscribe(() => emit('closed'))
+        session.destroyed$.subscribe(() => {
+            sftpOpen.value = false
+            emit('closed')
+        })
 
         if (disposed) {
             return
@@ -319,8 +339,13 @@ onBeforeUnmount(() => {
 <template>
     <div ref="paneRoot" class="terminal-pane">
         <ContextMenu :items="menuItems" @open="onMenuOpen" @select="onMenuSelect">
-            <div class="terminal-host"></div>
+            <div class="terminal-host" :class="{ 'with-sftp': sftpOpen }"></div>
         </ContextMenu>
+        <SftpPanel
+            v-if="sftpOpen && props.profile.type === 'ssh' && sshSessionId"
+            :ssh-id="sshSessionId"
+            @close="sftpOpen = false"
+        />
         <div v-if="mountError" class="mount-error">{{ mountError }}</div>
         <HostKeyDialog
             v-if="hostKeyChallenge"
@@ -354,6 +379,11 @@ onBeforeUnmount(() => {
 .terminal-host {
     position: absolute;
     inset: 0;
+}
+
+/* SFTP 面板开启时收缩终端区域（xterm 的 ResizeObserver 自动 refit） */
+.terminal-host.with-sftp {
+    inset: 0 400px 0 0;
 }
 
 .mount-error {

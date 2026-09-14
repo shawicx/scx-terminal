@@ -1,6 +1,6 @@
 # IPC 契约总表（前端 ↔ Rust）
 
-注册处：`src-tauri/src/lib.rs` `invoke_handler`。前端调用方：`src/services/pty.ts`（pty_*）、`src/services/ssh.ts`（ssh_*）、`src/services/secrets.ts`（key_*/cred_*）、`src/services/shells.ts`（list_shells）、`src/services/fonts.ts`（list_fonts）、`src/stores/config.ts`（config_*）、`src/main.ts` 与 `SettingsView.vue`（dev_log / config_dir_path / opener 插件）。
+注册处：`src-tauri/src/lib.rs` `invoke_handler`。前端调用方：`src/services/pty.ts`（pty_*）、`src/services/ssh.ts`（ssh_*）、`src/services/secrets.ts`（key_*/cred_*）、`src/services/sftp.ts`（sftp_*）、`src/services/shells.ts`（list_shells）、`src/services/fonts.ts`（list_fonts）、`src/stores/config.ts`（config_*）、`src/main.ts` 与 `SettingsView.vue`（dev_log / config_dir_path / opener 插件）。
 
 ## invoke 命令
 
@@ -20,6 +20,11 @@
 | `ssh_kill` | JS→Rust | `id` | `()` 或错误 | **async** | 关 channel + `disconnect` + 停队列 |
 | `ssh_ack_data` | JS→Rust | `id`、`length: usize` | `()` | sync | 背压恢复（语义同 pty_ack_data） |
 | `ssh_confirm_host_key` | JS→Rust | `id`、`accepted: bool` | `()` | sync | 应答 `ssh:{id}:hostkey` 事件（oneshot） |
+| `sftp_open` | JS→Rust | `sshId` | `{id, home}` | **async** | 同连接开第二 channel 跑 `sftp` subsystem（russh-sftp 3.0）；`SshSession.open_sftp_channel()` 封装 |
+| `sftp_read_dir` | JS→Rust | `id`、`path` | `FileEntry[]` | **async** | readdir 一次拿全元数据（size/mtime/isDir），目录优先排序 |
+| `sftp_mkdir` / `sftp_rename` / `sftp_remove_file` / `sftp_remove_dir` | JS→Rust | `id` + 路径参数 | `()` | **async** | 文件管理 |
+| `sftp_download` / `sftp_upload` | JS→Rust | `id`、remotePath/localPath、`progress: Channel<TransferProgress>` | `()`（立即返回） | **async**+spawn | 256KB 分块流式，进度 ≥1MB 节流推送，done/error 收尾；`File` 须显式 `shutdown()` |
+| `sftp_close` | JS→Rust | `id` | `()` | **async** | 关会话（面板关闭/会话退出时调用） |
 | `pty_spawn` | JS→Rust | `options: SpawnOptions`（camelCase：file/args/env/cwd/cols/rows）、`channel: Channel` | `string`（会话 id，UUID） | **async**（线程池） | 建会话；输出经 channel 二进制流回传 |
 | `pty_write` | JS→Rust | `id: string`、`data: number[]`（字节） | `()` 或错误 | **async** | 写 master；前端吞掉错误（会话可能已退出） |
 | `pty_resize` | JS→Rust | `id`、`cols: u16`、`rows: u16` | `()` | sync | ioctl resize |

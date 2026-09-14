@@ -82,12 +82,35 @@ pub struct SshSession {
     #[allow(dead_code)]
     pub id: String,
     write: tokio::sync::Mutex<Option<russh::ChannelWriteHalf<client::Msg>>>,
+    /// 连接句柄：open_sftp_channel 复用它开第二 channel（SFTP 文件面板）
     connection: tokio::sync::Mutex<Option<client::Handle<ScxHandler>>>,
     exited: Arc<AtomicBool>,
     queue: Arc<PtyDataQueue>,
 }
 
 impl SshSession {
+    /// 在本连接上开第二 channel 并请求 `sftp` subsystem，返回可直接交给
+    /// russh-sftp 的 `SftpSession::new` 的流；连接已关闭返回 `None`
+    ///
+    /// # Returns
+    ///
+    /// SFTP subsystem 通道流
+    ///
+    /// # Examples
+    ///
+    /// `let stream = session.open_sftp_channel().await.ok_or("closed")?;`
+    pub(crate) async fn open_sftp_channel(
+        &self,
+    ) -> Result<russh::ChannelStream<client::Msg>, String> {
+        let connection = self.connection.lock().await;
+        let handle = connection.as_ref().ok_or_else(|| "ssh session is closed".to_string())?;
+        let channel = handle.channel_open_session().await
+            .map_err(|e| format!("failed to open sftp channel: {e}"))?;
+        channel.request_subsystem(true, "sftp").await
+            .map_err(|e| format!("failed to request sftp subsystem: {e}"))?;
+        Ok(channel.into_stream())
+    }
+
     /// 主动断开：关 channel → 断连接 → 停队列（泵任务随后收到 EOF 并发出 exit 事件）
     async fn disconnect(&self) {
         if let Some(write) = self.write.lock().await.take() {
@@ -114,7 +137,7 @@ impl SshManager {
         Self::default()
     }
 
-    fn session (&self, id: &str) -> Option<Arc<SshSession>> {
+    pub(crate) fn session (&self, id: &str) -> Option<Arc<SshSession>> {
         self.sessions.lock().unwrap().get(id).cloned()
     }
 }
