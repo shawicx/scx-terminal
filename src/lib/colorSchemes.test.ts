@@ -5,6 +5,9 @@ import {
     builtinColorSchemes,
     findColorScheme,
     resolveColorScheme,
+    mergeColorSchemes,
+    groupColorSchemesByInitial,
+    type TerminalColorScheme,
 } from './colorSchemes'
 import {
     deriveChromeTokens,
@@ -36,6 +39,29 @@ describe('colorSchemes', () => {
     it('finds schemes by exact name and returns null otherwise', () => {
         expect(findColorScheme('Dracula')?.background).toBe('#1e1f29')
         expect(findColorScheme('no-such-scheme')).toBeNull()
+    })
+
+    it('merges custom schemes with same-name priority and appends new ones', () => {
+        const overridden: TerminalColorScheme = { ...defaultDarkColorScheme, foreground: '#custom' }
+        const fresh: TerminalColorScheme = { ...defaultLightColorScheme, name: 'My Scheme' }
+        const merged = mergeColorSchemes(builtinColorSchemes, [overridden, fresh])
+        // 同名自定义覆盖内置版本，不产生重复
+        expect(merged.filter(scheme => scheme.name === 'Tabby Default')).toEqual([overridden])
+        expect(merged).toHaveLength(builtinColorSchemes.length + 1)
+        // 覆盖后解析结果与展示一致（自定义优先）
+        expect(findColorScheme('Tabby Default', [overridden, fresh])).toBe(overridden)
+        expect(merged[0]).toBe(overridden)
+    })
+
+    it('groups schemes by name initial with digits folded into #', () => {
+        const scheme = (name: string): TerminalColorScheme => ({ ...defaultDarkColorScheme, name })
+        const groups = groupColorSchemesByInitial([scheme('3024 Night'), scheme('Argonaut'), scheme('Adventure'), scheme('aero'), scheme('Belafonte Day')])
+        expect(groups.map(group => group.initial)).toEqual(['#', 'A', 'B'])
+        // 组内不区分大小写按名称排序（Adventure < aero < Argonaut）
+        expect(groups[1]!.schemes.map(s => s.name)).toEqual(['Adventure', 'aero', 'Argonaut'])
+        // 全库分组无遗漏
+        const allGroups = groupColorSchemesByInitial(mergeColorSchemes(builtinColorSchemes, []))
+        expect(allGroups.flatMap(group => group.schemes)).toHaveLength(builtinColorSchemes.length)
     })
 
     it('prefers custom schemes over builtin ones with the same name', () => {

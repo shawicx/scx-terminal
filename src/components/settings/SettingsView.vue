@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { nanoid } from 'nanoid'
 import { writeClipboardText } from '@/lib/frontendContext'
-import { Terminal, Palette, Keyboard, Info, FolderOpen, Layers, KeyRound, Copy, Plus, Trash2, Upload, Zap, Pencil, X } from 'lucide-vue-next'
+import { Terminal, Palette, Keyboard, Info, FolderOpen, Layers, KeyRound, Copy, Plus, Trash2, Upload, Zap, Pencil, X, Globe } from 'lucide-vue-next'
 import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
 import type { Event as TauriEvent, UnlistenFn } from '@tauri-apps/api/event'
 import type { SshKeyMeta, SshKeyInspection } from '@/services/secrets'
@@ -18,6 +18,7 @@ import Slider from '@/components/ui/Slider.vue'
 import Select from '@/components/ui/Select.vue'
 import Separator from '@/components/ui/Separator.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import ColorSchemePicker from '@/components/settings/ColorSchemePicker.vue'
 import { useConfigStore, defaultFirstProfiles, type QuickCommand, type SshProfile, type TerminalProfile } from '@/stores/config'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
@@ -31,7 +32,7 @@ const { t } = useI18n()
 const config = useConfigStore()
 const store = config.store
 
-const page = ref<'terminal' | 'profiles' | 'quickCommands' | 'keys' | 'appearance' | 'hotkeys' | 'about'>('profiles')
+const page = ref<'terminal' | 'profiles' | 'quickCommands' | 'keys' | 'appearance' | 'colorSchemes' | 'hotkeys' | 'about'>('profiles')
 
 const { sortedCommands } = useCommands()
 const hotkeyCommands = computed(() => sortedCommands.value.filter(command => command.hotkeyId))
@@ -77,7 +78,8 @@ const pages = computed(() => [
     { id: 'quickCommands' as const, label: t('settings.quickCommands'), icon: Zap },
     { id: 'keys' as const, label: t('settings.keychainPage'), icon: KeyRound },
     { id: 'terminal' as const, label: t('settings.terminal'), icon: Terminal },
-    { id: 'appearance' as const, label: t('settings.appearance'), icon: Palette },
+    { id: 'appearance' as const, label: t('settings.appearance'), icon: Globe },
+    { id: 'colorSchemes' as const, label: t('settings.colorSchemesPage'), icon: Palette },
     { id: 'hotkeys' as const, label: t('settings.hotkeys'), icon: Keyboard },
     { id: 'about' as const, label: t('settings.about'), icon: Info },
 ])
@@ -709,12 +711,6 @@ function newlineModel (key: 'inputNewlines' | 'outputNewlines') {
 const inputNewlinesModel = newlineModel('inputNewlines')
 const outputNewlinesModel = newlineModel('outputNewlines')
 
-const colorSchemeOptions = computed(() => [
-    { value: 'auto', label: t('settings.colorSchemeAuto') },
-    ...builtinColorSchemes.map(scheme => ({ value: scheme.name, label: scheme.name })),
-    ...store.colorSchemes.map(scheme => ({ value: scheme.name, label: scheme.name, hint: t('settings.customTag') })),
-])
-
 // ---- custom color schemes editor ----
 type SchemeColorKey = 'foreground' | 'background' | 'cursor' | 'cursorAccent' | 'selection' | 'selectionForeground'
 
@@ -1327,14 +1323,14 @@ async function openConfigDir (): Promise<void> {
             <template v-else-if="page === 'appearance'">
                 <h2>{{ t('settings.appearance') }}</h2>
                 <div class="settings-field">
-                    <Label>{{ t('settings.colorScheme') }}</Label>
-                    <SearchableSelect
-                        v-model="store.appearance.colorScheme"
-                        :options="colorSchemeOptions"
-                        class="w-60"
-                        :placeholder="t('settings.searchPlaceholder')"
-                    />
+                    <Label>{{ t('settings.language') }}</Label>
+                    <Select v-model="store.appearance.language" :options="languageOptions" class="w-44" />
                 </div>
+            </template>
+
+            <template v-else-if="page === 'colorSchemes'">
+                <h2>{{ t('settings.colorSchemesPage') }}</h2>
+                <ColorSchemePicker v-model="store.appearance.colorScheme" :custom-schemes="store.colorSchemes" />
                 <Separator />
                 <div class="custom-schemes-section">
                     <div class="custom-schemes-toolbar">
@@ -1426,11 +1422,6 @@ async function openConfigDir (): Promise<void> {
                             </div>
                         </div>
                     </template>
-                </div>
-                <Separator />
-                <div class="settings-field">
-                    <Label>{{ t('settings.language') }}</Label>
-                    <Select v-model="store.appearance.language" :options="languageOptions" class="w-44" />
                 </div>
             </template>
 

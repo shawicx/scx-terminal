@@ -583,6 +583,10 @@ export const useConfigStore = defineStore('config', () => {
     let pendingChange = false
     let lastSaved = emptyBaseline()
 
+    // 持久化 watch 必须在 setup 同步流创建（load() 的 await 之后创建在 WKWebView 实测不触发）；
+    // getter 数组 + deep 逐分片建依赖（theme store 同款模式）。loaded 门控在 scheduleSave 内。
+    watch(() => [store.terminal, store.appearance, store.hotkeys, store.profiles, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
+
     async function load (): Promise<void> {
         let userConfig: Record<string, unknown> | null = null
         let migratedFromLegacy = false
@@ -613,7 +617,6 @@ export const useConfigStore = defineStore('config', () => {
         loaded = true
         // 迁移走空基线：首次 flush 把合并后的全量状态写入新库
         lastSaved = migratedFromLegacy ? emptyBaseline() : captureBaseline(store)
-        watch(store, () => scheduleSave(), { deep: true })
         // 首次运行/旧配置（用户配置无 profiles 键）：由 /etc/shells 生成默认档案并持久化；
         // 键存在（即使空数组）视为用户已管理，不再生成
         await generateProfilesIfAbsent(userConfig)
@@ -735,6 +738,8 @@ export const useConfigStore = defineStore('config', () => {
             }
         } catch (error) {
             console.error('could not persist config change', error)
+            // webview 的 console.error 不进 tauri dev 终端，转发一条便于排查（同 SettingsView openConfigDir 先例）
+            void invoke('dev_log', { message: `[config] flush failed: ${String(error)}` }).catch(() => {})
         } finally {
             saving = false
             if (pendingChange) {

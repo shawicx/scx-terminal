@@ -124,3 +124,53 @@ export function resolveColorScheme (
     }
     return findColorScheme(preference, custom) ?? (systemPrefersLight ? defaultLightColorScheme : defaultDarkColorScheme)
 }
+
+/**
+ * @description 合并内置与自定义配色为一份选择列表：同名时自定义优先（与 findColorScheme
+ *              的解析优先级一致），保持内置列表原有顺序，自定义新名称按序追加
+ * @param builtin 内置配色列表（builtinColorSchemes）
+ * @param custom 用户自定义配色列表
+ * @returns TerminalColorScheme[] 合并后的列表（同名不重复）
+ *
+ * @example mergeColorSchemes(builtin, [{ name: 'Tabby Default', ... }])[0].foreground // => 自定义版本的前景色
+ *
+ */
+export function mergeColorSchemes (builtin: TerminalColorScheme[], custom: TerminalColorScheme[]): TerminalColorScheme[] {
+    const customNames = new Set(custom.map(scheme => scheme.name))
+    return [...custom, ...builtin.filter(scheme => !customNames.has(scheme.name))]
+}
+
+/** 配色方案首字母分组（数字开头归「#」组，其余取大写首字母） */
+export interface ColorSchemeGroup {
+    initial: string
+    schemes: TerminalColorScheme[]
+}
+
+/**
+ * @description 按名称首字符分组排序：数字开头归「#」组，其余取大写首字母；
+ *              组间按「# < A-Z」排序，组内按名称不区分大小写排序
+ * @param schemes 待分组的配色列表（顺序无关）
+ * @returns ColorSchemeGroup[] 首字母分组列表
+ *
+ * @example groupColorSchemesByInitial(schemes).find(g => g.initial === 'A')!.schemes.length // => A 开头的数量
+ *
+ */
+export function groupColorSchemesByInitial (schemes: TerminalColorScheme[]): ColorSchemeGroup[] {
+    const groups = new Map<string, TerminalColorScheme[]>()
+    for (const scheme of schemes) {
+        const first = scheme.name.trim().charAt(0).toUpperCase()
+        const initial = /[0-9]/.test(first) ? '#' : first
+        const bucket = groups.get(initial)
+        if (bucket) {
+            bucket.push(scheme)
+        } else {
+            groups.set(initial, [scheme])
+        }
+    }
+    return [...groups.entries()]
+        .sort(([a], [b]) => (a === '#' ? -1 : b === '#' ? 1 : a.localeCompare(b)))
+        .map(([initial, bucket]) => ({
+            initial,
+            schemes: bucket.sort((x, y) => x.name.toLowerCase().localeCompare(y.name.toLowerCase())),
+        }))
+}
