@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
+import { parse as parseYaml } from 'yaml'
 
 // 锁定为 mac 平台：默认热键的 mac 分支曾出现与 getKeyName 产出不一致的键名（回归测试目标）
 vi.mock('@/lib/platform', () => ({
@@ -7,9 +7,24 @@ vi.mock('@/lib/platform', () => ({
     platform: 'macos' as const,
 }))
 
-import { deepMerge, defaultHotkeys, profilesFromShells, defaultFirstProfiles, fallbackProfile, type TerminalProfile } from './config'
+import {
+    deepMerge,
+    defaultHotkeys,
+    profilesFromShells,
+    defaultFirstProfiles,
+    fallbackProfile,
+    defaultConfig,
+    stableStringify,
+    diffById,
+    computeOps,
+    captureBaseline,
+    emptyBaseline,
+    type TerminalProfile,
+    type FlushOp,
+} from './config'
 import { getKeyName, metaKeyName, altKeyName, normalizeHotkeysConfig } from '@/lib/hotkeys/hotkeys'
 import type { Shell } from '@/services/shells'
+import type { TerminalColorScheme } from '@/lib/colorSchemes'
 
 /** 模拟按下带修饰键的物理按键，返回 getKeyName 产出的键名 */
 function pressedKeyName (key: string, code?: string): string {
@@ -39,15 +54,10 @@ describe('config deepMerge', () => {
     })
 })
 
-describe('config YAML round-trip', () => {
-    it('serializes and parses a full config snapshot', () => {
-        const snapshot = {
-            terminal: { fontSize: 15, font: 'monospace', cursor: 'bar' },
-            appearance: { colorScheme: 'dark' },
-        }
-        const parsed = parseYaml(stringifyYaml(snapshot))
-        expect(parsed.terminal.fontSize).toBe(15)
-        expect(parsed.appearance.colorScheme).toBe('dark')
+describe('legacy config.yaml parsing (one-time migration source)', () => {
+    it('parses a legacy config file body', () => {
+        const parsed = parseYaml('terminal:\n  fontSize: 15\nappearance:\n  colorScheme: dark\n')
+        expect(parsed).toEqual({ terminal: { fontSize: 15 }, appearance: { colorScheme: 'dark' } })
     })
 
     it('parses an empty document without error', () => {
@@ -55,11 +65,109 @@ describe('config YAML round-trip', () => {
     })
 })
 
+describe('stableStringify', () => {
+    it('sorts object keys so key order does not affect comparison', () => {
+        expect(stableStringify({ b: 1, a: 2 })).toBe('{"a":2,"b":1}')
+        expect(stableStringify({ b: 1, a: 2 })).toBe(stableStringify({ a: 2, b: 1 }))
+    })
+
+    it('sorts keys of nested arrays and objects', () => {
+        expect(stableStringify([{ y: 1, x: { d: 4, c: 3 } }])).toBe('[{"x":{"c":3,"d":4},"y":1}]')
+    })
+})
+
+describe('diffById', () => {
+    it('classifies creates, updates and deletes by id', () => {
+        const saved = {
+            a: stableStringify({ id: 'a', v: 1 }),
+            b: stableStringify({ id: 'b', v: 2 }),
+        }
+        const diff = diffById([{ id: 'a', v: 9 }, { id: 'b', v: 2 }, { id: 'c', v: 3 }], saved)
+        expect(diff.creates.map(item => item.id)).toEqual(['c'])
+        expect(diff.updates.map(item => item.id)).toEqual(['a'])
+        expect(diff.deletes).toEqual([])
+
+        const afterDelete = diffById([{ id: 'a', v: 9 }], saved)
+        expect(afterDelete.deletes).toEqual(['b'])
+    })
+})
+
+describe('computeOps (entity-level diff flush)', () => {
+    function localProfile (id: string, name: string): TerminalProfile {
+        return { id, type: 'local', name, command: `/bin/${name}`, args: [], env: {}, cwd: null, colorScheme: null, loginShell: true, isDefault: false }
+    }
+
+    function scheme (name: string): TerminalColorScheme {
+        return { name, foreground: '#fff', background: '#000', cursor: '#ccc', colors: ['#000000', '#ffffff'] }
+    }
+
+    it('emits nothing when the store matches the baseline', () => {
+        const config = defaultConfig()
+        config.profiles.push(localProfile('p1', 'zsh'))
+        expect(computeOps(config, captureBaseline(config))).toEqual([])
+    })
+
+    it('emits a section set for changed terminal settings only', () => {
+        const config = defaultConfig()
+        const baseline = captureBaseline(config)
+        config.terminal.fontSize = 18
+        const ops = computeOps(config, baseline)
+        expect(ops).toHaveLength(1)
+        expect(ops[0]).toMatchObject({ kind: 'settingsSection', key: 'terminal' })
+    })
+
+    it('emits per-entity create/update/delete for profiles, quick commands and groups', () => {
+        const config = defaultConfig()
+        config.profiles.push(localProfile('p1', 'zsh'))
+        config.quickCommandGroups.push({ id: 'g1', name: 'ops' })
+        config.quickCommands.push(
+            { id: 'q1', name: 'list', command: 'ls', autoRun: false },
+            { id: 'q2', name: 'deploy', command: 'deploy', groupId: 'g1', autoRun: true },
+        )
+        // 实体为空的基线（设置分片已同步）：diff 只产出实体级 create
+        const emptyEntities = { ...captureBaseline(config), profiles: {}, quickCommands: {}, quickCommandGroups: {} }
+        const kinds = computeOps(config, emptyEntities).map(op => op.kind)
+        expect(kinds).toEqual(expect.arrayContaining(['profileCreate', 'quickCommandGroupCreate', 'quickCommandCreate', 'quickCommandCreate']))
+
+        // 变更前的状态捕获为基线后：改名 → update，删除 → delete，只产出对应实体的操作
+        const baseline = captureBaseline(config)
+        config.profiles[0]!.name = 'bash'
+        config.quickCommands.splice(0, 1)
+        expect(computeOps(config, baseline).map(op => op.kind).sort()).toEqual(['profileUpdate', 'quickCommandDelete'])
+    })
+
+    it('treats a renamed color scheme as delete-old + save-new', () => {
+        const config = defaultConfig()
+        config.colorSchemes.push(scheme('solar'))
+        const baseline = captureBaseline(config)
+        config.colorSchemes[0]!.name = 'solarized'
+        const ops = computeOps(config, baseline)
+        expect(ops.map(op => op.kind).sort()).toEqual(['colorSchemeDelete', 'colorSchemeSave'])
+        expect(ops.find(op => op.kind === 'colorSchemeDelete')).toMatchObject({ kind: 'colorSchemeDelete', name: 'solar' })
+        expect(ops.find(op => op.kind === 'colorSchemeSave')).toMatchObject({ kind: 'colorSchemeSave', name: 'solarized' })
+    })
+
+    it('clears a hotkey whose action vanished from the store', () => {
+        const config = defaultConfig()
+        const baseline = captureBaseline(config)
+        delete config.hotkeys['copy']
+        const op = computeOps(config, baseline).find(item => item.kind === 'hotkey') as Extract<FlushOp, { kind: 'hotkey' }>
+        expect(op.bindings).toEqual([])
+    })
+
+    it('emits a full import against the empty baseline (legacy migration)', () => {
+        const config = defaultConfig()
+        const ops = computeOps(config, emptyBaseline())
+        expect(ops.filter(op => op.kind === 'settingsSection')).toHaveLength(2)
+        expect(ops.filter(op => op.kind === 'hotkey')).toHaveLength(Object.keys(defaultHotkeys()).length)
+    })
+})
+
 describe('default hotkeys', () => {
     it('pane navigation defaults match the keystrokes getKeyName produces', () => {
         const hotkeys = defaultHotkeys()
         expect(hotkeys['pane-forward']).toEqual([[`${metaKeyName}-${altKeyName}-${pressedKeyName('ArrowRight')}`]])
-        expect(hotkeys['pane-back']).toEqual([[`${metaKeyName}-${altKeyName}-${pressedKeyName('ArrowLeft')}`]])
+        expect(hotkeys['pane-backward']).toEqual([[`${metaKeyName}-${altKeyName}-${pressedKeyName('ArrowLeft')}`]])
     })
 
     it('defaults stay normalized (idempotent under normalizeHotkeysConfig)', () => {

@@ -10,14 +10,15 @@
 - `colorSchemes`：`TerminalColorScheme[]`——用户自定义配色（详见下文配色库）。
 - `hotkeys`：`Record<hotkeyId, string[][]>`（每个热键多组按键序列；macOS 默认含 ⌘ 前缀，见 `defaultHotkeys()`，平台判断来自 `src/lib/platform.ts`）。
 
-机制：启动时 `config_load` 读 YAML → `deepMerge(默认值, 用户值)`（未知键丢弃，数组整体替换）→ **`normalizeHotkeysConfig` 归一化热键键名**（`Arrow*`/`Alt`/`Meta` 等旧别名 → `getKeyName` 产出）→ **用户配置无 `profiles` 键时由 `list_shells` 生成默认档案**（`profilesFromShells`，系统默认 shell 标 `isDefault` 且置顶，生成后自动持久化；键存在即使空数组也不再生成的）。测试见 `config.test.ts` / `hotkeys.test.ts`；store 深度 watch 后 500ms 防抖全量快照 `config_save`。文件位置由 Rust 侧决定（`~/Library/Application Support/scx-terminal/config.yaml`，原子写 + `.backup`，见 [03-backend/commands-and-config](../03-backend/commands-and-config.md)）。store 另提供 `defaultProfile()`（isDefault 优先兜底第一个）、`setDefaultProfile(id)` 与 `defaultFirstProfiles(profiles)`（展示排序：默认档案置顶；设置页档案列表与「+」下拉共用，兼容已持久化的任意顺序数据）。
+机制：启动时 `config_load` 读 SQLite 聚合快照（`app_data_dir/config.db`，Rust 侧实体表见 [03-backend/commands-and-config](../03-backend/commands-and-config.md)）→ `deepMerge(默认值, 用户值)`（未知键丢弃，数组整体替换）→ **`normalizeHotkeysConfig` 归一化热键键名**（`Arrow*`/`Alt`/`Meta` 等旧别名 → `getKeyName` 产出）→ **用户配置无 `profiles` 键时由 `list_shells` 生成默认档案**（`profilesFromShells`，系统默认 shell 标 `isDefault` 且置顶，生成后自动持久化；键存在即使空数组也不再生成的）。快照为 null（全新库）时走**一次性 legacy 迁移**：`config_load_legacy_yaml` 读旧 `config.yaml` → 前端解析合并 → 空基线强制全量落库 → `config_archive_legacy_yaml` 改名归档。
+**写路径为差异 flush**：组件照旧直接改 store；深度 watch + 500ms 防抖后，`computeOps(store, lastSaved)`（纯函数，`stableStringify` 键排序串比对）把变更 diff 成实体级 CRUD 命令（`diffById` 按造 id 增改删、配色按 name、热键逐 action、terminal/appearance 分片级 set），逐条 invoke 并按条提交基线——部分失败仅重试剩余差异。flush 进行中到达的变更记 pending，结束后重排。测试见 `config.test.ts` / `hotkeys.test.ts`。store 另提供 `defaultProfile()`（isDefault 优先兜底第一个）、`setDefaultProfile(id)` 与 `defaultFirstProfiles(profiles)`（展示排序：默认档案置顶；设置页档案列表与「+」下拉共用，兼容已持久化的任意顺序数据）。
 
 ## 配色库（`src/lib/colorSchemes.ts` + `src/lib/communityColorSchemes.ts`）
 
 - `TerminalColorScheme = { name, foreground, background, cursor, cursorAccent?, selection?, selectionForeground?, colors[16] }`。
 - **严格复刻 Tabby 候选列表（共 193 套）**：`Tabby Default` / `Tabby Default Light` 两套核心默认（数据即原 scx-terminal Dark/Light，改名对齐 Tabby）+ Tabby 官方社区配色全集 191 套（`communityColorSchemes.ts`，由一次性脚本从 `Eugeny/tabby` 仓库 `tabby-community-color-schemes/schemes/` 拉取 Xresources 文件解析生成，勿手工编辑；base16 `#define` 宏与缺冒号写法均已兼容）。
 - `resolveColorScheme(preference, systemPrefersLight, custom?)`：`'dark'`/`'light'`（旧值）→ 默认深/浅配色；`'auto'` → 按系统；其余按配色名查找（**自定义优先于内置**），找不到回退系统深浅对应默认配色。**前端唯一配色解析入口**（`frontendContext.colorScheme()`、theme store、TerminalPane 按档案配色都走它，均传 `config.store.colorSchemes`）。
-- **自定义配色**存于 `config.colorSchemes: TerminalColorScheme[]`（YAML 持久化），可与内置同名（自定义优先生效）。
+- **自定义配色**存于 `config.colorSchemes: TerminalColorScheme[]`（SQLite 持久化，按 name upsert；重命名按删旧建新处理），可与内置同名（自定义优先生效）。
 - **iTerm2 导入**：`src/lib/itermColors.ts` 的 `parseItermColorsFile(text, name)`——纯字符串解析 XML plist（`Red/Green/Blue Component` 0-1 浮点 → `#rrggbb`），映射 Ansi 0..15 / Background / Foreground / Cursor / Cursor Text / Selection / Selected Text，缺失字段回退默认深色值。
 - 单测：`src/lib/colorSchemes.test.ts`（193 套唯一名/16 色/自定义优先级/旧值兼容）、`src/lib/itermColors.test.ts`。
 

@@ -873,10 +873,11 @@ const configDir = ref('')
 invoke<string>('config_dir_path').then(path => (configDir.value = path)).catch(() => {})
 
 /**
- * @description 在 Finder 中打开配置目录（opener 插件 open_path，capabilities 已放行 $APPDATA 范围）
+ * @description 在 Finder 中打开配置数据目录（opener 插件 open_path，capabilities 已放行
+ *              identifier 数据目录范围，config.db / secrets.db 所在）
  * @returns Promise<void>
  *
- * @example await openConfigDir() // 打开 ~/Library/Application Support/scx-terminal
+ * @example await openConfigDir() // 打开 ~/Library/Application Support/com.scx.terminal
  *
  */
 async function openConfigDir (): Promise<void> {

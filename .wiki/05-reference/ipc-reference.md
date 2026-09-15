@@ -34,9 +34,16 @@
 | `pty_get_cwd` | JS→Rust | `id` | `Option<string>` | sync | 进程探测读 shell 子进程当前工作目录（`proc_cwd.rs` FFI `PROC_PIDVNODEPATHINFO`；pid 在 spawn 时拆出存 `Pty.pid`——child 锁被清理线程 wait() 持有，事后不可取） |
 | `list_shells` | JS→Rust | 无 | `ShellInfo[]`（path/name/default/args） | sync | 解析 `/etc/shells` |
 | `list_fonts` | JS→Rust | 无 | `Vec<String>`（字体族名，去重排序） | sync | `font-loader` 枚举系统字体（macOS CoreText）；失败前端回退自由文本输入 |
-| `config_load` | JS→Rust | 无 | `string`（YAML 原文，可空） | sync | 读配置文件 |
-| `config_save` | JS→Rust | `content: string` | `()` | sync | 原子写 + `.backup` |
-| `config_dir_path` | JS→Rust | 无 | `string` | sync | 配置目录绝对路径 |
+| `config_load` | JS→Rust | 无 | `ConfigSnapshot \| null`（terminal/appearance/hotkeys/profiles/colorSchemes/quickCommands/quickCommandGroups；null = 全新库未写过） | sync | 聚合读全量配置（config.db） |
+| `config_load_legacy_yaml` | JS→Rust | 无 | `string \| null` | sync | 读旧版 `config.yaml` 原文（一次性迁移源，不存在返回 null） |
+| `config_archive_legacy_yaml` | JS→Rust | 无 | `bool`（是否执行了改名） | sync | 旧 config.yaml → `config.yaml.migrated` |
+| `config_dir_path` | JS→Rust | 无 | `string` | sync | `app_data_dir` 绝对路径（config.db/secrets.db 所在） |
+| `settings_set_section` | JS→Rust | `key`（terminal\|appearance）、`value` | `()` | sync | upsert 设置分片 JSON（key 白名单校验） |
+| `hotkey_set` | JS→Rust | `action`、`bindings` | `()` | sync | upsert 单个热键绑定 |
+| `profile_create` / `profile_update` / `profile_delete` | JS→Rust | `profile`（完整 JSON）/ `id` | `()` | sync | 档案增改删；create 缺 id、update 目标不存在报错；delete 幂等 |
+| `quick_command_create` / `quick_command_update` / `quick_command_delete` | JS→Rust | `command`（id/name/command/groupId?/autoRun）/ `id` | `()` | sync | 快捷命令增改删；update 保留 sort_order；delete 幂等 |
+| `quick_command_group_create` / `quick_command_group_update` / `quick_command_group_delete` | JS→Rust | `group`（id/name）/ `id` | `()` | sync | 分组增改删；delete 同事务把组内命令降级未分组 |
+| `color_scheme_save` / `color_scheme_delete` | JS→Rust | `name`、`data` / `name` | `()` | sync | 自定义配色按 name upsert / 删（delete 幂等） |
 | `dev_log` | JS→Rust | `message: string` | `()` | sync | 前端日志转发到 stdout |
 
 类型映射注意：JS `number[]` ↔ Rust `Vec<u8>`；`SpawnOptions` 用 `#[serde(rename_all = "camelCase")]`；id 两侧都是字符串。
