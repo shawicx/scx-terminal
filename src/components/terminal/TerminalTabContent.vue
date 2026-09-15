@@ -106,6 +106,8 @@ const tabApi = {
     paste: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'paste'),
     clear: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'clear'),
     find: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'find'),
+    sendTextToActivePane: (text: string, execute?: boolean) =>
+        rootContainer.value?.sendTextToLeaf(activeLeafId.value, text, execute),
     getActivePaneCwd: async (): Promise<string | null> =>
         (await rootContainer.value?.getLeafCwd(activeLeafId.value)) ?? null,
 }

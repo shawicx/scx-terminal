@@ -6,6 +6,7 @@ import TitleBar from '@/components/titlebar/TitleBar.vue'
 import TerminalTabContent from '@/components/terminal/TerminalTabContent.vue'
 import SettingsView from '@/components/settings/SettingsView.vue'
 import CommandPalette from '@/components/palette/CommandPalette.vue'
+import QuickCommandPalette from '@/components/palette/QuickCommandPalette.vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useConfigStore } from '@/stores/config'
 import { useCommands } from '@/services/commands'
@@ -13,7 +14,7 @@ import { hotkeys } from '@/services/hotkeysSingleton'
 
 const store = useTabsStore()
 const config = useConfigStore()
-const { registerDefaults, registerProfileCommands, bindHotkeys } = useCommands()
+const { registerDefaults, registerProfileCommands, registerQuickCommandCommands, bindHotkeys } = useCommands()
 const { locale } = useI18n()
 
 function isEditableTarget (target: EventTarget | null): boolean {
@@ -43,6 +44,7 @@ onMounted(() => {
 
     registerDefaults()
     registerProfileCommands(config.store.profiles)
+    registerQuickCommandCommands(config.store.quickCommands)
     bindHotkeys()
 
     document.addEventListener('keydown', onKeydown)
@@ -57,6 +59,11 @@ onBeforeUnmount(() => {
 // 档案增删改后同步命令面板里的"按档案新建标签"命令
 watch(() => config.store.profiles, profiles => {
     registerProfileCommands(profiles)
+}, { deep: true })
+
+// 快捷命令增删改后同步命令面板里的对应条目
+watch(() => config.store.quickCommands, quickCommands => {
+    registerQuickCommandCommands(quickCommands)
 }, { deep: true })
 
 // follow the configured UI language ('auto' follows the OS)
@@ -89,6 +96,7 @@ watch(() => config.store.appearance.language, language => {
             </div>
         </div>
         <CommandPalette />
+        <QuickCommandPalette />
     </div>
 </template>
 

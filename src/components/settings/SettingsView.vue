@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { nanoid } from 'nanoid'
 import { writeClipboardText } from '@/lib/frontendContext'
-import { Terminal, Palette, Keyboard, Info, FolderOpen, Layers, KeyRound, Copy, Plus, Trash2, Upload } from 'lucide-vue-next'
+import { Terminal, Palette, Keyboard, Info, FolderOpen, Layers, KeyRound, Copy, Plus, Trash2, Upload, Zap, Pencil, X } from 'lucide-vue-next'
 import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
 import type { Event as TauriEvent, UnlistenFn } from '@tauri-apps/api/event'
 import type { SshKeyMeta, SshKeyInspection } from '@/services/secrets'
@@ -18,11 +18,12 @@ import Slider from '@/components/ui/Slider.vue'
 import Select from '@/components/ui/Select.vue'
 import Separator from '@/components/ui/Separator.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import { useConfigStore, defaultFirstProfiles, type SshProfile, type TerminalProfile } from '@/stores/config'
+import { useConfigStore, defaultFirstProfiles, type QuickCommand, type SshProfile, type TerminalProfile } from '@/stores/config'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { builtinColorSchemes, defaultDarkColorScheme, type TerminalColorScheme } from '@/lib/colorSchemes'
 import { parseItermColorsFile } from '@/lib/itermColors'
+import { groupQuickCommandSections, parseQuickCommandParams, previewQuickCommand } from '@/lib/quickCommands'
 import { listSystemFonts } from '@/services/fonts'
 import type { NewlineMode } from '@/lib/middleware/streamProcessing'
 
@@ -30,7 +31,7 @@ const { t } = useI18n()
 const config = useConfigStore()
 const store = config.store
 
-const page = ref<'terminal' | 'profiles' | 'keys' | 'appearance' | 'hotkeys' | 'about'>('profiles')
+const page = ref<'terminal' | 'profiles' | 'quickCommands' | 'keys' | 'appearance' | 'hotkeys' | 'about'>('profiles')
 
 const { sortedCommands } = useCommands()
 const hotkeyCommands = computed(() => sortedCommands.value.filter(command => command.hotkeyId))
@@ -73,6 +74,7 @@ onMounted(() => {
 
 const pages = computed(() => [
     { id: 'profiles' as const, label: t('settings.profiles'), icon: Layers },
+    { id: 'quickCommands' as const, label: t('settings.quickCommands'), icon: Zap },
     { id: 'keys' as const, label: t('settings.keychainPage'), icon: KeyRound },
     { id: 'terminal' as const, label: t('settings.terminal'), icon: Terminal },
     { id: 'appearance' as const, label: t('settings.appearance'), icon: Palette },
@@ -518,6 +520,159 @@ const cursorOptions = computed(() => [
     { value: 'underline', label: t('settings.cursorStyleUnderline') },
 ])
 
+// ---- quick commands page ----
+const selectedQuickCommandId = ref<string | null>(null)
+const selectedQuickCommand = computed(() =>
+    store.quickCommands.find(qc => qc.id === selectedQuickCommandId.value)
+    ?? store.quickCommands[0]
+    ?? null)
+
+/** 左列表分段：未分组置顶无标题，其余按组名排序带小节头 */
+const quickCommandSections = computed(() =>
+    groupQuickCommandSections(store.quickCommands, store.quickCommandGroups))
+
+/** 编辑器分组下拉：未分组 + 各分组 */
+const quickCommandGroupOptions = computed(() => [
+    { value: '', label: t('settings.quickCommandUngrouped') },
+    ...store.quickCommandGroups.map(group => ({ value: group.id, label: group.name })),
+])
+
+const quickCommandGroupModel = computed({
+    get: () => selectedQuickCommand.value?.groupId ?? '',
+    set: (value: string) => {
+        const quickCommand = selectedQuickCommand.value
+        if (quickCommand) {
+            if (value) {
+                quickCommand.groupId = value
+            } else {
+                delete quickCommand.groupId
+            }
+        }
+    },
+})
+
+/** 编辑器底部实时提示：当前模板检测到的占位参数 */
+const selectedQuickCommandParams = computed(() =>
+    selectedQuickCommand.value ? parseQuickCommandParams(selectedQuickCommand.value.command) : [])
+
+/** 左列表组标题的行内改名状态；null = 无进行中的改名 */
+const editingGroupId = ref<string | null>(null)
+const groupNameDraft = ref('')
+
+/**
+ * @description 新建快捷命令并选中（名称/命令留空，填好后自动持久化）
+ * @returns void
+ *
+ * @example createQuickCommand()
+ *
+ */
+function createQuickCommand (): void {
+    const quickCommand: QuickCommand = {
+        id: `qc-${nanoid(8)}`,
+        name: `${t('settings.quickCommands')} ${store.quickCommands.length + 1}`,
+        command: '',
+        autoRun: false,
+    }
+    store.quickCommands.push(quickCommand)
+    selectedQuickCommandId.value = quickCommand.id
+}
+
+/**
+ * @description 删除快捷命令；删除的是选中项时选中态收敛到剩余第一项
+ * @param id 命令 id
+ * @returns void
+ *
+ * @example deleteQuickCommand('qc-abc123')
+ *
+ */
+function deleteQuickCommand (id: string): void {
+    const index = store.quickCommands.findIndex(qc => qc.id === id)
+    if (index === -1) {
+        return
+    }
+    store.quickCommands.splice(index, 1)
+    if (selectedQuickCommandId.value === id) {
+        selectedQuickCommandId.value = store.quickCommands[0]?.id ?? null
+    }
+}
+
+/**
+ * @description 新建分组并直接进入行内改名
+ * @returns void
+ *
+ * @example createQuickCommandGroup()
+ *
+ */
+function createQuickCommandGroup (): void {
+    const group = {
+        id: `qcgroup-${nanoid(6)}`,
+        name: t('settings.quickCommandNewGroupName'),
+    }
+    store.quickCommandGroups.push(group)
+    startGroupRename(group.id)
+}
+
+/**
+ * @description 删除分组：组内命令降级为未分组（groupId 清空）
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example deleteQuickCommandGroup('qcgroup-a1b2')
+ *
+ */
+function deleteQuickCommandGroup (id: string): void {
+    const index = store.quickCommandGroups.findIndex(group => group.id === id)
+    if (index === -1) {
+        return
+    }
+    store.quickCommandGroups.splice(index, 1)
+    for (const quickCommand of store.quickCommands) {
+        if (quickCommand.groupId === id) {
+            delete quickCommand.groupId
+        }
+    }
+    if (editingGroupId.value === id) {
+        editingGroupId.value = null
+    }
+}
+
+/**
+ * @description 开始分组行内改名（组名写入草稿）
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example startGroupRename('qcgroup-a1b2')
+ *
+ */
+function startGroupRename (id: string): void {
+    const group = store.quickCommandGroups.find(g => g.id === id)
+    if (!group) {
+        return
+    }
+    editingGroupId.value = id
+    groupNameDraft.value = group.name
+}
+
+/**
+ * @description 提交分组改名（空名放弃修改）
+ * @returns void
+ *
+ * @example commitGroupRename()
+ *
+ */
+function commitGroupRename (): void {
+    const id = editingGroupId.value
+    const group = store.quickCommandGroups.find(g => g.id === id)
+    if (group) {
+        const name = groupNameDraft.value.trim()
+        if (name) {
+            group.name = name
+        }
+    }
+    editingGroupId.value = null
+}
+
+
 const backspaceOptions = computed(() => [
     { value: 'backspace', label: t('settings.backspaceDefault') },
     { value: 'ctrl-h', label: t('settings.backspaceCtrlH') },
@@ -941,6 +1096,104 @@ async function openConfigDir (): Promise<void> {
                             <Button variant="ghost" size="sm" class="profile-delete" @click="deleteProfile(selectedProfile.id)">
                                 <Trash2 :size="14" />
                                 {{ t('settings.profileDelete') }}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <template v-else-if="page === 'quickCommands'">
+                <h2>{{ t('settings.quickCommands') }}</h2>
+                <div class="profiles-layout">
+                    <div class="profiles-list">
+                        <div class="profile-new-group">
+                            <button class="profile-new-button" @click="createQuickCommand">
+                                <Plus :size="14" />
+                                <span>{{ t('settings.quickCommandNew') }}</span>
+                            </button>
+                            <button class="profile-new-button" @click="createQuickCommandGroup">
+                                <Plus :size="14" />
+                                <span>{{ t('settings.quickCommandNewGroup') }}</span>
+                            </button>
+                        </div>
+                        <template v-for="section in quickCommandSections" :key="section.groupId ?? '__ungrouped'">
+                            <div v-if="section.title !== null" class="qc-group-header">
+                                <template v-if="editingGroupId === section.groupId">
+                                    <input
+                                        v-model="groupNameDraft"
+                                        class="qc-group-name-input"
+                                        @keydown.enter.prevent="commitGroupRename"
+                                        @keydown.esc.prevent="editingGroupId = null"
+                                        @blur="commitGroupRename"
+                                    />
+                                </template>
+                                <template v-else>
+                                    <span class="qc-group-name">{{ section.title }}</span>
+                                    <span class="qc-group-actions">
+                                        <button class="qc-group-action" :title="t('settings.quickCommandRenameGroup')" @click.stop="startGroupRename(section.groupId!)">
+                                            <Pencil :size="12" />
+                                        </button>
+                                        <button class="qc-group-action" :title="t('settings.quickCommandDeleteGroup')" @click.stop="deleteQuickCommandGroup(section.groupId!)">
+                                            <X :size="12" />
+                                        </button>
+                                    </span>
+                                </template>
+                            </div>
+                            <button
+                                v-for="qc in section.items"
+                                :key="qc.id"
+                                class="profile-item"
+                                :class="{ active: qc.id === selectedQuickCommand?.id }"
+                                @click="selectedQuickCommandId = qc.id"
+                            >
+                                <span class="profile-item-head">
+                                    <span class="profile-item-name">{{ qc.name || previewQuickCommand(qc.command) }}</span>
+                                    <span v-if="qc.autoRun" class="qc-auto-run-badge">↵</span>
+                                </span>
+                                <span class="profile-item-command">{{ previewQuickCommand(qc.command) }}</span>
+                            </button>
+                        </template>
+                        <p v-if="store.quickCommands.length === 0 && store.quickCommandGroups.length === 0" class="hint">
+                            {{ t('settings.quickCommandEmptyHint') }}
+                        </p>
+                    </div>
+                    <div v-if="selectedQuickCommand" class="profile-editor">
+                        <div class="settings-field">
+                            <Label>{{ t('settings.quickCommandName') }}</Label>
+                            <Input v-model="selectedQuickCommand.name" class="w-60" />
+                        </div>
+                        <div class="settings-field">
+                            <Label>{{ t('settings.quickCommandGroupLabel') }}</Label>
+                            <Select v-model="quickCommandGroupModel" :options="quickCommandGroupOptions" class="w-60" />
+                        </div>
+                        <div class="settings-field">
+                            <Label>
+                                {{ t('settings.quickCommandCommand') }}
+                                <span class="value-hint">{{ t('settings.quickCommandCommandHint') }}</span>
+                            </Label>
+                            <textarea
+                                v-model="selectedQuickCommand.command"
+                                class="qc-command-input"
+                                rows="6"
+                                spellcheck="false"
+                                :placeholder="t('settings.quickCommandCommandPlaceholder')"
+                            ></textarea>
+                        </div>
+                        <p v-if="selectedQuickCommandParams.length" class="hint qc-params-hint">
+                            {{ t('settings.quickCommandParams', { names: selectedQuickCommandParams.join(', ') }) }}
+                        </p>
+                        <div class="settings-field row">
+                            <Label>
+                                {{ t('settings.quickCommandAutoRun') }}
+                                <span class="value-hint">{{ t('settings.quickCommandAutoRunHint') }}</span>
+                            </Label>
+                            <Switch v-model="selectedQuickCommand.autoRun" />
+                        </div>
+                        <Separator />
+                        <div class="settings-field row profile-actions">
+                            <Button variant="ghost" size="sm" class="profile-delete" @click="deleteQuickCommand(selectedQuickCommand.id)">
+                                <Trash2 :size="14" />
+                                {{ t('settings.quickCommandDelete') }}
                             </Button>
                         </div>
                     </div>
@@ -1538,6 +1791,98 @@ async function openConfigDir (): Promise<void> {
 .profile-actions {
     gap: 8px;
     justify-content: flex-start;
+}
+
+.qc-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    padding: 8px 6px 2px;
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: 2px;
+}
+
+.qc-group-name {
+    font-size: 11px;
+    color: var(--color-muted-foreground);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.qc-group-name-input {
+    flex: 1;
+    min-width: 0;
+    padding: 2px 6px;
+    border: 1px solid var(--color-input);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-foreground);
+    font-size: 11px;
+    outline: none;
+}
+
+.qc-group-actions {
+    display: none;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.qc-group-header:hover .qc-group-actions {
+    display: inline-flex;
+}
+
+.qc-group-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-muted-foreground);
+    cursor: default;
+}
+
+.qc-group-action:hover {
+    background: var(--color-accent);
+    color: var(--color-accent-foreground);
+}
+
+.qc-auto-run-badge {
+    flex-shrink: 0;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: var(--color-accent);
+    color: var(--color-accent-foreground);
+    font-size: 10px;
+    line-height: 14px;
+}
+
+.qc-command-input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--color-input);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-foreground);
+    font-family: monospace;
+    font-size: 12px;
+    resize: vertical;
+    outline: none;
+}
+
+.qc-command-input:focus-visible {
+    border-color: var(--color-ring);
+    box-shadow: 0 0 0 1px var(--color-ring);
+}
+
+.qc-params-hint {
+    margin: -4px 0 8px;
 }
 
 .profile-delete {

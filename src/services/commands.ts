@@ -1,11 +1,13 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTabsStore } from '@/stores/tabs'
-import { useConfigStore, type TerminalProfile } from '@/stores/config'
+import { useConfigStore, type QuickCommand, type TerminalProfile } from '@/stores/config'
 import { terminalTabApi } from './terminalTabsApi'
+import { openQuickCommandPalette } from './quickCommandPalette'
 import { hotkeys } from './hotkeysSingleton'
 import { defaultDarkColorScheme, defaultLightColorScheme } from '@/lib/colorSchemes'
 import { writeClipboardText } from '@/lib/frontendContext'
+import { parseQuickCommandParams, previewQuickCommand } from '@/lib/quickCommands'
 
 export interface Command {
     id: string
@@ -61,6 +63,32 @@ export function useCommands () {
                 group: 'tab',
                 label: () => t('commands.newTabWithProfile', { name: profile.name }),
                 handler: () => void openNewTerminalTabWithCwd(profile.id),
+            })
+        }
+    }
+
+    const QUICK_COMMAND_PREFIX = 'quick-command:'
+
+    /**
+     * 同步式注册"快捷命令"面板条目：先移除全部旧命令再按当前命令重建
+     * （增删改后由 App.vue 的 watch 调用）。无参数命令直接发送；
+     * 有参数命令打开选择器并直接进入填参态
+     */
+    function registerQuickCommandCommands (quickCommands: QuickCommand[]): void {
+        commands.value = commands.value.filter(c => !c.id.startsWith(QUICK_COMMAND_PREFIX))
+        for (const quickCommand of quickCommands) {
+            register({
+                id: `${QUICK_COMMAND_PREFIX}${quickCommand.id}`,
+                group: 'quickCommand',
+                label: () => quickCommand.name || previewQuickCommand(quickCommand.command),
+                enabled: () => !!terminalTabApi.current,
+                handler: () => {
+                    if (parseQuickCommandParams(quickCommand.command).length) {
+                        openQuickCommandPalette(quickCommand.id)
+                    } else {
+                        terminalTabApi.current?.sendTextToActivePane(quickCommand.command, quickCommand.autoRun)
+                    }
+                },
             })
         }
     }
@@ -167,6 +195,12 @@ export function useCommands () {
             },
         })
         register({
+            id: 'open-quick-commands', group: 'app', hotkeyId: 'quick-commands-palette',
+            label: () => t('commands.quickCommands'),
+            enabled: () => !!terminalTabApi.current,
+            handler: () => openQuickCommandPalette(),
+        })
+        register({
             id: 'open-settings', group: 'app',
             label: () => t('commands.openSettings'),
             handler: () => tabs.openSettingsTab(),
@@ -198,10 +232,10 @@ export function useCommands () {
     }
 
     const sortedCommands = computed(() => {
-        const groups = ['tab', 'terminal', 'app']
+        const groups = ['tab', 'terminal', 'quickCommand', 'app']
         return [...commands.value].sort((a, b) =>
             groups.indexOf(a.group) - groups.indexOf(b.group) || a.id.localeCompare(b.id))
     })
 
-    return { register, registerDefaults, registerProfileCommands, dispatchHotkey, bindHotkeys, sortedCommands, commands }
+    return { register, registerDefaults, registerProfileCommands, registerQuickCommandCommands, dispatchHotkey, bindHotkeys, sortedCommands, commands }
 }

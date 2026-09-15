@@ -133,6 +133,22 @@ async function pasteFromClipboard (): Promise<void> {
 }
 
 /**
+ * @description 向本窗格会话写入一段文本（快捷命令用）：走 feedFromTerminal 复用输入中间件
+ *              （换行转换/退格映射），本地与 SSH 会话同接口；写入后聚焦终端
+ * @param text 待写入的文本（多行原样保留）
+ * @param execute 是否在文本末尾补换行立即执行（快捷命令的 autoRun）
+ * @returns void
+ *
+ * @example paneRef.value?.sendText('git status', true)
+ *
+ */
+function sendText (text: string, execute = false): void {
+    const normalized = text.replace(/\r\n/g, '\n')
+    session?.feedFromTerminal(encodeUTF8(execute ? normalized + '\n' : normalized))
+    frontend?.focus()
+}
+
+/**
  * @description 查询本窗格会话的当前工作目录（OSC 上报优先，进程探测兜底）
  * @returns Promise<string | null> 目录绝对路径或 null（会话未启动/已退出）
  *
@@ -153,6 +169,7 @@ defineExpose({
     clear: () => frontend?.clear(),
     find: () => openSearch(),
     getWorkingDirectory,
+    sendText,
     toggleSftp: () => {
         if (props.profile.type === 'ssh') {
             sftpOpen.value = !sftpOpen.value

@@ -21,9 +21,9 @@ const emit = defineEmits<{
 }>()
 
 const branchEl = ref<HTMLElement>()
-type PaneHandle = { focus (): void, copy (): void, paste (): void, clear (): void, find (): void, getWorkingDirectory (): Promise<string | null> }
+type PaneHandle = { focus (): void, copy (): void, paste (): void, clear (): void, find (): void, getWorkingDirectory (): Promise<string | null>, sendText (text: string, execute?: boolean): void }
 const paneRefs = new Map<string, PaneHandle>()
-type ContainerHandle = { focusLeaf (id: string): void, invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find'): void, getLeafCwd (id: string): Promise<string | null | undefined> }
+type ContainerHandle = { focusLeaf (id: string): void, invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find'): void, getLeafCwd (id: string): Promise<string | null | undefined>, sendTextToLeaf (id: string, text: string, execute?: boolean): void }
 const containerRefs = new Map<string, ContainerHandle>()
 
 function registerPane (id: string, comp: unknown) {
@@ -58,6 +58,23 @@ function invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find'):
 }
 
 /**
+ * @description 向指定叶窗格会话写入文本（快捷命令用，递归下钻子容器）
+ * @param id 叶节点 id
+ * @param text 待写入文本
+ * @param execute 是否补换行立即执行
+ * @returns void
+ *
+ * @example sendTextToLeaf(activeLeafId, 'git status', true)
+ *
+ */
+function sendTextToLeaf (id: string, text: string, execute?: boolean): void {
+    paneRefs.get(id)?.sendText(text, execute)
+    for (const container of containerRefs.values()) {
+        container?.sendTextToLeaf(id, text, execute)
+    }
+}
+
+/**
  * @description 查询叶窗格会话的当前工作目录（递归下钻子容器）
  * @param id 叶节点 id
  * @returns Promise<string | null | undefined> 目录路径；null = 叶存在但无 cwd；undefined = 叶不在本子树
@@ -79,7 +96,7 @@ async function getLeafCwd (id: string): Promise<string | null | undefined> {
     return undefined
 }
 
-defineExpose({ focusLeaf, invokeOnLeaf, getLeafCwd })
+defineExpose({ focusLeaf, invokeOnLeaf, getLeafCwd, sendTextToLeaf })
 
 function onSpannerResize (index: number, delta: number) {
     const node = props.node.type === 'branch' ? props.node : null

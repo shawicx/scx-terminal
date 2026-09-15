@@ -45,6 +45,22 @@ export interface SshProfile {
 /** 终端配置档案：type 为判别字段（local 本地 shell / ssh 远程连接） */
 export type TerminalProfile = LocalProfile | SshProfile
 
+/** 快捷命令分组（管理用实体，命令以 groupId 单选引用） */
+export interface QuickCommandGroup {
+    id: string
+    name: string
+}
+
+/** 快捷命令：command 支持 {{参数}} 占位符（Warp Workflow 式），autoRun 控制写入后是否补换行执行 */
+export interface QuickCommand {
+    id: string
+    name: string
+    command: string
+    /** 所属分组 id；缺省 = 未分组 */
+    groupId?: string
+    autoRun: boolean
+}
+
 export interface TerminalConfig {
     font: string
     fontSize: number
@@ -87,6 +103,8 @@ export interface ConfigStore {
     profiles: TerminalProfile[]
     /** 用户自定义配色方案（名称与内置重复时优先于内置生效） */
     colorSchemes: TerminalColorScheme[]
+    quickCommands: QuickCommand[]
+    quickCommandGroups: QuickCommandGroup[]
 }
 
 function defaultConfig (): ConfigStore {
@@ -121,6 +139,8 @@ function defaultConfig (): ConfigStore {
         },
         profiles: [],
         colorSchemes: [],
+        quickCommands: [],
+        quickCommandGroups: [],
         hotkeys: defaultHotkeys(),
     }
 }
@@ -201,6 +221,7 @@ export function defaultHotkeys (): HotkeysConfig {
             'paste': [['⌘-V']],
             'clear': [['⌘-K']],
             'find': [['⌘-F']],
+            'quick-commands-palette': [['⌘-Shift-R']],
             // 默认不绑定（与 Tabby 一致），可在设置页快捷键录制
             'copy-current-path': [],
         }
@@ -220,6 +241,7 @@ export function defaultHotkeys (): HotkeysConfig {
         'paste': [['Ctrl-Shift-V']],
         'clear': [['Ctrl-Shift-K']],
         'find': [['Ctrl-Shift-F']],
+        'quick-commands-palette': [['Ctrl-Shift-R']],
         'copy-current-path': [],
     }
 }
@@ -284,6 +306,7 @@ export const useConfigStore = defineStore('config', () => {
                     deepMerge(store, userConfig)
                     store.hotkeys = normalizeHotkeysConfig(store.hotkeys)
                     sanitizeProfiles()
+                    sanitizeQuickCommands()
                 }
             }
         } catch (error) {
@@ -312,6 +335,22 @@ export const useConfigStore = defineStore('config', () => {
             const legacy = profile as Record<string, unknown>
             delete legacy.password
             delete legacy.privateKeyPath
+        }
+    }
+
+    /**
+     * @description 清理快捷命令上悬空的 groupId（分组被删/手改 YAML 后的引用残留，降级为未分组）
+     * @returns void
+     *
+     * @example sanitizeQuickCommands()
+     *
+     */
+    function sanitizeQuickCommands (): void {
+        const groupIds = new Set(store.quickCommandGroups.map(group => group.id))
+        for (const quickCommand of store.quickCommands) {
+            if (quickCommand.groupId && !groupIds.has(quickCommand.groupId)) {
+                delete quickCommand.groupId
+            }
         }
     }
 
