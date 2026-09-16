@@ -49,9 +49,10 @@ function open (): void {
 }
 
 function close (): void {
+    // 热键恢复统一由 watch(paletteOpen → false) 负责：close 与 watch 各 enable 一次
+    // 会让 disabledLevel 计数每轮开-关净减 1，归零判断失效后热键永久不可用
     paletteOpen.value = false
     query.value = ''
-    hotkeys.enable()
 }
 
 function pick (index: number): void {

@@ -97,6 +97,24 @@ describe('hotkey matching', () => {
         expect(emitted).toEqual([])
     })
 
+    it('stays functional after an asymmetric enable (palette double-enable regression)', () => {
+        const service = new HotkeysService(() => ({ 'command-palette': [[`${metaKeyName}-Shift-P`]] }))
+        const emitted: string[] = []
+        service.hotkey$.subscribe(id => emitted.push(id))
+
+        // 回归场景：面板 close() 与 watch(open→false) 各 enable 一次 → 计数被打成负数，
+        // isEnabled()（=== 0）永远为 false，热键永久失效。防负钳制后单次 disable 配
+        // 多余 enable 不得影响后续匹配。
+        service.disable()
+        service.enable()
+        service.enable()
+        service.pushKeyEvent('keydown', keyEvent({ key: 'Meta', metaKey: true }))
+        service.pushKeyEvent('keydown', keyEvent({ key: 'p', metaKey: true, shiftKey: true }))
+
+        expect(emitted).toEqual(['command-palette'])
+        expect(service.isEnabled()).toBe(true)
+    })
+
     it('matches multi-key sequences in order', () => {
         const service = new HotkeysService(() => ({ 'close-pane': [[`${metaKeyName}-K`, `${metaKeyName}-X`]] }))
         const emitted: string[] = []

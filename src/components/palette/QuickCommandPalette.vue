@@ -77,11 +77,11 @@ function open (): void {
 }
 
 function close (): void {
+    // 热键恢复统一由 watch(quickCommandPaletteOpen → false) 负责（双 enable 会使计数器失衡）
     closeQuickCommandPalette()
     query.value = ''
     editing.value = null
     paramValues.value = {}
-    hotkeys.enable()
 }
 
 /**

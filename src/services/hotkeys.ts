@@ -32,8 +32,9 @@ export class HotkeysService {
         this.disabledLevel++
     }
 
+    /** 计数恢复，向下钳制到 0：防止不对称的 enable 调用把计数打成负数、热键永久禁用 */
     enable (): void {
-        this.disabledLevel--
+        this.disabledLevel = Math.max(0, this.disabledLevel - 1)
     }
 
     isEnabled (): boolean {

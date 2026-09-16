@@ -48,7 +48,7 @@
 
 ## 命令面板（`src/components/palette/CommandPalette.vue`）
 
-模糊搜索（`src/lib/utils/fuzzy.ts`）`sortedCommands`，回车执行；打开时 `hotkeys.disable()`，关闭 `enable()`。
+模糊搜索（`src/lib/utils/fuzzy.ts`）`sortedCommands`，回车执行。热键暂停/恢复的**唯一对称点**是面板组件对 open ref 的 `watch`（true → `open()` 内 `hotkeys.disable()`，false → `hotkeys.enable()`）；`close()` 里不得再调 `enable()`——`disabledLevel` 是计数器，双 enable 会让每轮开-关净减 1，计数变负后 `isEnabled()`（`=== 0`）永远为 false，**所有热键永久失效**（2026-09-16 修复的「面板关一次就再也打不开」bug；`enable()` 已加 0 下限钳制兜底）。
 
 ## 已知坑（历史）
 
