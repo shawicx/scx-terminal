@@ -12,7 +12,7 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     outputs:
-      body: ${{ steps.git-cliff.outputs.content }}
+      release_id: ${{ steps.create_release.outputs.release_id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,6 +24,20 @@ jobs:
         with:
           config: cliff.toml
           args: --latest --strip header
+
+      # 先建 draft release，各平台构建用 releaseId 直传产物，避免多 job 并发创建同一 release 撞 already_exists
+      - name: Create draft release
+        id: create_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES: ${{ steps.git-cliff.outputs.content }}
+        run: |
+          printf '%s' "$NOTES" > /tmp/release-notes.md
+          gh release create '${{ github.ref_name }}' --draft \
+            --title 'SCX Terminal ${{ github.ref_name }}' \
+            --notes-file /tmp/release-notes.md
+          release_id=$(gh api 'repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}' --jq .id)
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
   build:
     needs: changelog
@@ -75,9 +89,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          releaseId: ${{ needs.changelog.outputs.release_id }}
           tagName: ${{ github.ref_name }}
-          releaseName: 'SCX Terminal ${{ github.ref_name }}'
-          releaseBody: ${{ needs.changelog.outputs.body }}
-          releaseDraft: false
-          prerelease: false
           args: ${{ matrix.args }}
+
+  # 全平台产物就绪后才把 draft 转正式发布；部分失败时 draft 保留，re-run all jobs 即可重新走完整流程
+  publish:
+    needs: [changelog, build]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api -X PATCH 'repos/${{ github.repository }}/releases/${{ needs.changelog.outputs.release_id }}' -F draft=false

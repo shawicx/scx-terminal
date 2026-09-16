@@ -157,7 +157,13 @@ async fn rsa_hash_for(handle: &client::Handle<ScxHandler>, algorithm: ssh_key::A
 
 /// agent 认证：逐个 identity 尝试（返回是否成功）
 async fn try_agent(handle: &mut client::Handle<ScxHandler>, user: &str) -> Result<bool, String> {
+    // connect_env 仅在 Unix 存在（依赖 SSH_AUTH_SOCK）；Windows 走系统 OpenSSH Agent 服务的命名管道
+    #[cfg(unix)]
     let mut agent = AgentClient::connect_env()
+        .await
+        .map_err(|e| format!("SSH agent unavailable: {e}"))?;
+    #[cfg(windows)]
+    let mut agent = AgentClient::connect_named_pipe(r"\\.\pipe\openssh-ssh-agent")
         .await
         .map_err(|e| format!("SSH agent unavailable: {e}"))?;
     let identities = agent
