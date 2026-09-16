@@ -1,0 +1,26 @@
+[changelog]
+header = """
+# Changelog\n
+All notable changes to this project will be documented in this file.\n
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->🚀 新功能" },
+  { message = "^fix", group = "<!-- 1 -->🐛 修复" },
+  { message = "^perf", group = "<!-- 2 -->⚡ 性能优化" },
+  { message = "^refactor", group = "<!-- 3 -->♻️ 重构" },
+  { message = "^doc", skip = true },
+  { message = "^style", skip = true },
+  { message = "^chore", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^test", skip = true },
+]
+protect_breaking_commits = false
+filter_commits = true
+tag_pattern = "v[0-9].*"
+sort_commits = "oldest"
