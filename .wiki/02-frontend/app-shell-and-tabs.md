@@ -6,7 +6,7 @@
 | --- | --- |
 | `src/App.vue` | 应用骨架：TitleBar + 标签内容区 + CommandPalette；启动时创建首个标签；注册命令与全局键盘监听；语言跟随 |
 | `src/main.ts` | bootstrap：Pinia → **先加载配置再初始化主题** → Vue errorHandler / window error / unhandledrejection 全部转发到 Rust `dev_log`（`tauri dev` 控制台可见） |
-| `src/components/titlebar/TitleBar.vue` | 自定义标题栏（macOS Overlay 标题栏）：交通灯占位、标签条（右键菜单/重命名/颜色标记）、`+` 新建、设置齿轮 |
+| `src/components/titlebar/TitleBar.vue` | 自定义标题栏（macOS Overlay 标题栏）：交通灯占位、标签条（右键菜单/重命名/颜色标记）、`+` 新建、设置齿轮。⚠️ 拖拽/双击缩放全靠元素上的 `data-tauri-drag-region`（Tauri 原生：mousedown 拖动、macOS 双击在 mouseup 调 `internal_toggle_maximize`）——**不要再自绑 `@dblclick` 缩放**，双重 toggle 会竞态，表现为「最大化双击还原时大概率又弹回最大化」 |
 | `src/stores/tabs.ts` | 标签状态（`tabs` / `activeId` / `activeTab`）与动作（含 `renameTab` / `setTabColor` / `closeOtherTabs`） |
 | `src/components/palette/CommandPalette.vue` | 命令面板：模糊搜索命令并执行；打开期间 `hotkeys.disable()` 暂停全局热键 |
 | `src/components/ui/ContextMenu.vue` | 通用右键菜单（reka-ui ContextMenu 封装）：`items` 传入菜单项（含 `swatch` 色块、`danger`、分隔线），`select(key)` 回传 |

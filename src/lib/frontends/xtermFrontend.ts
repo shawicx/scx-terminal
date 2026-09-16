@@ -507,6 +507,17 @@ export class XTermFrontend extends Frontend {
         this.xterm.clear()
     }
 
+    /**
+     * @description 当前 xterm 实际渲染尺寸（spawn 后与 pty 对齐用）
+     * @returns { columns, rows } 列数与行数
+     *
+     * @example frontend.getSize().columns // => 88
+     *
+     */
+    getSize (): { columns: number, rows: number } {
+        return { columns: this.xterm.cols, rows: this.xterm.rows }
+    }
+
     resetTerminalModes (): void {
         // Disable mouse tracking modes and SGR extended mouse mode to prevent
         // stale mouse tracking from leaking escape sequences as text.

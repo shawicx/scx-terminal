@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Plus, Settings, X } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { platform } from '@/lib/platform'
@@ -13,7 +12,6 @@ import DropdownMenu from '@/components/ui/DropdownMenu.vue'
 const { t } = useI18n()
 const store = useTabsStore()
 const config = useConfigStore()
-const appWindow = getCurrentWindow()
 
 const dragOverIndex = ref<number | null>(null)
 const dragFromIndex = ref<number | null>(null)
@@ -54,10 +52,6 @@ function onNewTabMenuSelect (key: string): void {
         const cwd = await terminalTabApi.current?.getActivePaneCwd() ?? null
         store.openTerminalTab(key, cwd)
     })()
-}
-
-function toggleMaximize () {
-    void appWindow.toggleMaximize()
 }
 
 /**
@@ -197,15 +191,17 @@ function onDragEnd () {
 </script>
 
 <template>
-    <div class="title-bar" @dblclick.self="toggleMaximize">
+    <div class="title-bar">
+        <!-- 双击缩放统一交给 Tauri 原生 drag-region 处理（macOS 在 mouseup 调
+             internal_toggle_maximize）；自绑 @dblclick 会造成二次 toggle，窗口
+             从最大化双击还原时被竞态弹回最大化 -->
         <div
             v-if="needsTrafficLightSpace"
             class="traffic-light-space"
             data-tauri-drag-region
-            @dblclick.stop="toggleMaximize"
         ></div>
 
-        <div class="tabs-region">
+        <div class="tabs-region" data-tauri-drag-region>
             <ContextMenu
                 v-for="(tab, index) in store.tabs"
                 :key="tab.id"
@@ -257,7 +253,7 @@ function onDragEnd () {
             </DropdownMenu>
         </div>
 
-        <div class="drag-area" data-tauri-drag-region @dblclick.stop="toggleMaximize"></div>
+        <div class="drag-area" data-tauri-drag-region></div>
 
         <button class="new-tab-button settings-button" title="Settings" @click="store.openSettingsTab()">
             <Settings :size="14" />

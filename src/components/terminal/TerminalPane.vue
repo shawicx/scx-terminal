@@ -325,6 +325,11 @@ onMounted(async () => {
             })
         }
         session.releaseInitialDataBuffer()
+        // 防御性对齐：attach 期间 fit 的时序异常可能让 spawn 用上过时尺寸（本地与
+        // SSH 会话均可能出现 COLUMNS ≠ 实际渲染列数），spawn 完成后立即以 xterm
+        // 实际尺寸补一次 resize——不一致会破坏 zsh PROMPT_SP 补行等行宽敏感行为
+        const { columns, rows } = frontend.getSize()
+        session.resize(columns, rows)
         if (props.active) {
             frontend.focus()
         }
