@@ -36,7 +36,9 @@ jobs:
           gh release create '${{ github.ref_name }}' --draft \
             --title 'SCX Terminal ${{ github.ref_name }}' \
             --notes-file /tmp/release-notes.md
-          release_id=$(gh api 'repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}' --jq .id)
+          # draft release 在发布前不关联真实 tag，GET /releases/tags/{tag} 返回 404，需从 release 列表按 tag_name 匹配
+          release_id=$(gh api 'repos/${{ github.repository }}/releases' \
+            --jq "[.[] | select(.tag_name == '${{ github.ref_name }}')][0].id")
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
   build:
