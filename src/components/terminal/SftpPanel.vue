@@ -171,7 +171,10 @@ async function renameEntry (entry: SftpFileEntry): Promise<void> {
 }
 
 async function removeEntry (entry: SftpFileEntry): Promise<void> {
-    if (!window.confirm(t('sftp.deleteConfirm', { name: entry.name }))) {
+    // window.confirm 被 dialog 插件接管后转发到 plugin:dialog|confirm，该命令在插件 2.7+ 已并入 message，
+    // 直接调用会被 ACL 拒绝（Command not found），必须走插件 JS API
+    const { confirm } = await import('@tauri-apps/plugin-dialog')
+    if (!(await confirm(t('sftp.deleteConfirm', { name: entry.name })))) {
         return
     }
     error.value = ''
