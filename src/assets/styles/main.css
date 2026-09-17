@@ -80,6 +80,16 @@
     --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Tailwind v4 的裸 border 工具类默认取 currentColor（文字色），
+   深色主题下菜单/弹层描边会变成刺眼的亮白色——统一回落到 --border */
+@layer base {
+    *,
+    ::before,
+    ::after {
+        border-color: var(--border);
+    }
+}
+
 html,
 body,
 #app {

@@ -145,7 +145,7 @@ function selectScheme (name: string): void {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    max-width: 520px;
+    max-width: 620px;
 }
 
 .scheme-search {

@@ -11,18 +11,19 @@ import type { Event as TauriEvent, UnlistenFn } from '@tauri-apps/api/event'
 import type { SshKeyMeta, SshKeyInspection } from '@/services/secrets'
 import { generateSshKey, importSshKey, inspectSshKey, listSshKeys, updateSshKey, deleteSshKey, setProfilePassword, removeProfilePassword, hasProfilePassword } from '@/services/secrets'
 import Button from '@/components/ui/Button.vue'
+import Dialog from '@/components/ui/Dialog.vue'
 import Input from '@/components/ui/Input.vue'
 import Label from '@/components/ui/Label.vue'
 import Switch from '@/components/ui/Switch.vue'
 import Slider from '@/components/ui/Slider.vue'
 import Select from '@/components/ui/Select.vue'
-import Separator from '@/components/ui/Separator.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ColorSchemePicker from '@/components/settings/ColorSchemePicker.vue'
 import { useConfigStore, defaultFirstProfiles, type QuickCommand, type SshProfile, type TerminalProfile } from '@/stores/config'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { formatKeystrokeForDisplay } from '@/lib/hotkeys/hotkeys'
+import appIcon from '../../../src-tauri/icons/icon.png'
 import { builtinColorSchemes, defaultDarkColorScheme, type TerminalColorScheme } from '@/lib/colorSchemes'
 import { parseItermColorsFile } from '@/lib/itermColors'
 import { groupQuickCommandSections, parseQuickCommandParams, previewQuickCommand } from '@/lib/quickCommands'
@@ -50,6 +51,73 @@ function bindingFor (hotkeyId: string): string {
     return (store.hotkeys[hotkeyId] ?? [])
         .map(sequence => sequence.map(formatKeystrokeForDisplay).join(' '))
         .join(', ')
+}
+
+// ---- 危险操作确认弹窗（档案/快捷命令/密钥/自定义配色删除共用） ----
+const confirmState = ref<{ message: string, action: () => void } | null>(null)
+
+/**
+ * @description 打开删除确认弹窗：记录提示文案与确认后执行的动作
+ * @param message 确认提示文案（含目标名称）
+ * @param action 确认后执行的动作
+ * @returns void
+ *
+ */
+function confirmAction (message: string, action: () => void): void {
+    confirmState.value = { message, action }
+}
+
+/**
+ * @description 执行已确认的动作并关闭弹窗
+ * @returns void
+ *
+ */
+function runConfirmed (): void {
+    const current = confirmState.value
+    confirmState.value = null
+    current?.action()
+}
+
+/**
+ * @description 删除配置档案（经确认弹窗）
+ * @param profile 目标档案
+ * @returns void
+ *
+ */
+function confirmDeleteProfile (profile: TerminalProfile): void {
+    confirmAction(t('settings.deleteConfirmBody', { name: profile.name }), () => deleteProfile(profile.id))
+}
+
+/**
+ * @description 删除快捷命令（经确认弹窗；未命名时以命令预览为名）
+ * @param quickCommand 目标快捷命令
+ * @returns void
+ *
+ */
+function confirmDeleteQuickCommand (quickCommand: QuickCommand): void {
+    const name = quickCommand.name || previewQuickCommand(quickCommand.command)
+    confirmAction(t('settings.deleteConfirmBody', { name }), () => deleteQuickCommand(quickCommand.id))
+}
+
+/**
+ * @description 删除密钥链条目（经确认弹窗；引用中的档案同步置空 keyId）
+ * @param key 目标密钥条目
+ * @returns void
+ *
+ */
+function confirmDeleteKey (key: SshKeyMeta): void {
+    confirmAction(t('settings.deleteConfirmBody', { name: key.name }), () => void deleteKeyEntry(key))
+}
+
+/**
+ * @description 删除自定义配色（经确认弹窗）
+ * @param name 配色名称
+ * @param index 自定义配色列表索引
+ * @returns void
+ *
+ */
+function confirmDeleteCustomScheme (name: string, index: number): void {
+    confirmAction(t('settings.deleteConfirmBody', { name }), () => deleteCustomScheme(index))
 }
 
 function startRecording (hotkeyId: string): void {
@@ -308,6 +376,19 @@ function openKeyAddForm (): void {
     keyAddInspection.value = null
     keyAddError.value = ''
     keyDropFileName.value = ''
+}
+
+/**
+ * @description 切换「添加密钥」表单：打开时重置草稿，再点收起
+ * @returns void
+ *
+ */
+function toggleKeyAddForm (): void {
+    if (keyAddOpen.value) {
+        keyAddOpen.value = false
+    } else {
+        openKeyAddForm()
+    }
 }
 
 /**
@@ -927,110 +1008,147 @@ async function openConfigDir (): Promise<void> {
         <div class="settings-content">
             <template v-if="page === 'terminal'">
                 <h2>{{ t('settings.terminal') }}</h2>
-                <div class="settings-field">
-                    <Label>{{ t('settings.fontSize') }} <span class="value-hint">{{ store.terminal.fontSize }}</span></Label>
-                    <Slider v-model="store.terminal.fontSize" :min="8" :max="32" :step="1" />
+
+                <div class="settings-section">
+                    <h3 class="settings-section-title">{{ t('settings.sectionFontDisplay') }}</h3>
+                    <div class="settings-card">
+                        <div class="settings-card-row stacked">
+                            <div class="settings-row-head">
+                                <Label>{{ t('settings.fontSize') }}</Label>
+                                <span class="value-hint">{{ store.terminal.fontSize }}</span>
+                            </div>
+                            <Slider v-model="store.terminal.fontSize" :min="8" :max="32" :step="1" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.fontFamily') }}</Label>
+                            <!-- list_fonts 不可用时回退自由文本输入 -->
+                            <SearchableSelect
+                                v-if="systemFonts.length > 0"
+                                v-model="store.terminal.font"
+                                :options="fontOptions"
+                                class="w-60"
+                                :placeholder="t('settings.searchPlaceholder')"
+                            />
+                            <Input v-else v-model="store.terminal.font" placeholder="monospace" class="w-60" />
+                        </div>
+                        <div class="settings-card-row stacked">
+                            <div class="settings-row-head">
+                                <Label>{{ t('settings.linePadding') }}</Label>
+                                <span class="value-hint">{{ store.terminal.linePadding }}</span>
+                            </div>
+                            <Slider v-model="store.terminal.linePadding" :min="0" :max="8" :step="1" />
+                        </div>
+                        <div class="settings-card-row stacked">
+                            <div class="settings-row-head">
+                                <Label>{{ t('settings.minimumContrast') }}</Label>
+                                <span class="value-hint">{{ store.terminal.minimumContrastRatio }}</span>
+                            </div>
+                            <Slider v-model="store.terminal.minimumContrastRatio" :min="1" :max="7" :step="0.5" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.boldInBright') }}</Label>
+                            <Switch v-model="store.terminal.drawBoldTextInBrightColors" />
+                        </div>
+                    </div>
                 </div>
-                <div class="settings-field">
-                    <Label>{{ t('settings.fontFamily') }}</Label>
-                    <SearchableSelect
-                        v-if="systemFonts.length > 0"
-                        v-model="store.terminal.font"
-                        :options="fontOptions"
-                        class="w-60"
-                        :placeholder="t('settings.searchPlaceholder')"
-                    />
-                    <!-- list_fonts 不可用时回退自由文本输入 -->
-                    <Input v-else v-model="store.terminal.font" placeholder="monospace" />
+
+                <div class="settings-section">
+                    <h3 class="settings-section-title">{{ t('settings.sectionCursor') }}</h3>
+                    <div class="settings-card">
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.cursorStyle') }}</Label>
+                            <Select v-model="store.terminal.cursor" :options="cursorOptions" class="w-44" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.cursorBlink') }}</Label>
+                            <Switch v-model="store.terminal.cursorBlink" />
+                        </div>
+                    </div>
                 </div>
-                <div class="settings-field">
-                    <Label>{{ t('settings.linePadding') }} <span class="value-hint">{{ store.terminal.linePadding }}</span></Label>
-                    <Slider v-model="store.terminal.linePadding" :min="0" :max="8" :step="1" />
+
+                <div class="settings-section">
+                    <h3 class="settings-section-title">{{ t('settings.sectionInteraction') }}</h3>
+                    <div class="settings-card">
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.scrollback') }}</Label>
+                            <Input v-model.number="store.terminal.scrollbackLines" type="number" class="w-44" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.copyOnSelect') }}</Label>
+                            <Switch v-model="store.terminal.copyOnSelect" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.altIsMeta') }}</Label>
+                            <Switch v-model="store.terminal.altIsMeta" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.wordSeparator') }}</Label>
+                            <Input v-model="store.terminal.wordSeparator" class="w-44" />
+                        </div>
+                    </div>
                 </div>
-                <Separator />
-                <div class="settings-field">
-                    <Label>{{ t('settings.cursorStyle') }}</Label>
-                    <Select v-model="store.terminal.cursor" :options="cursorOptions" class="w-44" />
+
+                <div class="settings-section">
+                    <h3 class="settings-section-title">{{ t('settings.sectionCompatibility') }}</h3>
+                    <p class="settings-section-hint">{{ t('settings.middlewareHint') }}</p>
+                    <div class="settings-card">
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.backspace') }}</Label>
+                            <Select v-model="store.terminal.backspace" :options="backspaceOptions" class="w-44" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.inputNewlines') }}</Label>
+                            <Select v-model="inputNewlinesModel" :options="newlineOptions" class="w-44" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.outputNewlines') }}</Label>
+                            <Select v-model="outputNewlinesModel" :options="newlineOptions" class="w-44" />
+                        </div>
+                    </div>
                 </div>
-                <div class="settings-field row">
-                    <Label>{{ t('settings.cursorBlink') }}</Label>
-                    <Switch v-model="store.terminal.cursorBlink" />
-                </div>
-                <Separator />
-                <div class="settings-field">
-                    <Label>{{ t('settings.scrollback') }}</Label>
-                    <Input v-model.number="store.terminal.scrollbackLines" type="number" class="w-44" />
-                </div>
-                <div class="settings-field row">
-                    <Label>{{ t('settings.copyOnSelect') }}</Label>
-                    <Switch v-model="store.terminal.copyOnSelect" />
-                </div>
-                <div class="settings-field row">
-                    <Label>{{ t('settings.altIsMeta') }}</Label>
-                    <Switch v-model="store.terminal.altIsMeta" />
-                </div>
-                <div class="settings-field">
-                    <Label>{{ t('settings.minimumContrast') }} <span class="value-hint">{{ store.terminal.minimumContrastRatio }}</span></Label>
-                    <Slider v-model="store.terminal.minimumContrastRatio" :min="1" :max="7" :step="0.5" />
-                </div>
-                <Separator />
-                <p class="hint">{{ t('settings.middlewareHint') }}</p>
-                <div class="settings-field">
-                    <Label>{{ t('settings.backspace') }}</Label>
-                    <Select v-model="store.terminal.backspace" :options="backspaceOptions" class="w-44" />
-                </div>
-                <div class="settings-field">
-                    <Label>{{ t('settings.inputNewlines') }}</Label>
-                    <Select v-model="inputNewlinesModel" :options="newlineOptions" class="w-44" />
-                </div>
-                <div class="settings-field">
-                    <Label>{{ t('settings.outputNewlines') }}</Label>
-                    <Select v-model="outputNewlinesModel" :options="newlineOptions" class="w-44" />
-                </div>
-                <Separator />
-                <div class="settings-field">
-                    <Label>{{ t('settings.wordSeparator') }}</Label>
-                    <Input v-model="store.terminal.wordSeparator" class="w-44" />
-                </div>
-                <div class="settings-field row">
-                    <Label>{{ t('settings.boldInBright') }}</Label>
-                    <Switch v-model="store.terminal.drawBoldTextInBrightColors" />
-                </div>
-                <Separator />
-                <p class="hint">{{ t('settings.suggestionsTitle') }}</p>
-                <div class="settings-field row">
-                    <Label>{{ t('settings.suggestionsEnabled') }}</Label>
-                    <Switch v-model="store.terminal.suggestions.enabled" />
-                </div>
-                <div class="settings-field">
-                    <Label>{{ t('settings.suggestionsTrigger') }}</Label>
-                    <Select v-model="store.terminal.suggestions.trigger" :options="suggestionsTriggerOptions" class="w-44" />
-                </div>
-                <div class="settings-field">
-                    <Label>{{ t('settings.suggestionsDelay') }} <span class="value-hint">{{ store.terminal.suggestions.delay }}</span></Label>
-                    <Slider v-model="store.terminal.suggestions.delay" :min="100" :max="1000" :step="50" />
-                </div>
-                <div class="settings-field row">
-                    <Label>{{ t('settings.suggestionsSourceHistory') }}</Label>
-                    <Switch v-model="store.terminal.suggestions.sources.history" />
-                </div>
-                <div class="settings-field row">
-                    <Label>{{ t('settings.suggestionsSourceQuickCommands') }}</Label>
-                    <Switch v-model="store.terminal.suggestions.sources.quickCommands" />
-                </div>
-                <div class="settings-field row">
-                    <Label>{{ t('settings.suggestionsSourcePaths') }}</Label>
-                    <Switch v-model="store.terminal.suggestions.sources.paths" />
-                </div>
-                <div class="settings-field">
-                    <Button variant="outline" @click="onClearHistory">{{ t('settings.suggestionsClearHistory') }}</Button>
+
+                <div class="settings-section">
+                    <h3 class="settings-section-title">{{ t('settings.suggestionsTitle') }}</h3>
+                    <div class="settings-card">
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.suggestionsEnabled') }}</Label>
+                            <Switch v-model="store.terminal.suggestions.enabled" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.suggestionsTrigger') }}</Label>
+                            <Select v-model="store.terminal.suggestions.trigger" :options="suggestionsTriggerOptions" class="w-44" />
+                        </div>
+                        <div class="settings-card-row stacked">
+                            <div class="settings-row-head">
+                                <Label>{{ t('settings.suggestionsDelay') }}</Label>
+                                <span class="value-hint">{{ store.terminal.suggestions.delay }}</span>
+                            </div>
+                            <Slider v-model="store.terminal.suggestions.delay" :min="100" :max="1000" :step="50" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.suggestionsSourceHistory') }}</Label>
+                            <Switch v-model="store.terminal.suggestions.sources.history" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.suggestionsSourceQuickCommands') }}</Label>
+                            <Switch v-model="store.terminal.suggestions.sources.quickCommands" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.suggestionsSourcePaths') }}</Label>
+                            <Switch v-model="store.terminal.suggestions.sources.paths" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.suggestionsHistoryLabel') }}</Label>
+                            <Button variant="outline" size="sm" @click="onClearHistory">{{ t('settings.clear') }}</Button>
+                        </div>
+                    </div>
                 </div>
             </template>
 
             <template v-else-if="page === 'profiles'">
                 <h2>{{ t('settings.profiles') }}</h2>
-                <div class="profiles-layout">
-                    <div class="profiles-list">
+                <div class="master-detail">
+                    <div class="detail-list">
                         <div class="profile-new-group">
                             <button class="profile-new-button" @click="createProfile('local')">
                                 <Plus :size="14" />
@@ -1055,82 +1173,98 @@ async function openConfigDir (): Promise<void> {
                             <span class="profile-item-command">{{ p.type === 'ssh' ? `${p.user}@${p.host}${p.port === 22 ? '' : `:${p.port}`}` : p.command }}</span>
                         </button>
                     </div>
-                    <div v-if="selectedProfile" class="profile-editor">
-                        <div class="settings-field">
-                            <Label>{{ t('settings.profileName') }}</Label>
-                            <Input v-model="selectedProfile.name" class="w-60" />
-                        </div>
-                        <template v-if="selectedProfile.type === 'local'">
-                            <div class="settings-field">
-                                <Label>{{ t('settings.profileCommand') }}</Label>
-                                <Input v-model="selectedProfile.command" class="w-60" />
-                            </div>
-                            <div class="settings-field">
-                                <Label>{{ t('settings.profileArgs') }} <span class="value-hint">{{ t('settings.profileArgsHint') }}</span></Label>
-                                <Input v-model="argsText" class="w-60" />
-                            </div>
-                            <div class="settings-field">
-                                <Label>{{ t('settings.profileCwd') }}</Label>
-                                <Input v-model="cwdModel" class="w-60" />
-                            </div>
-                            <div class="settings-field">
-                                <Label>{{ t('settings.profileEnv') }} <span class="value-hint">{{ t('settings.profileEnvHint') }}</span></Label>
-                                <textarea v-model="envText" class="profile-env" rows="4" spellcheck="false"></textarea>
-                            </div>
-                            <div class="settings-field row">
-                                <Label>{{ t('settings.profileLoginShell') }}</Label>
-                                <Switch v-model="selectedProfile.loginShell" />
-                            </div>
-                        </template>
-                        <template v-else>
-                            <div class="settings-field">
-                                <Label>{{ t('settings.sshHost') }}</Label>
-                                <Input v-model="selectedProfile.host" class="w-60" placeholder="example.com" />
-                            </div>
-                            <div class="settings-field">
-                                <Label>{{ t('settings.sshPort') }}</Label>
-                                <Input v-model.number="selectedProfile.port" type="number" class="w-24" />
-                            </div>
-                            <div class="settings-field">
-                                <Label>{{ t('settings.sshUser') }}</Label>
-                                <Input v-model="selectedProfile.user" class="w-60" />
-                            </div>
-                            <div class="settings-field">
-                                <Label>{{ t('settings.sshAuth') }}</Label>
-                                <Select v-model="selectedProfile.auth" :options="sshAuthOptions" class="w-44" />
-                            </div>
-                            <div v-if="selectedProfile.auth === 'publicKey' || selectedProfile.auth === 'auto'" class="settings-field">
-                                <Label>{{ t('settings.keychain') }} <span class="value-hint">{{ t('settings.keychainHint') }}</span></Label>
-                                <Select v-model="keyIdModel" :options="sshKeyOptions" class="w-60" />
-                            </div>
-                            <div v-if="selectedProfile.auth === 'password' || selectedProfile.auth === 'auto'" class="settings-field">
-                                <Label>{{ t('settings.sshPassword') }}</Label>
-                                <div class="ssh-password-row">
-                                    <Button variant="outline" size="sm" @click="passwordEditorOpen = !passwordEditorOpen">
-                                        {{ profilePasswordSet ? t('settings.sshPasswordReplace') : t('settings.sshPasswordSet') }}
-                                    </Button>
-                                    <span v-if="profilePasswordSet" class="value-hint">{{ t('settings.sshPasswordStored') }}</span>
-                                    <Button v-if="profilePasswordSet" variant="ghost" size="sm" class="profile-delete" @click="clearProfilePassword">
-                                        {{ t('settings.sshPasswordClear') }}
-                                    </Button>
+                    <div v-if="selectedProfile" class="detail-content">
+                        <div class="settings-section">
+                            <h3 class="settings-section-title">{{ t('settings.profileSectionBasic') }}</h3>
+                            <div class="settings-card">
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.profileName') }}</Label>
+                                    <Input v-model="selectedProfile.name" class="w-60" />
                                 </div>
-                                <div v-if="passwordEditorOpen" class="ssh-password-editor">
-                                    <Input v-model="passwordDraft" type="password" class="w-60" :placeholder="t('settings.sshPasswordPlaceholder')" />
-                                    <Button size="sm" @click="saveProfilePassword">{{ t('settings.sshPasswordSave') }}</Button>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.profileColorScheme') }}</Label>
+                                    <SearchableSelect
+                                        v-model="profileColorSchemeModel"
+                                        :options="profileColorSchemeOptions"
+                                        class="w-60"
+                                        :placeholder="t('settings.searchPlaceholder')"
+                                    />
                                 </div>
                             </div>
-                        </template>
-                        <div class="settings-field">
-                            <Label>{{ t('settings.profileColorScheme') }}</Label>
-                            <SearchableSelect
-                                v-model="profileColorSchemeModel"
-                                :options="profileColorSchemeOptions"
-                                class="w-60"
-                                :placeholder="t('settings.searchPlaceholder')"
-                            />
                         </div>
-                        <Separator />
-                        <div class="settings-field row profile-actions">
+
+                        <div v-if="selectedProfile.type === 'local'" class="settings-section">
+                            <h3 class="settings-section-title">{{ t('settings.profileSectionCommand') }}</h3>
+                            <div class="settings-card">
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.profileCommand') }}</Label>
+                                    <Input v-model="selectedProfile.command" class="w-60" />
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.profileArgs') }} <span class="value-hint">{{ t('settings.profileArgsHint') }}</span></Label>
+                                    <Input v-model="argsText" class="w-60" />
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.profileCwd') }}</Label>
+                                    <Input v-model="cwdModel" class="w-60" />
+                                </div>
+                                <div class="settings-card-row stacked">
+                                    <Label>{{ t('settings.profileEnv') }} <span class="value-hint">{{ t('settings.profileEnvHint') }}</span></Label>
+                                    <textarea v-model="envText" class="profile-env" rows="4" spellcheck="false"></textarea>
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.profileLoginShell') }}</Label>
+                                    <Switch v-model="selectedProfile.loginShell" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-else class="settings-section">
+                            <h3 class="settings-section-title">{{ t('settings.profileSectionConnection') }}</h3>
+                            <div class="settings-card">
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.sshHost') }}</Label>
+                                    <Input v-model="selectedProfile.host" class="w-60" placeholder="example.com" />
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.sshPort') }}</Label>
+                                    <Input v-model.number="selectedProfile.port" type="number" class="w-24" />
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.sshUser') }}</Label>
+                                    <Input v-model="selectedProfile.user" class="w-60" />
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.sshAuth') }}</Label>
+                                    <Select v-model="selectedProfile.auth" :options="sshAuthOptions" class="w-44" />
+                                </div>
+                                <div v-if="selectedProfile.auth === 'publicKey' || selectedProfile.auth === 'auto'" class="settings-card-row">
+                                    <Label>{{ t('settings.keychain') }} <span class="value-hint">{{ t('settings.keychainHint') }}</span></Label>
+                                    <Select v-model="keyIdModel" :options="sshKeyOptions" class="w-60" />
+                                </div>
+                                <div v-if="selectedProfile.auth === 'password' || selectedProfile.auth === 'auto'" class="settings-card-row">
+                                    <Label>{{ t('settings.sshPassword') }}</Label>
+                                    <div class="ssh-password-row">
+                                        <Button variant="outline" size="sm" @click="passwordEditorOpen = !passwordEditorOpen">
+                                            {{ profilePasswordSet ? t('settings.sshPasswordReplace') : t('settings.sshPasswordSet') }}
+                                        </Button>
+                                        <span v-if="profilePasswordSet" class="value-hint">{{ t('settings.sshPasswordStored') }}</span>
+                                        <Button v-if="profilePasswordSet" variant="ghost" size="sm" class="profile-delete" @click="clearProfilePassword">
+                                            {{ t('settings.sshPasswordClear') }}
+                                        </Button>
+                                    </div>
+                                </div>
+                                <div v-if="passwordEditorOpen && (selectedProfile.auth === 'password' || selectedProfile.auth === 'auto')" class="settings-card-row stacked">
+                                    <Label>{{ t('settings.sshPassword') }}</Label>
+                                    <div class="ssh-password-editor">
+                                        <Input v-model="passwordDraft" type="password" class="w-60" :placeholder="t('settings.sshPasswordPlaceholder')" />
+                                        <Button size="sm" @click="saveProfilePassword">{{ t('settings.sshPasswordSave') }}</Button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="profile-actions">
                             <Button
                                 variant="outline"
                                 size="sm"
@@ -1139,7 +1273,7 @@ async function openConfigDir (): Promise<void> {
                             >
                                 {{ t('settings.profileSetDefault') }}
                             </Button>
-                            <Button variant="ghost" size="sm" class="profile-delete" @click="deleteProfile(selectedProfile.id)">
+                            <Button variant="destructive-outline" size="sm" @click="confirmDeleteProfile(selectedProfile)">
                                 <Trash2 :size="14" />
                                 {{ t('settings.profileDelete') }}
                             </Button>
@@ -1150,8 +1284,8 @@ async function openConfigDir (): Promise<void> {
 
             <template v-else-if="page === 'quickCommands'">
                 <h2>{{ t('settings.quickCommands') }}</h2>
-                <div class="profiles-layout">
-                    <div class="profiles-list">
+                <div class="master-detail">
+                    <div class="detail-list">
                         <div class="profile-new-group">
                             <button class="profile-new-button" @click="createQuickCommand">
                                 <Plus :size="14" />
@@ -1203,44 +1337,47 @@ async function openConfigDir (): Promise<void> {
                             {{ t('settings.quickCommandEmptyHint') }}
                         </p>
                     </div>
-                    <div v-if="selectedQuickCommand" class="profile-editor">
-                        <div class="settings-field">
-                            <Label>{{ t('settings.quickCommandName') }}</Label>
-                            <Input v-model="selectedQuickCommand.name" class="w-60" />
-                        </div>
-                        <div class="settings-field">
-                            <Label>{{ t('settings.quickCommandGroupLabel') }}</Label>
-                            <Select v-model="quickCommandGroupModel" :options="quickCommandGroupOptions" class="w-60" />
-                        </div>
-                        <div class="settings-field">
-                            <Label>
-                                {{ t('settings.quickCommandCommand') }}
-                                <span class="value-hint">{{ t('settings.quickCommandCommandHint') }}</span>
-                            </Label>
-                            <textarea
-                                v-model="selectedQuickCommand.command"
-                                class="qc-command-input"
-                                rows="6"
-                                spellcheck="false"
-                                :placeholder="t('settings.quickCommandCommandPlaceholder')"
-                            ></textarea>
-                        </div>
-                        <p v-if="selectedQuickCommandParams.length" class="hint qc-params-hint">
-                            {{ t('settings.quickCommandParams', { names: selectedQuickCommandParams.join(', ') }) }}
-                        </p>
-                        <div class="settings-field row">
-                            <Label>
-                                {{ t('settings.quickCommandAutoRun') }}
-                                <span class="value-hint">{{ t('settings.quickCommandAutoRunHint') }}</span>
-                            </Label>
-                            <Switch v-model="selectedQuickCommand.autoRun" />
-                        </div>
-                        <Separator />
-                        <div class="settings-field row profile-actions">
-                            <Button variant="ghost" size="sm" class="profile-delete" @click="deleteQuickCommand(selectedQuickCommand.id)">
-                                <Trash2 :size="14" />
-                                {{ t('settings.quickCommandDelete') }}
-                            </Button>
+                    <div v-if="selectedQuickCommand" class="detail-content">
+                        <div class="settings-section">
+                            <div class="settings-card">
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.quickCommandName') }}</Label>
+                                    <Input v-model="selectedQuickCommand.name" class="w-60" />
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.quickCommandGroupLabel') }}</Label>
+                                    <Select v-model="quickCommandGroupModel" :options="quickCommandGroupOptions" class="w-60" />
+                                </div>
+                                <div class="settings-card-row stacked">
+                                    <Label>
+                                        {{ t('settings.quickCommandCommand') }}
+                                        <span class="value-hint">{{ t('settings.quickCommandCommandHint') }}</span>
+                                    </Label>
+                                    <textarea
+                                        v-model="selectedQuickCommand.command"
+                                        class="qc-command-input"
+                                        rows="6"
+                                        spellcheck="false"
+                                        :placeholder="t('settings.quickCommandCommandPlaceholder')"
+                                    ></textarea>
+                                    <p v-if="selectedQuickCommandParams.length" class="hint qc-params-hint">
+                                        {{ t('settings.quickCommandParams', { names: selectedQuickCommandParams.join(', ') }) }}
+                                    </p>
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>
+                                        {{ t('settings.quickCommandAutoRun') }}
+                                        <span class="value-hint">{{ t('settings.quickCommandAutoRunHint') }}</span>
+                                    </Label>
+                                    <Switch v-model="selectedQuickCommand.autoRun" />
+                                </div>
+                                <div class="settings-card-row actions">
+                                    <Button variant="destructive-outline" size="sm" @click="confirmDeleteQuickCommand(selectedQuickCommand)">
+                                        <Trash2 :size="14" />
+                                        {{ t('settings.quickCommandDelete') }}
+                                    </Button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1250,13 +1387,14 @@ async function openConfigDir (): Promise<void> {
                 <h2>{{ t('settings.keychainPage') }}</h2>
                 <p class="hint">{{ t('settings.keychainHint') }}</p>
                 <p v-if="keysError" class="import-error">{{ keysError }}</p>
-                <div class="keys-layout">
-                    <div class="keys-list">
+                <div class="master-detail">
+                    <div class="detail-list">
                         <p v-if="sshKeys.length === 0" class="hint">{{ t('settings.keychainEmpty') }}</p>
                         <button
                             v-for="key in sshKeys"
                             :key="key.id"
                             class="profile-item"
+                            :class="{ active: key.id === selectedKeyId }"
                             @click="selectedKeyId = selectedKeyId === key.id ? null : key.id"
                         >
                             <span class="profile-item-head">
@@ -1272,129 +1410,162 @@ async function openConfigDir (): Promise<void> {
                             <span class="profile-item-command">{{ key.algorithm }} · {{ key.fingerprint.slice(0, 19) }}…</span>
                         </button>
                     </div>
-                    <div class="keys-editor">
-                        <div class="keys-actions">
-                            <Button variant="outline" size="sm" @click="openKeyAddForm">
-                                <Plus :size="14" />
-                                {{ t('settings.keychainAdd') }}
-                            </Button>
-                            <label class="import-label">
-                                <span class="import-trigger">
-                                    <Upload :size="14" />
-                                    {{ t('settings.keychainImportFile') }}
-                                </span>
-                                <input type="file" hidden @change="onKeyFileChosen" />
-                            </label>
-                        </div>
-                        <div v-if="keyAddOpen" class="keys-form key-add-form">
-                            <div class="settings-field">
-                                <Label>{{ t('settings.keychainName') }}</Label>
-                                <Input v-model="keyAddName" class="w-full" :placeholder="t('settings.keychainNamePlaceholder')" />
-                            </div>
-                            <div class="settings-field">
-                                <Label>{{ t('settings.keychainPrivateKey') }} *</Label>
-                                <textarea
-                                    v-model="keyAddPrivatePem"
-                                    class="key-pem-input"
-                                    rows="7"
-                                    spellcheck="false"
-                                    :placeholder="t('settings.keychainPrivatePlaceholder')"
-                                    @input="scheduleKeyInspect"
-                                ></textarea>
-                            </div>
-                            <div class="settings-field">
-                                <Label>{{ t('settings.keychainPassphrase') }} <span class="value-hint">{{ t('settings.keychainPassphraseHint') }}</span></Label>
-                                <Input v-model="keyAddPassphrase" type="password" class="w-60" @input="scheduleKeyInspect" />
-                            </div>
-                            <div v-if="keyAddInspection" class="settings-field">
-                                <Label>{{ t('settings.keychainPublicKey') }}</Label>
-                                <div class="ssh-password-row">
-                                    <span class="value-hint mono key-public">{{ keyAddInspection.publicKey }}</span>
-                                    <Button variant="ghost" size="sm" @click="copyKeyPublic({ publicKey: keyAddInspection.publicKey } as SshKeyMeta)">
-                                        <Copy :size="14" />
-                                    </Button>
+                    <div class="detail-content">
+                        <div v-if="selectedKey" class="settings-section">
+                            <h3 class="settings-section-title">{{ t('settings.keychainDetail') }}</h3>
+                            <div class="settings-card">
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.keychainName') }}</Label>
+                                    <span class="value-hint">{{ selectedKey.name }}</span>
                                 </div>
-                                <span class="value-hint">{{ keyAddInspection.algorithm }} · {{ keyAddInspection.fingerprint }}</span>
-                            </div>
-                            <div
-                                class="key-drop-zone"
-                                :class="{ active: keyDropActive }"
-                            >
-                                <span class="value-hint">{{ keyDropFileName || t('settings.keychainDropHint') }}</span>
-                            </div>
-                            <div class="settings-field row">
-                                <Button size="sm" @click="saveKeyEntry">{{ t('settings.keychainSave') }}</Button>
-                                <Button variant="ghost" size="sm" @click="keyAddOpen = false">{{ t('settings.keychainCancel') }}</Button>
-                            </div>
-                            <p v-if="keyAddError" class="import-error">{{ keyAddError }}</p>
-                        </div>
-                        <div class="keys-form">
-                            <p class="keys-form-title">{{ t('settings.keychainGenerate') }}</p>
-                            <div class="settings-field">
-                                <Label>{{ t('settings.keychainAlgorithm') }}</Label>
-                                <Select v-model="keyGenAlgorithm" :options="keyAlgorithmOptions" class="w-44" />
-                            </div>
-                            <div class="settings-field">
-                                <Label>{{ t('settings.keychainName') }}</Label>
-                                <Input v-model="keyGenName" class="w-60" :placeholder="t('settings.keychainNamePlaceholder')" />
-                            </div>
-                            <div class="settings-field">
-                                <Label>{{ t('settings.keychainPassphrase') }} <span class="value-hint">{{ t('settings.keychainPassphraseOptional') }}</span></Label>
-                                <Input v-model="keyGenPassphrase" type="password" class="w-60" />
-                            </div>
-                            <Button variant="outline" size="sm" @click="generateKeyEntry">
-                                <Plus :size="14" />
-                                {{ t('settings.keychainGenerateAction') }}
-                            </Button>
-                        </div>
-                        <template v-if="selectedKey">
-                            <Separator />
-                            <div class="settings-field">
-                                <Label>{{ t('settings.keychainPublicKey') }}</Label>
-                                <div class="ssh-password-row">
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.keychainAlgorithm') }}</Label>
+                                    <span class="value-hint mono">{{ selectedKey.algorithm }}</span>
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.keychainFingerprint') }}</Label>
+                                    <span class="value-hint mono key-fingerprint">{{ selectedKey.fingerprint }}</span>
+                                </div>
+                                <div class="settings-card-row stacked">
+                                    <div class="settings-row-head">
+                                        <Label>{{ t('settings.keychainPublicKey') }}</Label>
+                                        <Button variant="ghost" size="sm" @click="copyKeyPublic(selectedKey)">
+                                            <Copy :size="14" />
+                                        </Button>
+                                    </div>
                                     <span class="value-hint mono key-public">{{ selectedKey.publicKey }}</span>
-                                    <Button variant="ghost" size="sm" @click="copyKeyPublic(selectedKey)">
-                                        <Copy :size="14" />
+                                </div>
+                                <div class="settings-card-row actions">
+                                    <Button variant="destructive-outline" size="sm" @click="confirmDeleteKey(selectedKey)">
+                                        <Trash2 :size="14" />
+                                        {{ t('settings.keychainDelete') }}
                                     </Button>
                                 </div>
                             </div>
-                            <div class="settings-field row profile-actions">
-                                <Button variant="ghost" size="sm" class="profile-delete" @click="deleteKeyEntry(selectedKey)">
-                                    <Trash2 :size="14" />
-                                    {{ t('settings.keychainDelete') }}
-                                </Button>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3 class="settings-section-title">{{ t('settings.keychainGenerate') }}</h3>
+                            <div class="settings-card">
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.keychainAlgorithm') }}</Label>
+                                    <Select v-model="keyGenAlgorithm" :options="keyAlgorithmOptions" class="w-44" />
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.keychainName') }}</Label>
+                                    <Input v-model="keyGenName" class="w-60" :placeholder="t('settings.keychainNamePlaceholder')" />
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.keychainPassphrase') }} <span class="value-hint">{{ t('settings.keychainPassphraseOptional') }}</span></Label>
+                                    <Input v-model="keyGenPassphrase" type="password" class="w-60" />
+                                </div>
+                                <div class="settings-card-row actions">
+                                    <Button variant="outline" size="sm" @click="generateKeyEntry">
+                                        <Plus :size="14" />
+                                        {{ t('settings.keychainGenerateAction') }}
+                                    </Button>
+                                </div>
                             </div>
-                        </template>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="settings-section-head">
+                                <h3 class="settings-section-title">{{ t('settings.keychainImportSection') }}</h3>
+                                <div class="settings-section-actions">
+                                    <Button variant="outline" size="sm" @click="toggleKeyAddForm">
+                                        {{ keyAddOpen ? t('settings.keychainCancel') : t('settings.keychainAdd') }}
+                                    </Button>
+                                    <label class="import-label">
+                                        <span class="import-trigger">
+                                            <Upload :size="14" />
+                                            {{ t('settings.keychainImportFile') }}
+                                        </span>
+                                        <input type="file" hidden @change="onKeyFileChosen" />
+                                    </label>
+                                </div>
+                            </div>
+                            <div v-if="keyAddOpen" class="settings-card">
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.keychainName') }}</Label>
+                                    <Input v-model="keyAddName" class="w-60" :placeholder="t('settings.keychainNamePlaceholder')" />
+                                </div>
+                                <div class="settings-card-row stacked">
+                                    <Label>{{ t('settings.keychainPrivateKey') }} *</Label>
+                                    <textarea
+                                        v-model="keyAddPrivatePem"
+                                        class="key-pem-input"
+                                        rows="7"
+                                        spellcheck="false"
+                                        :placeholder="t('settings.keychainPrivatePlaceholder')"
+                                        @input="scheduleKeyInspect"
+                                    ></textarea>
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.keychainPassphrase') }} <span class="value-hint">{{ t('settings.keychainPassphraseHint') }}</span></Label>
+                                    <Input v-model="keyAddPassphrase" type="password" class="w-60" @input="scheduleKeyInspect" />
+                                </div>
+                                <div v-if="keyAddInspection" class="settings-card-row stacked">
+                                    <div class="settings-row-head">
+                                        <Label>{{ t('settings.keychainPublicKey') }}</Label>
+                                        <Button variant="ghost" size="sm" @click="copyKeyPublic({ publicKey: keyAddInspection.publicKey } as SshKeyMeta)">
+                                            <Copy :size="14" />
+                                        </Button>
+                                    </div>
+                                    <span class="value-hint mono key-public">{{ keyAddInspection.publicKey }}</span>
+                                    <span class="value-hint">{{ keyAddInspection.algorithm }} · {{ keyAddInspection.fingerprint }}</span>
+                                </div>
+                                <div class="settings-card-row stacked">
+                                    <div
+                                        class="key-drop-zone"
+                                        :class="{ active: keyDropActive }"
+                                    >
+                                        <span class="value-hint">{{ keyDropFileName || t('settings.keychainDropHint') }}</span>
+                                    </div>
+                                </div>
+                                <div class="settings-card-row actions">
+                                    <Button variant="ghost" size="sm" @click="keyAddOpen = false">{{ t('settings.keychainCancel') }}</Button>
+                                    <Button size="sm" @click="saveKeyEntry">{{ t('settings.keychainSave') }}</Button>
+                                </div>
+                                <div v-if="keyAddError" class="settings-card-row">
+                                    <p class="import-error">{{ keyAddError }}</p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </template>
 
             <template v-else-if="page === 'appearance'">
                 <h2>{{ t('settings.appearance') }}</h2>
-                <div class="settings-field">
-                    <Label>{{ t('settings.language') }}</Label>
-                    <Select v-model="store.appearance.language" :options="languageOptions" class="w-44" />
+                <div class="settings-section">
+                    <div class="settings-card">
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.language') }}</Label>
+                            <Select v-model="store.appearance.language" :options="languageOptions" class="w-44" />
+                        </div>
+                    </div>
                 </div>
             </template>
 
             <template v-else-if="page === 'colorSchemes'">
                 <h2>{{ t('settings.colorSchemesPage') }}</h2>
                 <ColorSchemePicker v-model="store.appearance.colorScheme" :custom-schemes="store.colorSchemes" />
-                <Separator />
-                <div class="custom-schemes-section">
-                    <div class="custom-schemes-toolbar">
-                        <h3 class="custom-schemes-title">{{ t('settings.customSchemes') }}</h3>
-                        <Button variant="outline" size="sm" @click="newCustomScheme">
-                            <Plus :size="14" />
-                            {{ t('settings.customSchemeNew') }}
-                        </Button>
-                        <label class="import-label">
-                            <span class="import-trigger">
-                                <Upload :size="14" />
-                                {{ t('settings.customSchemeImport') }}
-                            </span>
-                            <input type="file" accept=".itermcolors" hidden @change="onImportFile" />
-                        </label>
+                <div class="settings-section">
+                    <div class="settings-section-head">
+                        <h3 class="settings-section-title">{{ t('settings.customSchemes') }}</h3>
+                        <div class="settings-section-actions">
+                            <Button variant="outline" size="sm" @click="newCustomScheme">
+                                <Plus :size="14" />
+                                {{ t('settings.customSchemeNew') }}
+                            </Button>
+                            <label class="import-label">
+                                <span class="import-trigger">
+                                    <Upload :size="14" />
+                                    {{ t('settings.customSchemeImport') }}
+                                </span>
+                                <input type="file" accept=".itermcolors" hidden @change="onImportFile" />
+                            </label>
+                        </div>
                     </div>
                     <p v-if="importError" class="import-error">{{ importError }}</p>
                     <p v-if="customSchemes.length === 0" class="hint">{{ t('settings.customSchemeEmpty') }}</p>
@@ -1410,61 +1581,67 @@ async function openConfigDir (): Promise<void> {
                                 {{ scheme.name }}
                             </button>
                         </div>
-                        <div v-if="selectedCustom" class="custom-scheme-editor">
-                            <div class="settings-field">
+                        <div v-if="selectedCustom" class="settings-card">
+                            <div class="settings-card-row">
                                 <Label>{{ t('settings.profileName') }}</Label>
                                 <Input v-model="selectedCustom.name" class="w-60" />
                             </div>
-                            <div
-                                class="scheme-preview"
-                                :style="{
-                                    background: selectedCustom.background,
-                                    color: selectedCustom.foreground,
-                                    borderColor: selectedCustom.cursor,
-                                }"
-                            >
-                                <span>AaBb 命令输出 <b>bold</b> <i>italic</i> → $</span>
-                                <span class="scheme-preview-colors">
-                                    <span
-                                        v-for="(color, index) in selectedCustom.colors"
-                                        :key="index"
-                                        class="scheme-preview-swatch"
-                                        :style="{ background: color }"
-                                    ></span>
-                                </span>
-                            </div>
-                            <div class="scheme-slots">
-                                <div v-for="slot in specialSlots" :key="slot.key" class="scheme-slot">
-                                    <Label class="scheme-slot-label">{{ slot.label }}</Label>
-                                    <input
-                                        type="color"
-                                        class="scheme-color-input"
-                                        :value="schemeSlotColor(selectedCustom, slot.key)"
-                                        @input="setSchemeSlotColor(selectedCustom, slot.key, ($event.target as HTMLInputElement).value)"
-                                    />
-                                    <input
-                                        class="scheme-hex-input"
-                                        :value="selectedCustom[slot.key] ?? ''"
-                                        @change="setSchemeSlotColorText(selectedCustom, slot.key, ($event.target as HTMLInputElement).value)"
-                                    />
-                                </div>
-                                <div v-for="slot in ansiSlots" :key="`ansi-${slot.key}`" class="scheme-slot">
-                                    <Label class="scheme-slot-label">{{ slot.label }}</Label>
-                                    <input
-                                        type="color"
-                                        class="scheme-color-input"
-                                        :value="selectedCustom.colors[slot.key]!"
-                                        @input="selectedCustom.colors[slot.key] = ($event.target as HTMLInputElement).value"
-                                    />
-                                    <input
-                                        class="scheme-hex-input"
-                                        :value="selectedCustom.colors[slot.key]!"
-                                        @change="setAnsiColorText(selectedCustom, slot.key, ($event.target as HTMLInputElement).value)"
-                                    />
+                            <div class="settings-card-row stacked">
+                                <Label>{{ t('settings.schemePreviewLabel') }}</Label>
+                                <div
+                                    class="scheme-preview"
+                                    :style="{
+                                        background: selectedCustom.background,
+                                        color: selectedCustom.foreground,
+                                        borderColor: selectedCustom.cursor,
+                                    }"
+                                >
+                                    <span>AaBb 命令输出 <b>bold</b> <i>italic</i> → $</span>
+                                    <span class="scheme-preview-colors">
+                                        <span
+                                            v-for="(color, index) in selectedCustom.colors"
+                                            :key="index"
+                                            class="scheme-preview-swatch"
+                                            :style="{ background: color }"
+                                        ></span>
+                                    </span>
                                 </div>
                             </div>
-                            <div class="settings-field row profile-actions">
-                                <Button variant="ghost" size="sm" class="profile-delete" @click="deleteCustomScheme(selectedCustomIndex)">
+                            <div class="settings-card-row stacked">
+                                <Label>{{ t('settings.schemeSlotsLabel') }}</Label>
+                                <div class="scheme-slots">
+                                    <div v-for="slot in specialSlots" :key="slot.key" class="scheme-slot">
+                                        <Label class="scheme-slot-label">{{ slot.label }}</Label>
+                                        <input
+                                            type="color"
+                                            class="scheme-color-input"
+                                            :value="schemeSlotColor(selectedCustom, slot.key)"
+                                            @input="setSchemeSlotColor(selectedCustom, slot.key, ($event.target as HTMLInputElement).value)"
+                                        />
+                                        <input
+                                            class="scheme-hex-input"
+                                            :value="selectedCustom[slot.key] ?? ''"
+                                            @change="setSchemeSlotColorText(selectedCustom, slot.key, ($event.target as HTMLInputElement).value)"
+                                        />
+                                    </div>
+                                    <div v-for="slot in ansiSlots" :key="`ansi-${slot.key}`" class="scheme-slot">
+                                        <Label class="scheme-slot-label">{{ slot.label }}</Label>
+                                        <input
+                                            type="color"
+                                            class="scheme-color-input"
+                                            :value="selectedCustom.colors[slot.key]!"
+                                            @input="selectedCustom.colors[slot.key] = ($event.target as HTMLInputElement).value"
+                                        />
+                                        <input
+                                            class="scheme-hex-input"
+                                            :value="selectedCustom.colors[slot.key]!"
+                                            @change="setAnsiColorText(selectedCustom, slot.key, ($event.target as HTMLInputElement).value)"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="settings-card-row actions">
+                                <Button variant="destructive-outline" size="sm" @click="confirmDeleteCustomScheme(selectedCustom.name, selectedCustomIndex)">
                                     <Trash2 :size="14" />
                                     {{ t('settings.customSchemeDelete') }}
                                 </Button>
@@ -1477,39 +1654,57 @@ async function openConfigDir (): Promise<void> {
             <template v-else-if="page === 'hotkeys'">
                 <h2>{{ t('settings.hotkeys') }}</h2>
                 <p class="hint">{{ t('settings.hotkeysHint') }}</p>
-                <div
-                    v-for="command in hotkeyCommands"
-                    :key="command.id"
-                    class="settings-field row hotkey-row"
-                >
-                    <Label>{{ command.label() }}</Label>
-                    <button
-                        class="hotkey-binding"
-                        :class="{ recording: recordingHotkeyId === command.hotkeyId }"
-                        @click="startRecording(command.hotkeyId!)"
-                    >
-                        {{ recordingHotkeyId === command.hotkeyId ? '…' : (bindingFor(command.hotkeyId!) || '—') }}
-                    </button>
+                <div class="settings-section">
+                    <div class="settings-card">
+                        <div
+                            v-for="command in hotkeyCommands"
+                            :key="command.id"
+                            class="settings-card-row"
+                        >
+                            <Label>{{ command.label() }}</Label>
+                            <button
+                                class="hotkey-binding"
+                                :class="{ recording: recordingHotkeyId === command.hotkeyId }"
+                                @click="startRecording(command.hotkeyId!)"
+                            >
+                                {{ recordingHotkeyId === command.hotkeyId ? '…' : (bindingFor(command.hotkeyId!) || '—') }}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </template>
 
             <template v-else>
                 <h2>{{ t('settings.about') }}</h2>
-                <div class="settings-field row">
-                    <Label>{{ t('settings.version') }}</Label>
-                    <span class="value-hint">0.1.0</span>
+                <div class="about-hero">
+                    <img class="about-icon" :src="appIcon" alt="scx-terminal" />
+                    <div class="about-name">scx-terminal</div>
+                    <div class="about-version">v0.1.0</div>
                 </div>
-                <Separator />
-                <div class="settings-field row">
-                    <Label>{{ t('settings.configDir') }}</Label>
-                    <span class="value-hint mono">{{ configDir }}</span>
-                    <Button variant="ghost" size="sm" @click="openConfigDir">
-                        <FolderOpen :size="14" />
-                        {{ t('settings.openConfigDir') }}
-                    </Button>
+                <div class="settings-section">
+                    <div class="settings-card">
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.configDir') }}</Label>
+                            <div class="about-config">
+                                <span class="value-hint mono about-config-path">{{ configDir }}</span>
+                                <Button variant="ghost" size="sm" @click="openConfigDir">
+                                    <FolderOpen :size="14" />
+                                    {{ t('settings.openConfigDir') }}
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </template>
         </div>
+
+        <Dialog v-if="confirmState" :title="t('settings.deleteConfirmTitle')" :width="380" @cancel="confirmState = null">
+            <p class="confirm-text">{{ confirmState.message }}</p>
+            <template #footer>
+                <Button variant="outline" size="sm" @click="confirmState = null">{{ t('settings.cancel') }}</Button>
+                <Button variant="destructive" size="sm" @click="runConfirmed">{{ t('settings.deleteConfirmButton') }}</Button>
+            </template>
+        </Dialog>
     </div>
 </template>
 
@@ -1596,47 +1791,159 @@ async function openConfigDir (): Promise<void> {
     font-size: 12px;
 }
 
-.hint {
-    color: var(--color-muted-foreground);
+/* 设置页分组卡片：标题 + 卡片内逐行排布（行间以细线分隔），简单页面共用 */
+.settings-section {
+    max-width: 620px;
+    margin-bottom: 22px;
+}
+
+.settings-section-title {
+    margin: 0 0 8px;
     font-size: 13px;
-    margin-bottom: 16px;
+    font-weight: 600;
 }
 
-.hotkey-row {
-    max-width: 560px;
+.settings-section-hint {
+    margin: -4px 0 8px;
+    font-size: 12px;
+    color: var(--color-muted-foreground);
 }
 
-.keys-layout {
+.settings-card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-card);
+}
+
+.settings-card-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 11px 16px;
+}
+
+.settings-card-row + .settings-card-row {
+    border-top: 1px solid var(--color-border);
+}
+
+.settings-card-row.stacked {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+}
+
+.settings-row-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.settings-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.settings-section-head .settings-section-title {
+    margin: 0;
+}
+
+.settings-section-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.settings-card-row.actions {
+    justify-content: flex-end;
+}
+
+/* 档案/快捷命令/密钥链共用的主从布局：左列表 + 右编辑内容 */
+.master-detail {
     display: flex;
     gap: 20px;
     align-items: flex-start;
 }
 
-.keys-list {
-    width: 320px;
+.master-detail .detail-list {
+    width: 240px;
     flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
-.keys-editor {
+.master-detail .detail-content {
     flex: 1 1 0;
     min-width: 0;
-    max-width: 520px;
+    max-width: 620px;
 }
 
-.keys-actions {
+.profile-actions {
     display: flex;
     gap: 8px;
-    margin-bottom: 14px;
 }
 
-.keys-form {
-    margin-bottom: 16px;
+.confirm-text {
+    margin: 0;
+    word-break: break-all;
 }
 
-.keys-form-title {
-    margin: 0 0 10px;
-    font-size: 13px;
+.key-fingerprint {
+    word-break: break-all;
+    text-align: right;
+}
+
+/* 关于页：应用图标 + 名称 + 版本居中展示 */
+.about-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 28px 0 24px;
+}
+
+.about-icon {
+    width: 76px;
+    height: 76px;
+    border-radius: 16px;
+    margin-bottom: 6px;
+}
+
+.about-name {
+    font-size: 16px;
     font-weight: 600;
+}
+
+.about-version {
+    font-size: 12px;
+    color: var(--color-muted-foreground);
+    font-family: var(--font-mono);
+}
+
+.about-config {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
+}
+
+.about-config-path {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hint {
+    color: var(--color-muted-foreground);
+    font-size: 13px;
+    margin-bottom: 16px;
 }
 
 .key-name-input {
@@ -1665,12 +1972,6 @@ async function openConfigDir (): Promise<void> {
     align-items: center;
     gap: 8px;
     margin-top: 8px;
-}
-
-.key-add-form {
-    border: 1px solid var(--color-border);
-    border-radius: 8px;
-    padding: 14px;
 }
 
 .key-pem-input {
@@ -1706,20 +2007,6 @@ async function openConfigDir (): Promise<void> {
 .key-drop-zone.active {
     border-color: var(--color-ring);
     background: var(--color-accent);
-}
-
-.profiles-layout {
-    display: flex;
-    gap: 20px;
-    align-items: flex-start;
-}
-
-.profiles-list {
-    width: 220px;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
 }
 
 .profile-new-group {
@@ -1807,12 +2094,6 @@ async function openConfigDir (): Promise<void> {
     text-overflow: ellipsis;
 }
 
-.profile-editor {
-    flex: 1;
-    min-width: 0;
-    max-width: 480px;
-}
-
 .profile-env {
     width: 100%;
     padding: 8px 10px;
@@ -1829,11 +2110,6 @@ async function openConfigDir (): Promise<void> {
 .profile-env:focus-visible {
     border-color: var(--color-ring);
     box-shadow: 0 0 0 1px var(--color-ring);
-}
-
-.profile-actions {
-    gap: 8px;
-    justify-content: flex-start;
 }
 
 .qc-group-header {
@@ -1932,24 +2208,6 @@ async function openConfigDir (): Promise<void> {
     color: var(--color-destructive);
 }
 
-.custom-schemes-section {
-    max-width: 560px;
-}
-
-.custom-schemes-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-}
-
-.custom-schemes-title {
-    margin: 0;
-    margin-right: auto;
-    font-size: 13px;
-    font-weight: 600;
-}
-
 .import-label {
     display: inline-flex;
     cursor: default;
@@ -2009,12 +2267,6 @@ async function openConfigDir (): Promise<void> {
     background: var(--color-accent);
     border-color: var(--color-ring);
     color: var(--color-foreground);
-}
-
-.custom-scheme-editor {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
 }
 
 .scheme-preview {
