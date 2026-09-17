@@ -129,20 +129,24 @@ describe('computeOps (entity-level diff flush)', () => {
         const config = defaultConfig()
         config.profiles.push(localProfile('p1', 'zsh'))
         config.quickCommandGroups.push({ id: 'g1', name: 'ops' })
+        config.sshGroups.push({ id: 'sg1', name: 'prod' })
         config.quickCommands.push(
             { id: 'q1', name: 'list', command: 'ls', autoRun: false },
             { id: 'q2', name: 'deploy', command: 'deploy', groupId: 'g1', autoRun: true },
         )
         // 实体为空的基线（设置分片已同步）：diff 只产出实体级 create
-        const emptyEntities = { ...captureBaseline(config), profiles: {}, quickCommands: {}, quickCommandGroups: {} }
+        const emptyEntities = { ...captureBaseline(config), profiles: {}, quickCommands: {}, quickCommandGroups: {}, sshGroups: {} }
         const kinds = computeOps(config, emptyEntities).map(op => op.kind)
-        expect(kinds).toEqual(expect.arrayContaining(['profileCreate', 'quickCommandGroupCreate', 'quickCommandCreate', 'quickCommandCreate']))
+        expect(kinds).toEqual(expect.arrayContaining(['profileCreate', 'quickCommandGroupCreate', 'sshGroupCreate', 'quickCommandCreate', 'quickCommandCreate']))
 
         // 变更前的状态捕获为基线后：改名 → update，删除 → delete，只产出对应实体的操作
         const baseline = captureBaseline(config)
         config.profiles[0]!.name = 'bash'
         config.quickCommands.splice(0, 1)
-        expect(computeOps(config, baseline).map(op => op.kind).sort()).toEqual(['profileUpdate', 'quickCommandDelete'])
+        config.sshGroups[0]!.name = '生产'
+        expect(computeOps(config, baseline).map(op => op.kind).sort()).toEqual(['profileUpdate', 'quickCommandDelete', 'sshGroupUpdate'])
+        config.sshGroups.splice(0, 1)
+        expect(computeOps(config, baseline).map(op => op.kind).sort()).toEqual(['profileUpdate', 'quickCommandDelete', 'sshGroupDelete'])
     })
 
     it('treats a renamed color scheme as delete-old + save-new', () => {

@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { nanoid } from 'nanoid'
 import { writeClipboardText } from '@/lib/frontendContext'
-import { Terminal, Palette, Keyboard, Info, FolderOpen, Layers, KeyRound, Copy, Plus, Trash2, Upload, Zap, Pencil, X, Globe } from 'lucide-vue-next'
+import { Terminal, Palette, Keyboard, Info, FolderOpen, KeyRound, Copy, Plus, Trash2, Upload, Zap, Pencil, X, Globe, Server, SquareTerminal } from 'lucide-vue-next'
 import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
 import type { Event as TauriEvent, UnlistenFn } from '@tauri-apps/api/event'
 import type { SshKeyMeta, SshKeyInspection } from '@/services/secrets'
@@ -19,7 +19,7 @@ import Slider from '@/components/ui/Slider.vue'
 import Select from '@/components/ui/Select.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ColorSchemePicker from '@/components/settings/ColorSchemePicker.vue'
-import { useConfigStore, defaultFirstProfiles, type QuickCommand, type SshProfile, type TerminalProfile } from '@/stores/config'
+import { useConfigStore, defaultFirstProfiles, type LocalProfile, type QuickCommand, type SshGroup, type SshProfile, type TerminalProfile } from '@/stores/config'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { formatKeystrokeForDisplay } from '@/lib/hotkeys/hotkeys'
@@ -35,7 +35,7 @@ const { t } = useI18n()
 const config = useConfigStore()
 const store = config.store
 
-const page = ref<'terminal' | 'profiles' | 'quickCommands' | 'keys' | 'appearance' | 'colorSchemes' | 'hotkeys' | 'about'>('profiles')
+const page = ref<'terminal' | 'profiles' | 'ssh' | 'quickCommands' | 'keys' | 'appearance' | 'colorSchemes' | 'hotkeys' | 'about'>('profiles')
 
 const { sortedCommands } = useCommands()
 const hotkeyCommands = computed(() => sortedCommands.value.filter(command => command.hotkeyId))
@@ -79,13 +79,14 @@ function runConfirmed (): void {
 }
 
 /**
- * @description 删除配置档案（经确认弹窗）
+ * @description 删除配置档案（经确认弹窗；按类型路由到对应档案页的删除逻辑）
  * @param profile 目标档案
  * @returns void
  *
  */
 function confirmDeleteProfile (profile: TerminalProfile): void {
-    confirmAction(t('settings.deleteConfirmBody', { name: profile.name }), () => deleteProfile(profile.id))
+    confirmAction(t('settings.deleteConfirmBody', { name: profile.name }), () =>
+        profile.type === 'ssh' ? deleteSshProfile(profile.id) : deleteLocalProfile(profile.id))
 }
 
 /**
@@ -146,7 +147,8 @@ onMounted(() => {
 })
 
 const pages = computed(() => [
-    { id: 'profiles' as const, label: t('settings.profiles'), icon: Layers },
+    { id: 'profiles' as const, label: t('settings.localTerminalPage'), icon: SquareTerminal },
+    { id: 'ssh' as const, label: t('settings.sshPage'), icon: Server },
     { id: 'quickCommands' as const, label: t('settings.quickCommands'), icon: Zap },
     { id: 'keys' as const, label: t('settings.keychainPage'), icon: KeyRound },
     { id: 'terminal' as const, label: t('settings.terminal'), icon: Terminal },
@@ -156,19 +158,13 @@ const pages = computed(() => [
     { id: 'about' as const, label: t('settings.about'), icon: Info },
 ])
 
-// ---- profiles page ----
-const profiles = computed(() => defaultFirstProfiles(store.profiles))
-const selectedProfileId = ref<string | null>(null)
-const selectedProfile = computed<TerminalProfile | null>(() =>
-    profiles.value.find(p => p.id === selectedProfileId.value)
-    ?? profiles.value[0]
+// ---- 本地终端页（仅 local 档案；与 SSH 档案页分离，各自独立选中态） ----
+const localProfiles = computed(() => defaultFirstProfiles(store.profiles.filter((p): p is LocalProfile => p.type === 'local')))
+const selectedLocalProfileId = ref<string | null>(null)
+const selectedLocalProfile = computed<LocalProfile | null>(() =>
+    localProfiles.value.find(p => p.id === selectedLocalProfileId.value)
+    ?? localProfiles.value[0]
     ?? null)
-
-// 仅 local 档案存在这些字段；编辑器在 SSH 档案下隐藏对应区块
-const selectedLocalProfile = computed(() => {
-    const profile = selectedProfile.value
-    return profile?.type === 'local' ? profile : null
-})
 
 const argsText = computed({
     get: () => selectedLocalProfile.value?.args.join(' ') ?? '',
@@ -222,11 +218,125 @@ const sshAuthOptions = computed(() => [
     { value: 'password', label: t('settings.sshAuthPassword') },
 ])
 
-// 仅 SSH 档案存在这些字段
-const selectedSshProfile = computed(() => {
-    const profile = selectedProfile.value
-    return profile?.type === 'ssh' ? profile : null
+// ---- SSH 页（SSH 档案 + 分组；分组交互对齐快捷命令分组） ----
+const sshProfiles = computed(() => store.profiles.filter((p): p is SshProfile => p.type === 'ssh'))
+const selectedSshProfileId = ref<string | null>(null)
+const selectedSshProfile = computed<SshProfile | null>(() =>
+    sshProfiles.value.find(p => p.id === selectedSshProfileId.value)
+    ?? sshProfiles.value[0]
+    ?? null)
+
+/** SSH 左列表分段：默认分组置顶（固定标题、不可改名/删除），其余按组名排序带小节头 */
+const sshSections = computed(() => {
+    const sections = groupQuickCommandSections(sshProfiles.value, store.sshGroups)
+        .map(section => section.groupId === null ? { ...section, title: t('settings.sshDefaultGroup') } : section)
+    // 没有未分组档案时也保持默认分组段置顶（空段常驻可见）
+    if (sshProfiles.value.length > 0 && !sections.some(section => section.groupId === null)) {
+        sections.unshift({ title: t('settings.sshDefaultGroup'), groupId: null, items: [] })
+    }
+    return sections
 })
+
+/** 编辑器分组下拉：默认分组 + 各分组 */
+const sshGroupOptions = computed(() => [
+    { value: '', label: t('settings.sshDefaultGroup') },
+    ...store.sshGroups.map(group => ({ value: group.id, label: group.name })),
+])
+
+const sshGroupModel = computed({
+    get: () => selectedSshProfile.value?.groupId ?? '',
+    set: (value: string) => {
+        const profile = selectedSshProfile.value
+        if (!profile) {
+            return
+        }
+        if (value) {
+            profile.groupId = value
+        } else {
+            delete profile.groupId
+        }
+    },
+})
+
+/** 左列表组标题的行内改名状态；null = 无进行中的改名 */
+const editingSshGroupId = ref<string | null>(null)
+const sshGroupNameDraft = ref('')
+
+/**
+ * @description 新建 SSH 分组并直接进入行内改名
+ * @returns void
+ *
+ * @example createSshGroup()
+ *
+ */
+function createSshGroup (): void {
+    const group: SshGroup = {
+        id: `sshgroup-${nanoid(6)}`,
+        name: t('settings.sshNewGroupName'),
+    }
+    store.sshGroups.push(group)
+    startSshGroupRename(group.id)
+}
+
+/**
+ * @description 删除 SSH 分组：组内档案降级默认分组（groupId 清空，Rust 删组命令同语义级联）
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example deleteSshGroup('sshgroup-a1b2')
+ *
+ */
+function deleteSshGroup (id: string): void {
+    const index = store.sshGroups.findIndex(group => group.id === id)
+    if (index === -1) {
+        return
+    }
+    store.sshGroups.splice(index, 1)
+    for (const profile of store.profiles) {
+        if (profile.type === 'ssh' && profile.groupId === id) {
+            delete profile.groupId
+        }
+    }
+    if (editingSshGroupId.value === id) {
+        editingSshGroupId.value = null
+    }
+}
+
+/**
+ * @description 开始 SSH 分组行内改名（组名写入草稿）
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example startSshGroupRename('sshgroup-a1b2')
+ *
+ */
+function startSshGroupRename (id: string): void {
+    const group = store.sshGroups.find(g => g.id === id)
+    if (!group) {
+        return
+    }
+    editingSshGroupId.value = id
+    sshGroupNameDraft.value = group.name
+}
+
+/**
+ * @description 提交 SSH 分组改名（空名放弃修改）
+ * @returns void
+ *
+ * @example commitSshGroupRename()
+ *
+ */
+function commitSshGroupRename (): void {
+    const id = editingSshGroupId.value
+    const group = store.sshGroups.find(g => g.id === id)
+    if (group) {
+        const name = sshGroupNameDraft.value.trim()
+        if (name) {
+            group.name = name
+        }
+    }
+    editingSshGroupId.value = null
+}
 
 // ---- SSH 密钥链（元数据存加密 SQLite，私钥明文不出库） ----
 const sshKeys = ref<SshKeyMeta[]>([])
@@ -526,10 +636,20 @@ async function renameKeyEntry (key: SshKeyMeta, name: string): Promise<void> {
     await updateSshKey({ id: key.id, name: trimmed }).catch(() => {})
 }
 
-const profileColorSchemeModel = computed({
-    get: () => selectedProfile.value?.colorScheme ?? '',
+const localColorSchemeModel = computed({
+    get: () => selectedLocalProfile.value?.colorScheme ?? '',
     set: (value: string) => {
-        const profile = selectedProfile.value
+        const profile = selectedLocalProfile.value
+        if (profile) {
+            profile.colorScheme = value || null
+        }
+    },
+})
+
+const sshColorSchemeModel = computed({
+    get: () => selectedSshProfile.value?.colorScheme ?? '',
+    set: (value: string) => {
+        const profile = selectedSshProfile.value
         if (profile) {
             profile.colorScheme = value || null
         }
@@ -537,67 +657,92 @@ const profileColorSchemeModel = computed({
 })
 
 /**
- * @description 新建配置档案并选中：local 以默认档案为模板；ssh 为远端连接模板
- * @param type 档案类型（local / ssh）
+ * @description 新建本地终端档案并选中（以首个 local 档案为模板）
  * @returns void
  *
- * @example createProfile('ssh') // 列表新增并选中新 SSH 档案
+ * @example createLocalProfile() // 列表新增并选中新档案
  *
  */
-function createProfile (type: 'local' | 'ssh'): void {
-    if (type === 'ssh') {
-        const profile: TerminalProfile = {
-            id: `ssh-${nanoid(8)}`,
-            type: 'ssh',
-            name: `${t('settings.profileTypeSsh')} ${store.profiles.length + 1}`,
-            host: '',
-            port: 22,
-            user: 'root',
-            auth: 'auto',
-            keyId: null,
-            colorScheme: null,
-            isDefault: false,
-        }
-        store.profiles.push(profile)
-        selectedProfileId.value = profile.id
-        return
-    }
-    const template = config.defaultProfile()
-    const profile: TerminalProfile = {
+function createLocalProfile (): void {
+    const template = localProfiles.value[0]
+    const profile: LocalProfile = {
         id: `local-${nanoid(8)}`,
         type: 'local',
-        name: `${t('settings.profiles')} ${store.profiles.length + 1}`,
-        command: (template?.type === 'local' ? template.command : undefined) ?? '/bin/zsh',
+        name: `${t('settings.localTerminalPage')} ${localProfiles.value.length + 1}`,
+        command: template?.command ?? '/bin/zsh',
         args: [],
         env: {},
         cwd: null,
         colorScheme: null,
-        loginShell: (template?.type === 'local' ? template.loginShell : undefined) ?? true,
+        loginShell: template?.loginShell ?? true,
         isDefault: false,
     }
     store.profiles.push(profile)
-    selectedProfileId.value = profile.id
+    selectedLocalProfileId.value = profile.id
 }
 
 /**
- * @description 删除配置档案；删除的是默认档案时把第一个剩余档案提升为默认
+ * @description 新建 SSH 档案并选中（落在默认分组）
+ * @returns void
+ *
+ * @example createSshProfile() // 列表默认分组下新增并选中
+ *
+ */
+function createSshProfile (): void {
+    const profile: SshProfile = {
+        id: `ssh-${nanoid(8)}`,
+        type: 'ssh',
+        name: `${t('settings.profileTypeSsh')} ${sshProfiles.value.length + 1}`,
+        host: '',
+        port: 22,
+        user: 'root',
+        auth: 'auto',
+        keyId: null,
+        colorScheme: null,
+        isDefault: false,
+    }
+    store.profiles.push(profile)
+    selectedSshProfileId.value = profile.id
+}
+
+/**
+ * @description 删除本地终端档案；删除的是默认档案时把第一个剩余 local 档案提升为默认
  * @param id 档案 id
  * @returns void
  *
- * @example deleteProfile('local-abc123')
+ * @example deleteLocalProfile('local-abc123')
  *
  */
-function deleteProfile (id: string): void {
+function deleteLocalProfile (id: string): void {
     const index = store.profiles.findIndex(p => p.id === id)
     if (index === -1) {
         return
     }
     const [removed] = store.profiles.splice(index, 1)
-    if (removed?.isDefault && store.profiles.length > 0) {
-        config.setDefaultProfile(profiles.value[0]!.id)
+    if (removed?.isDefault && localProfiles.value.length > 0) {
+        config.setDefaultProfile(localProfiles.value[0]!.id)
     }
-    if (selectedProfileId.value === id) {
-        selectedProfileId.value = profiles.value[0]?.id ?? null
+    if (selectedLocalProfileId.value === id) {
+        selectedLocalProfileId.value = localProfiles.value[0]?.id ?? null
+    }
+}
+
+/**
+ * @description 删除 SSH 档案；删除的是选中项时选中态收敛到剩余第一项
+ * @param id 档案 id
+ * @returns void
+ *
+ * @example deleteSshProfile('ssh-abc123')
+ *
+ */
+function deleteSshProfile (id: string): void {
+    const index = store.profiles.findIndex(p => p.id === id)
+    if (index === -1) {
+        return
+    }
+    store.profiles.splice(index, 1)
+    if (selectedSshProfileId.value === id) {
+        selectedSshProfileId.value = sshProfiles.value[0]?.id ?? null
     }
 }
 
@@ -1146,45 +1291,41 @@ async function openConfigDir (): Promise<void> {
             </template>
 
             <template v-else-if="page === 'profiles'">
-                <h2>{{ t('settings.profiles') }}</h2>
+                <h2>{{ t('settings.localTerminalPage') }}</h2>
                 <div class="master-detail">
                     <div class="detail-list">
                         <div class="profile-new-group">
-                            <button class="profile-new-button" @click="createProfile('local')">
+                            <button class="profile-new-button" @click="createLocalProfile">
                                 <Plus :size="14" />
                                 <span>{{ t('settings.profileNew') }}</span>
                             </button>
-                            <button class="profile-new-button" @click="createProfile('ssh')">
-                                <Plus :size="14" />
-                                <span>{{ t('settings.profileNewSsh') }}</span>
-                            </button>
                         </div>
                         <button
-                            v-for="p in profiles"
+                            v-for="p in localProfiles"
                             :key="p.id"
                             class="profile-item"
-                            :class="{ active: p.id === selectedProfile?.id }"
-                            @click="selectedProfileId = p.id"
+                            :class="{ active: p.id === selectedLocalProfile?.id }"
+                            @click="selectedLocalProfileId = p.id"
                         >
                             <span class="profile-item-head">
                                 <span class="profile-item-name">{{ p.name }}</span>
                                 <span v-if="p.isDefault" class="profile-default-badge">{{ t('tab.defaultProfile') }}</span>
                             </span>
-                            <span class="profile-item-command">{{ p.type === 'ssh' ? `${p.user}@${p.host}${p.port === 22 ? '' : `:${p.port}`}` : p.command }}</span>
+                            <span class="profile-item-command">{{ p.command }}</span>
                         </button>
                     </div>
-                    <div v-if="selectedProfile" class="detail-content">
+                    <div v-if="selectedLocalProfile" class="detail-content">
                         <div class="settings-section">
                             <h3 class="settings-section-title">{{ t('settings.profileSectionBasic') }}</h3>
                             <div class="settings-card">
                                 <div class="settings-card-row">
                                     <Label>{{ t('settings.profileName') }}</Label>
-                                    <Input v-model="selectedProfile.name" class="w-60" />
+                                    <Input v-model="selectedLocalProfile.name" class="w-60" />
                                 </div>
                                 <div class="settings-card-row">
                                     <Label>{{ t('settings.profileColorScheme') }}</Label>
                                     <SearchableSelect
-                                        v-model="profileColorSchemeModel"
+                                        v-model="localColorSchemeModel"
                                         :options="profileColorSchemeOptions"
                                         class="w-60"
                                         :placeholder="t('settings.searchPlaceholder')"
@@ -1193,12 +1334,12 @@ async function openConfigDir (): Promise<void> {
                             </div>
                         </div>
 
-                        <div v-if="selectedProfile.type === 'local'" class="settings-section">
+                        <div class="settings-section">
                             <h3 class="settings-section-title">{{ t('settings.profileSectionCommand') }}</h3>
                             <div class="settings-card">
                                 <div class="settings-card-row">
                                     <Label>{{ t('settings.profileCommand') }}</Label>
-                                    <Input v-model="selectedProfile.command" class="w-60" />
+                                    <Input v-model="selectedLocalProfile.command" class="w-60" />
                                 </div>
                                 <div class="settings-card-row">
                                     <Label>{{ t('settings.profileArgs') }} <span class="value-hint">{{ t('settings.profileArgsHint') }}</span></Label>
@@ -1214,35 +1355,132 @@ async function openConfigDir (): Promise<void> {
                                 </div>
                                 <div class="settings-card-row">
                                     <Label>{{ t('settings.profileLoginShell') }}</Label>
-                                    <Switch v-model="selectedProfile.loginShell" />
+                                    <Switch v-model="selectedLocalProfile.loginShell" />
                                 </div>
                             </div>
                         </div>
 
-                        <div v-else class="settings-section">
+                        <div class="profile-actions">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                :disabled="selectedLocalProfile.isDefault"
+                                @click="config.setDefaultProfile(selectedLocalProfile.id)"
+                            >
+                                {{ t('settings.profileSetDefault') }}
+                            </Button>
+                            <Button variant="destructive-outline" size="sm" @click="confirmDeleteProfile(selectedLocalProfile)">
+                                <Trash2 :size="14" />
+                                {{ t('settings.profileDelete') }}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <template v-else-if="page === 'ssh'">
+                <h2>{{ t('settings.sshPage') }}</h2>
+                <div class="master-detail">
+                    <div class="detail-list">
+                        <div class="profile-new-group">
+                            <button class="profile-new-button" @click="createSshProfile">
+                                <Plus :size="14" />
+                                <span>{{ t('settings.sshNew') }}</span>
+                            </button>
+                            <button class="profile-new-button" @click="createSshGroup">
+                                <Plus :size="14" />
+                                <span>{{ t('settings.sshNewGroup') }}</span>
+                            </button>
+                        </div>
+                        <template v-for="section in sshSections" :key="section.groupId ?? '__default'">
+                            <div class="qc-group-header">
+                                <template v-if="section.groupId !== null && editingSshGroupId === section.groupId">
+                                    <input
+                                        v-model="sshGroupNameDraft"
+                                        class="qc-group-name-input"
+                                        @keydown.enter.prevent="commitSshGroupRename"
+                                        @keydown.esc.prevent="editingSshGroupId = null"
+                                        @blur="commitSshGroupRename"
+                                    />
+                                </template>
+                                <template v-else>
+                                    <span class="qc-group-name">{{ section.title }}</span>
+                                    <span v-if="section.groupId !== null" class="qc-group-actions">
+                                        <button class="qc-group-action" :title="t('settings.sshRenameGroup')" @click.stop="startSshGroupRename(section.groupId!)">
+                                            <Pencil :size="12" />
+                                        </button>
+                                        <button class="qc-group-action" :title="t('settings.sshDeleteGroup')" @click.stop="deleteSshGroup(section.groupId!)">
+                                            <X :size="12" />
+                                        </button>
+                                    </span>
+                                </template>
+                            </div>
+                            <button
+                                v-for="p in section.items"
+                                :key="p.id"
+                                class="profile-item"
+                                :class="{ active: p.id === selectedSshProfile?.id }"
+                                @click="selectedSshProfileId = p.id"
+                            >
+                                <span class="profile-item-head">
+                                    <span class="profile-item-name">{{ p.name }}</span>
+                                    <span v-if="p.isDefault" class="profile-default-badge">{{ t('tab.defaultProfile') }}</span>
+                                </span>
+                                <span class="profile-item-command">{{ `${p.user}@${p.host}${p.port === 22 ? '' : `:${p.port}`}` }}</span>
+                            </button>
+                        </template>
+                        <p v-if="sshProfiles.length === 0 && store.sshGroups.length === 0" class="hint">
+                            {{ t('settings.sshEmptyHint') }}
+                        </p>
+                    </div>
+                    <div v-if="selectedSshProfile" class="detail-content">
+                        <div class="settings-section">
+                            <h3 class="settings-section-title">{{ t('settings.profileSectionBasic') }}</h3>
+                            <div class="settings-card">
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.profileName') }}</Label>
+                                    <Input v-model="selectedSshProfile.name" class="w-60" />
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.profileColorScheme') }}</Label>
+                                    <SearchableSelect
+                                        v-model="sshColorSchemeModel"
+                                        :options="profileColorSchemeOptions"
+                                        class="w-60"
+                                        :placeholder="t('settings.searchPlaceholder')"
+                                    />
+                                </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.sshGroupLabel') }}</Label>
+                                    <Select v-model="sshGroupModel" :options="sshGroupOptions" class="w-60" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
                             <h3 class="settings-section-title">{{ t('settings.profileSectionConnection') }}</h3>
                             <div class="settings-card">
                                 <div class="settings-card-row">
                                     <Label>{{ t('settings.sshHost') }}</Label>
-                                    <Input v-model="selectedProfile.host" class="w-60" placeholder="example.com" />
+                                    <Input v-model="selectedSshProfile.host" class="w-60" placeholder="example.com" />
                                 </div>
                                 <div class="settings-card-row">
                                     <Label>{{ t('settings.sshPort') }}</Label>
-                                    <Input v-model.number="selectedProfile.port" type="number" class="w-24" />
+                                    <Input v-model.number="selectedSshProfile.port" type="number" class="w-24" />
                                 </div>
                                 <div class="settings-card-row">
                                     <Label>{{ t('settings.sshUser') }}</Label>
-                                    <Input v-model="selectedProfile.user" class="w-60" />
+                                    <Input v-model="selectedSshProfile.user" class="w-60" />
                                 </div>
                                 <div class="settings-card-row">
                                     <Label>{{ t('settings.sshAuth') }}</Label>
-                                    <Select v-model="selectedProfile.auth" :options="sshAuthOptions" class="w-44" />
+                                    <Select v-model="selectedSshProfile.auth" :options="sshAuthOptions" class="w-44" />
                                 </div>
-                                <div v-if="selectedProfile.auth === 'publicKey' || selectedProfile.auth === 'auto'" class="settings-card-row">
+                                <div v-if="selectedSshProfile.auth === 'publicKey' || selectedSshProfile.auth === 'auto'" class="settings-card-row">
                                     <Label>{{ t('settings.keychain') }} <span class="value-hint">{{ t('settings.keychainHint') }}</span></Label>
                                     <Select v-model="keyIdModel" :options="sshKeyOptions" class="w-60" />
                                 </div>
-                                <div v-if="selectedProfile.auth === 'password' || selectedProfile.auth === 'auto'" class="settings-card-row">
+                                <div v-if="selectedSshProfile.auth === 'password' || selectedSshProfile.auth === 'auto'" class="settings-card-row">
                                     <Label>{{ t('settings.sshPassword') }}</Label>
                                     <div class="ssh-password-row">
                                         <Button variant="outline" size="sm" @click="passwordEditorOpen = !passwordEditorOpen">
@@ -1254,7 +1492,7 @@ async function openConfigDir (): Promise<void> {
                                         </Button>
                                     </div>
                                 </div>
-                                <div v-if="passwordEditorOpen && (selectedProfile.auth === 'password' || selectedProfile.auth === 'auto')" class="settings-card-row stacked">
+                                <div v-if="passwordEditorOpen && (selectedSshProfile.auth === 'password' || selectedSshProfile.auth === 'auto')" class="settings-card-row stacked">
                                     <Label>{{ t('settings.sshPassword') }}</Label>
                                     <div class="ssh-password-editor">
                                         <Input v-model="passwordDraft" type="password" class="w-60" :placeholder="t('settings.sshPasswordPlaceholder')" />
@@ -1268,12 +1506,12 @@ async function openConfigDir (): Promise<void> {
                             <Button
                                 variant="outline"
                                 size="sm"
-                                :disabled="selectedProfile.isDefault"
-                                @click="config.setDefaultProfile(selectedProfile.id)"
+                                :disabled="selectedSshProfile.isDefault"
+                                @click="config.setDefaultProfile(selectedSshProfile.id)"
                             >
                                 {{ t('settings.profileSetDefault') }}
                             </Button>
-                            <Button variant="destructive-outline" size="sm" @click="confirmDeleteProfile(selectedProfile)">
+                            <Button variant="destructive-outline" size="sm" @click="confirmDeleteProfile(selectedSshProfile)">
                                 <Trash2 :size="14" />
                                 {{ t('settings.profileDelete') }}
                             </Button>

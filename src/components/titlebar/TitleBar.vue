@@ -4,8 +4,9 @@ import { Plus, Settings, X } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { platform } from '@/lib/platform'
 import { useTabsStore, type Tab } from '@/stores/tabs'
-import { useConfigStore, defaultFirstProfiles } from '@/stores/config'
+import { useConfigStore, defaultFirstProfiles, type LocalProfile, type SshProfile } from '@/stores/config'
 import { terminalTabApi } from '@/services/terminalTabsApi'
+import { groupQuickCommandSections } from '@/lib/quickCommands'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
 import DropdownMenu from '@/components/ui/DropdownMenu.vue'
 
@@ -30,16 +31,27 @@ const TAB_COLORS = [
 ] as const
 
 /**
- * @description 「+」按钮的档案菜单项：列出全部 local 档案（默认档案置顶），默认档案带标记
+ * @description 「+」按钮的档案菜单项：本地档案在前（默认档案置顶、带标记），分隔线后
+ *              按分组排列 SSH 档案（默认分组在前，其余按组名排序，组内保持配置顺序）
  * @returns ContextMenuItemSpec[] 菜单项列表
  *
  */
-const newTabMenuItems = computed<ContextMenuItemSpec[]>(() => defaultFirstProfiles(config.store.profiles)
-    .filter(profile => profile.type === 'local' || profile.type === 'ssh')
-    .map(profile => ({
-        key: profile.id,
-        label: profile.isDefault ? `${profile.name} · ${t('tab.defaultProfile')}` : profile.name,
-    })))
+const newTabMenuItems = computed<ContextMenuItemSpec[]>(() => {
+    const locals: ContextMenuItemSpec[] = defaultFirstProfiles(config.store.profiles)
+        .filter((profile): profile is LocalProfile => profile.type === 'local')
+        .map(profile => ({
+            key: profile.id,
+            label: profile.isDefault ? `${profile.name} · ${t('tab.defaultProfile')}` : profile.name,
+        }))
+    const sshItems: ContextMenuItemSpec[] = groupQuickCommandSections(
+        config.store.profiles.filter((profile): profile is SshProfile => profile.type === 'ssh'),
+        config.store.sshGroups,
+    ).flatMap(section => section.items.map(profile => ({ key: profile.id, label: profile.name })))
+    return [
+        ...locals,
+        ...sshItems.map((item, index) => index === 0 && locals.length > 0 ? { ...item, separatorBefore: true } : item),
+    ]
+})
 
 /**
  * @description 处理「+」档案菜单选择：取活动窗格 cwd 后按档案开新标签（继承当前目录）

@@ -50,7 +50,7 @@ export function useCommands () {
 
     /**
      * 同步式注册"按档案新建标签"命令：先移除全部旧命令再按当前档案重建
-     * （档案增删改名后由 App.vue 的 watch 调用）
+     * （档案增删改名后由 App.vue 的 watch 调用）；SSH 档案用「连接」文案与本地终端区分
      */
     function registerProfileCommands (profiles: TerminalProfile[]): void {
         commands.value = commands.value.filter(c => !c.id.startsWith(PROFILE_COMMAND_PREFIX))
@@ -61,7 +61,9 @@ export function useCommands () {
             register({
                 id: `${PROFILE_COMMAND_PREFIX}${profile.id}`,
                 group: 'tab',
-                label: () => t('commands.newTabWithProfile', { name: profile.name }),
+                label: () => profile.type === 'ssh'
+                    ? t('commands.newTabWithSshProfile', { name: profile.name })
+                    : t('commands.newTabWithProfile', { name: profile.name }),
                 handler: () => void openNewTerminalTabWithCwd(profile.id),
             })
         }

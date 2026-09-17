@@ -37,6 +37,14 @@ pub struct QuickCommandGroupRecord {
     pub name: String,
 }
 
+/// SSH 档案分组记录
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshGroupRecord {
+    pub id: String,
+    pub name: String,
+}
+
 /// 启动聚合读取的全量快照（档案/配色从 data JSON 重建，快捷命令/分组从列重建）
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,6 +56,7 @@ pub struct ConfigSnapshot {
     pub color_schemes: Vec<Value>,
     pub quick_commands: Vec<QuickCommandRecord>,
     pub quick_command_groups: Vec<QuickCommandGroupRecord>,
+    pub ssh_groups: Vec<SshGroupRecord>,
 }
 
 /// 配置库状态：app_data_dir/config.db 的单连接（WAL）
@@ -117,6 +126,17 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             PRAGMA user_version = 1;",
         )
         .map_err(|e| format!("failed to create config schema: {e}"))?;
+    }
+    if version < 2 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS ssh_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL
+            );
+            PRAGMA user_version = 2;",
+        )
+        .map_err(|e| format!("failed to create ssh_groups schema: {e}"))?;
     }
     Ok(())
 }
@@ -239,6 +259,18 @@ fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot>, String> 
         .map_err(|e| format!("failed to read quick commands: {e}"))?;
     for row in rows {
         snapshot.quick_commands.push(row.map_err(|e| e.to_string())?);
+    }
+
+    {
+        let mut stmt = conn
+            .prepare("SELECT id, name FROM ssh_groups ORDER BY sort_order")
+            .map_err(|e| format!("failed to read ssh groups: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| Ok(SshGroupRecord { id: row.get(0)?, name: row.get(1)? }))
+            .map_err(|e| format!("failed to read ssh groups: {e}"))?;
+        for row in rows {
+            snapshot.ssh_groups.push(row.map_err(|e| e.to_string())?);
+        }
     }
 
     Ok(Some(snapshot))
@@ -441,8 +473,74 @@ fn quick_command_group_delete_internal(state: &ConfigState, id: &str) -> Result<
         .map_err(|e| format!("failed to delete quick command group {id}: {e}"))?;
     tx.execute("UPDATE quick_commands SET group_id = NULL WHERE group_id = ?1", [id])
         .map_err(|e| format!("failed to ungroup quick commands of {id}: {e}"))?;
-    mark_initialized(&tx).map_err(|e| format!("failed to mark config initialized: {e}"))?;
+    mark_initialized(&tx).map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| format!("failed to commit quick command group delete: {e}"))
+}
+
+// ---- 写入：SSH 分组 ----
+
+/// 新增 SSH 分组
+fn ssh_group_create_internal(state: &ConfigState, group: &SshGroupRecord) -> Result<(), String> {
+    let mut conn = state.conn.lock().unwrap();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let sort_order = next_sort_order(&tx, "ssh_groups").map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO ssh_groups (id, name, sort_order) VALUES (?1, ?2, ?3)",
+        rusqlite::params![group.id, group.name, sort_order],
+    )
+    .map_err(|e| format!("failed to create ssh group {}: {e}", group.id))?;
+    mark_initialized(&tx).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| format!("failed to commit ssh group create: {e}"))
+}
+
+/// 更新 SSH 分组（按 id）
+fn ssh_group_update_internal(state: &ConfigState, group: &SshGroupRecord) -> Result<(), String> {
+    let mut conn = state.conn.lock().unwrap();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let changed = tx
+        .execute(
+            "UPDATE ssh_groups SET name = ?1 WHERE id = ?2",
+            rusqlite::params![group.name, group.id],
+        )
+        .map_err(|e| format!("failed to update ssh group {}: {e}", group.id))?;
+    if changed == 0 {
+        return Err(format!("ssh group not found: {}", group.id));
+    }
+    mark_initialized(&tx).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| format!("failed to commit ssh group update: {e}"))
+}
+
+/// 删除 SSH 分组：单事务内删组并把组内 SSH 档案降级默认分组（groupId 存于 profiles 的
+/// data JSON 内，需逐行改写 JSON 后回写；对齐快捷命令「删组降级」语义）
+fn ssh_group_delete_internal(state: &ConfigState, id: &str) -> Result<(), String> {
+    let mut conn = state.conn.lock().unwrap();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM ssh_groups WHERE id = ?1", [id])
+        .map_err(|e| format!("failed to delete ssh group {id}: {e}"))?;
+    let members: Vec<(String, String)> = {
+        let mut stmt = tx
+            .prepare("SELECT id, data FROM profiles WHERE type = 'ssh'")
+            .map_err(|e| format!("failed to read ssh profiles: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .map_err(|e| format!("failed to read ssh profiles: {e}"))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
+    };
+    for (profile_id, raw) in members {
+        let Ok(mut data) = serde_json::from_str::<serde_json::Map<String, Value>>(&raw) else {
+            continue;
+        };
+        if data.get("groupId").and_then(Value::as_str) == Some(id) {
+            data.remove("groupId");
+            tx.execute(
+                "UPDATE profiles SET data = ?1 WHERE id = ?2",
+                rusqlite::params![Value::Object(data).to_string(), profile_id],
+            )
+            .map_err(|e| format!("failed to ungroup ssh profile {profile_id}: {e}"))?;
+        }
+    }
+    mark_initialized(&tx).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| format!("failed to commit ssh group delete: {e}"))
 }
 
 // ---- 写入：自定义配色 ----
@@ -636,6 +734,24 @@ pub fn quick_command_group_delete(state: State<'_, ConfigState>, id: String) -> 
     quick_command_group_delete_internal(&state, &id)
 }
 
+/// 新增 SSH 分组
+#[tauri::command]
+pub fn ssh_group_create(state: State<'_, ConfigState>, group: SshGroupRecord) -> Result<(), String> {
+    ssh_group_create_internal(&state, &group)
+}
+
+/// 更新 SSH 分组
+#[tauri::command]
+pub fn ssh_group_update(state: State<'_, ConfigState>, group: SshGroupRecord) -> Result<(), String> {
+    ssh_group_update_internal(&state, &group)
+}
+
+/// 删除 SSH 分组（组内 SSH 档案降级默认分组）
+#[tauri::command]
+pub fn ssh_group_delete(state: State<'_, ConfigState>, id: String) -> Result<(), String> {
+    ssh_group_delete_internal(&state, &id)
+}
+
 /// upsert 自定义配色
 #[tauri::command]
 pub fn color_scheme_save(state: State<'_, ConfigState>, name: String, data: Value) -> Result<(), String> {
@@ -691,7 +807,7 @@ mod tests {
         let state = temp_state("version");
         let conn = state.conn.lock().unwrap();
         let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
     }
 
     #[test]
@@ -796,6 +912,56 @@ mod tests {
         .is_err());
         quick_command_group_delete_internal(&state, "g1").unwrap();
         assert!(load_internal(&state).unwrap().unwrap().quick_command_groups.is_empty());
+    }
+
+    #[test]
+    fn ssh_group_crud_round_trip() {
+        let state = temp_state("ssh-group");
+        ssh_group_create_internal(&state, &SshGroupRecord { id: "sg1".into(), name: "生产".into() }).unwrap();
+        ssh_group_create_internal(&state, &SshGroupRecord { id: "sg2".into(), name: "测试".into() }).unwrap();
+        ssh_group_update_internal(&state, &SshGroupRecord { id: "sg1".into(), name: "prod".into() }).unwrap();
+
+        let snapshot = load_internal(&state).unwrap().unwrap();
+        assert_eq!(snapshot.ssh_groups.len(), 2);
+        assert_eq!(snapshot.ssh_groups[0].name, "prod");
+        assert_eq!(snapshot.ssh_groups[1].name, "测试");
+        assert!(ssh_group_update_internal(&state, &SshGroupRecord { id: "ghost".into(), name: "x".into() }).is_err());
+
+        ssh_group_delete_internal(&state, "sg1").unwrap();
+        ssh_group_delete_internal(&state, "sg1").unwrap(); // 幂等
+        let snapshot = load_internal(&state).unwrap().unwrap();
+        assert_eq!(snapshot.ssh_groups.len(), 1);
+        assert_eq!(snapshot.ssh_groups[0].id, "sg2");
+    }
+
+    #[test]
+    fn ssh_group_delete_cascades_ungroup() {
+        let state = temp_state("ssh-group-cascade");
+        ssh_group_create_internal(&state, &SshGroupRecord { id: "sg1".into(), name: "prod".into() }).unwrap();
+        profile_create_internal(&state, &serde_json::json!({
+            "id": "s1", "type": "ssh", "name": "web", "host": "h", "port": 22,
+            "user": "root", "auth": "auto", "keyId": null, "colorScheme": null,
+            "isDefault": false, "groupId": "sg1",
+        }))
+        .unwrap();
+        profile_create_internal(&state, &serde_json::json!({
+            "id": "s2", "type": "ssh", "name": "db", "host": "h2", "port": 22,
+            "user": "root", "auth": "auto", "keyId": null, "colorScheme": null,
+            "isDefault": false,
+        }))
+        .unwrap();
+        profile_create_internal(&state, &profile_json("l1", "zsh", "local", false)).unwrap();
+
+        ssh_group_delete_internal(&state, "sg1").unwrap();
+
+        let snapshot = load_internal(&state).unwrap().unwrap();
+        assert!(snapshot.ssh_groups.is_empty());
+        for profile in &snapshot.profiles {
+            assert!(profile.get("groupId").is_none(), "groupId must be dropped: {profile}");
+        }
+        // 其余字段原样保留（仅移除 groupId 键）
+        assert_eq!(snapshot.profiles[0]["name"], "web");
+        assert_eq!(snapshot.profiles[0]["host"], "h");
     }
 
     #[test]

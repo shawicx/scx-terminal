@@ -16,7 +16,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 import { createPinia, setActivePinia } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { useConfigStore } from './config'
-import type { TerminalProfile } from './config'
+import type { SshProfile, TerminalProfile } from './config'
 
 const mockInvoke = vi.mocked(invoke)
 
@@ -28,6 +28,7 @@ const db = {
     profiles: new Map<string, Record<string, unknown>>(),
     quickCommands: new Map<string, Record<string, unknown>>(),
     groups: new Map<string, Record<string, unknown>>(),
+    sshGroups: new Map<string, Record<string, unknown>>(),
     colorSchemes: new Map<string, Record<string, unknown>>(),
 }
 
@@ -38,6 +39,7 @@ function resetDb (): void {
     db.profiles.clear()
     db.quickCommands.clear()
     db.groups.clear()
+    db.sshGroups.clear()
     db.colorSchemes.clear()
 }
 
@@ -62,6 +64,7 @@ function mockImplementationBody (): void {
                         colorSchemes: [...db.colorSchemes.values()],
                         quickCommands: [...db.quickCommands.values()],
                         quickCommandGroups: [...db.groups.values()],
+                        sshGroups: [...db.sshGroups.values()],
                     }
                     : null
             case 'config_load_legacy_yaml':
@@ -106,6 +109,20 @@ function mockImplementationBody (): void {
                 for (const command of db.quickCommands.values()) {
                     if (command.groupId === a.id) {
                         delete command.groupId
+                    }
+                }
+                return null
+            }
+            case 'ssh_group_create':
+            case 'ssh_group_update':
+                db.sshGroups.set((a.group as Record<string, unknown>).id as string, a.group as Record<string, unknown>)
+                db.initialized = true
+                return null
+            case 'ssh_group_delete': {
+                db.sshGroups.delete(a.id as string)
+                for (const profile of db.profiles.values()) {
+                    if (profile.type === 'ssh' && profile.groupId === a.id) {
+                        delete profile.groupId
                     }
                 }
                 return null
@@ -178,6 +195,46 @@ describe('config store diff-flush integration', () => {
         expect(mockInvoke).toHaveBeenCalledWith('quick_command_group_delete', { id: 'g1' })
         expect(mockInvoke).toHaveBeenCalledWith('profile_delete', { id: 'p2' })
         expect(db.profiles.has('p2')).toBe(false)
+    })
+
+    it('flushes ssh group CRUD and cascades ungroup on delete', async () => {
+        db.initialized = true
+        db.profiles.set('s1', {
+            id: 's1', type: 'ssh', name: 'web', host: 'h', port: 22, user: 'root',
+            auth: 'auto', keyId: null, colorScheme: null, isDefault: false,
+        } as unknown as Record<string, unknown>)
+        setActivePinia(createPinia())
+        const config = useConfigStore()
+        await config.load()
+        expect(config.store.profiles).toHaveLength(1)
+
+        // 建组 + 把 SSH 档案归组：分组 create 与档案 update 都要落库
+        config.store.sshGroups.push({ id: 'sg1', name: 'prod' })
+        ;(config.store.profiles[0] as SshProfile).groupId = 'sg1'
+        await new Promise(resolve => setTimeout(resolve, 700))
+        expect(mockInvoke).toHaveBeenCalledWith('ssh_group_create', { group: { id: 'sg1', name: 'prod' } })
+        expect(mockInvoke).toHaveBeenCalledWith('profile_update', { profile: expect.objectContaining({ id: 's1', groupId: 'sg1' }) })
+
+        // 删组：组删除命令 + 前端级联把档案降级默认分组（再触发一条 profile_update）
+        config.store.sshGroups.splice(0, 1)
+        delete (config.store.profiles[0] as SshProfile).groupId
+        await new Promise(resolve => setTimeout(resolve, 700))
+        expect(mockInvoke).toHaveBeenCalledWith('ssh_group_delete', { id: 'sg1' })
+        expect(db.sshGroups.has('sg1')).toBe(false)
+        expect(db.profiles.get('s1')).not.toHaveProperty('groupId')
+    })
+
+    it('drops dangling ssh profile groupId on load (sanitize)', async () => {
+        db.initialized = true
+        db.sshGroups.set('sg1', { id: 'sg1', name: 'prod' })
+        db.profiles.set('s1', {
+            id: 's1', type: 'ssh', name: 'web', host: 'h', port: 22, user: 'root',
+            auth: 'auto', keyId: null, colorScheme: null, isDefault: false, groupId: 'gone',
+        } as unknown as Record<string, unknown>)
+        setActivePinia(createPinia())
+        const config = useConfigStore()
+        await config.load()
+        expect(config.store.profiles[0]).not.toHaveProperty('groupId')
     })
 
     it('persists nothing until load() completes (loaded gate)', async () => {

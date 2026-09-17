@@ -40,10 +40,18 @@ export interface SshProfile {
     /** 档案专属配色名；null 跟随全局 */
     colorScheme: string | null
     isDefault: boolean
+    /** 所属分组 id（见 SshGroup）；缺省 = 默认分组 */
+    groupId?: string
 }
 
 /** 终端配置档案：type 为判别字段（local 本地 shell / ssh 远程连接） */
 export type TerminalProfile = LocalProfile | SshProfile
+
+/** SSH 档案分组（管理用实体，SSH 档案以 groupId 单选引用；无引用 = 默认分组） */
+export interface SshGroup {
+    id: string
+    name: string
+}
 
 /** 快捷命令分组（管理用实体，命令以 groupId 单选引用） */
 export interface QuickCommandGroup {
@@ -108,6 +116,8 @@ export interface ConfigStore {
     appearance: AppearanceConfig
     hotkeys: HotkeysConfig
     profiles: TerminalProfile[]
+    /** SSH 档案分组（SSH 档案以 groupId 引用） */
+    sshGroups: SshGroup[]
     /** 用户自定义配色方案（名称与内置重复时优先于内置生效） */
     colorSchemes: TerminalColorScheme[]
     quickCommands: QuickCommand[]
@@ -120,6 +130,7 @@ export interface ConfigSnapshot {
     appearance?: Partial<AppearanceConfig>
     hotkeys?: HotkeysConfig
     profiles?: TerminalProfile[]
+    sshGroups?: SshGroup[]
     colorSchemes?: TerminalColorScheme[]
     quickCommands?: QuickCommand[]
     quickCommandGroups?: QuickCommandGroup[]
@@ -162,6 +173,7 @@ export function defaultConfig (): ConfigStore {
             language: 'auto',
         },
         profiles: [],
+        sshGroups: [],
         colorSchemes: [],
         quickCommands: [],
         quickCommandGroups: [],
@@ -322,6 +334,7 @@ export interface SavedBaseline {
     profiles: Record<string, string>
     quickCommands: Record<string, string>
     quickCommandGroups: Record<string, string>
+    sshGroups: Record<string, string>
     colorSchemes: Record<string, string>
 }
 
@@ -338,6 +351,9 @@ export type FlushOp =
     | { kind: 'quickCommandGroupCreate'; group: QuickCommandGroup; saved: string }
     | { kind: 'quickCommandGroupUpdate'; group: QuickCommandGroup; saved: string }
     | { kind: 'quickCommandGroupDelete'; id: string }
+    | { kind: 'sshGroupCreate'; group: SshGroup; saved: string }
+    | { kind: 'sshGroupUpdate'; group: SshGroup; saved: string }
+    | { kind: 'sshGroupDelete'; id: string }
     | { kind: 'colorSchemeSave'; name: string; data: TerminalColorScheme; saved: string }
     | { kind: 'colorSchemeDelete'; name: string }
 
@@ -449,6 +465,17 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
         ops.push({ kind: 'quickCommandGroupUpdate', group, saved: stableStringify(group) })
     }
 
+    const sshGroupDiff = diffById(store.sshGroups, saved.sshGroups)
+    for (const id of sshGroupDiff.deletes) {
+        ops.push({ kind: 'sshGroupDelete', id })
+    }
+    for (const group of sshGroupDiff.creates) {
+        ops.push({ kind: 'sshGroupCreate', group, saved: stableStringify(group) })
+    }
+    for (const group of sshGroupDiff.updates) {
+        ops.push({ kind: 'sshGroupUpdate', group, saved: stableStringify(group) })
+    }
+
     // 配色以 name 为身份键（重命名 = 删旧建新，净效果等价）
     for (const name of new Set([...store.colorSchemes.map(scheme => scheme.name), ...Object.keys(saved.colorSchemes)])) {
         const scheme = store.colorSchemes.find(item => item.name === name)
@@ -467,7 +494,7 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
 
 /** 空基线：任何非空 store 与之 diff 都会产出全量导入操作（legacy 迁移用） */
 export function emptyBaseline (): SavedBaseline {
-    return { terminal: '', appearance: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, colorSchemes: {} }
+    return { terminal: '', appearance: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, sshGroups: {}, colorSchemes: {} }
 }
 
 /**
@@ -486,6 +513,7 @@ export function captureBaseline (store: ConfigStore): SavedBaseline {
         profiles: Object.fromEntries(store.profiles.map(profile => [profile.id, stableStringify(profile)])),
         quickCommands: Object.fromEntries(store.quickCommands.map(command => [command.id, stableStringify(command)])),
         quickCommandGroups: Object.fromEntries(store.quickCommandGroups.map(group => [group.id, stableStringify(group)])),
+        sshGroups: Object.fromEntries(store.sshGroups.map(group => [group.id, stableStringify(group)])),
         colorSchemes: Object.fromEntries(store.colorSchemes.map(scheme => [scheme.name, stableStringify(scheme)])),
     }
 }
@@ -530,6 +558,15 @@ async function runFlushOp (op: FlushOp): Promise<void> {
             break
         case 'quickCommandGroupDelete':
             await invoke('quick_command_group_delete', { id: op.id })
+            break
+        case 'sshGroupCreate':
+            await invoke('ssh_group_create', { group: op.group })
+            break
+        case 'sshGroupUpdate':
+            await invoke('ssh_group_update', { group: op.group })
+            break
+        case 'sshGroupDelete':
+            await invoke('ssh_group_delete', { id: op.id })
             break
         case 'colorSchemeSave':
             await invoke('color_scheme_save', { name: op.name, data: op.data })
@@ -576,6 +613,13 @@ function commitOp (saved: SavedBaseline, op: FlushOp): void {
         case 'quickCommandGroupDelete':
             delete saved.quickCommandGroups[op.id]
             break
+        case 'sshGroupCreate':
+        case 'sshGroupUpdate':
+            saved.sshGroups[op.group.id] = op.saved
+            break
+        case 'sshGroupDelete':
+            delete saved.sshGroups[op.id]
+            break
         case 'colorSchemeSave':
             saved.colorSchemes[op.name] = op.saved
             break
@@ -601,7 +645,7 @@ export const useConfigStore = defineStore('config', () => {
 
     // 持久化 watch 必须在 setup 同步流创建（load() 的 await 之后创建在 WKWebView 实测不触发）；
     // getter 数组 + deep 逐分片建依赖（theme store 同款模式）。loaded 门控在 scheduleSave 内。
-    watch(() => [store.terminal, store.appearance, store.hotkeys, store.profiles, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
+    watch(() => [store.terminal, store.appearance, store.hotkeys, store.profiles, store.sshGroups, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
 
     async function load (): Promise<void> {
         let userConfig: Record<string, unknown> | null = null
@@ -643,14 +687,16 @@ export const useConfigStore = defineStore('config', () => {
     }
 
     /**
-     * @description 清理 SSH 档案上已废弃的明文敏感字段（旧版 yaml 遗留的 password/privateKeyPath——
-     *              敏感数据已加密存 SQLite，不允许残留明文副本）
+     * @description 清理 SSH 档案上的无效引用：已废弃的明文敏感字段（旧版 yaml 遗留的
+     *              password/privateKeyPath——敏感数据已加密存 SQLite，不允许残留明文副本）
+     *              与悬空的 groupId（分组被删/旧数据残留，降级为默认分组）
      * @returns void
      *
      * @example sanitizeProfiles()
      *
      */
     function sanitizeProfiles (): void {
+        const groupIds = new Set(store.sshGroups.map(group => group.id))
         for (const profile of store.profiles) {
             if (profile.type !== 'ssh') {
                 continue
@@ -658,6 +704,9 @@ export const useConfigStore = defineStore('config', () => {
             const legacy = profile as Record<string, unknown>
             delete legacy.password
             delete legacy.privateKeyPath
+            if (profile.groupId && !groupIds.has(profile.groupId)) {
+                delete legacy.groupId
+            }
         }
     }
 
