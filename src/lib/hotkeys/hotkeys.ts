@@ -166,3 +166,35 @@ export function normalizeHotkeysConfig<T extends Record<string, string[][]>> (ho
     }
     return result as T
 }
+
+const MAC_KEY_SYMBOLS: Record<string, string> = {
+    [metaKeyName]: '⌘',
+    [altKeyName]: '⌥',
+    Shift: '⇧',
+    Ctrl: '⌃',
+    Up: '↑',
+    Down: '↓',
+    Left: '←',
+    Right: '→',
+    Enter: '↵',
+    Escape: '⎋',
+    Backspace: '⌫',
+    Delete: '⌦',
+    Tab: '⇥',
+}
+
+/**
+ * @description 将按键串格式化为用户友好的显示文本（macOS 以符号紧凑拼接，其余平台以 + 连接）
+ * @param keystroke 按键串（如 "⌘-Shift-P"，即 parseKeystroke 可解析的形式）
+ * @returns string 显示文本（如 "⌘⇧P"；Windows/Linux 下 "Ctrl+Shift+P"）
+ *
+ * @example formatKeystrokeForDisplay('⌘-Shift-P') // '⌘⇧P'
+ *
+ */
+export function formatKeystrokeForDisplay (keystroke: string): string {
+    const keys = parseKeystroke(keystroke)
+    if (platform === 'macos') {
+        return keys.map(key => MAC_KEY_SYMBOLS[key] ?? key).join('')
+    }
+    return keys.join('+')
+}

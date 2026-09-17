@@ -106,6 +106,7 @@ const tabApi = {
     paste: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'paste'),
     clear: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'clear'),
     find: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'find'),
+    triggerSuggestions: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'triggerSuggestions'),
     sendTextToActivePane: (text: string, execute?: boolean) =>
         rootContainer.value?.sendTextToLeaf(activeLeafId.value, text, execute),
     getActivePaneCwd: async (): Promise<string | null> =>
@@ -150,7 +151,6 @@ onBeforeUnmount(() => {
 .terminal-tab-content {
     height: 100%;
     display: flex;
-    transition: all 0.125s ease;
 }
 
 /* 根分栏容器必须占满可用空间：其内容（terminal-pane）为绝对定位，

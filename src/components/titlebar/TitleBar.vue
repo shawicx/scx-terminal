@@ -216,12 +216,17 @@ function onDragEnd () {
                     }"
                     :draggable="renamingId !== tab.id"
                     :title="displayTitle(tab)"
+                    role="tab"
+                    :aria-selected="tab.id === store.activeId"
+                    tabindex="0"
                     @dragstart="onDragStart(index, $event)"
                     @dragover="onDragOver(index, $event)"
                     @drop="onDrop(index, $event)"
                     @dragend="onDragEnd"
                     @click="store.activate(tab.id)"
                     @auxclick="onAuxClick(tab.id, $event)"
+                    @keydown.enter.self.prevent="store.activate(tab.id)"
+                    @keydown.space.self.prevent="store.activate(tab.id)"
                 >
                     <span v-if="tab.color" class="tab-color-dot" :style="{ background: tab.color }"></span>
                     <input
@@ -238,7 +243,7 @@ function onDragEnd () {
                     <button
                         v-if="renamingId !== tab.id"
                         class="tab-close"
-                        :title="'Close'"
+                        :title="t('commands.closeTab')"
                         @click.stop="store.closeTab(tab.id)"
                     >
                         <X :size="12" />
@@ -255,7 +260,7 @@ function onDragEnd () {
 
         <div class="drag-area" data-tauri-drag-region></div>
 
-        <button class="new-tab-button settings-button" title="Settings" @click="store.openSettingsTab()">
+        <button class="new-tab-button settings-button" :title="t('commands.openSettings')" @click="store.openSettingsTab()">
             <Settings :size="14" />
         </button>
     </div>
@@ -292,18 +297,24 @@ function onDragEnd () {
     gap: 6px;
     padding: 0 10px;
     height: 30px;
+    border: 1px solid transparent;
+    border-bottom: none;
     border-radius: 6px 6px 0 0;
     font-size: 12px;
     color: var(--color-muted-foreground);
     cursor: default;
     position: relative;
     max-width: 200px;
-    transition: all 0.25s ease;
+    transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
 }
 
+/* 激活标签与内容区连通：背景取内容区底色，侧/顶描边 + 下探 1px 盖住标题栏底边线 */
 .tab-header.active {
-    background: var(--color-accent);
-    color: var(--color-accent-foreground);
+    height: 31px;
+    margin-bottom: -1px;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    border-color: var(--color-border);
 }
 
 .tab-header:not(.active):hover {
@@ -352,7 +363,7 @@ function onDragEnd () {
     background: transparent;
     color: inherit;
     opacity: 0;
-    cursor: pointer;
+    cursor: default;
     transition: opacity 0.25s ease, background 0.25s ease;
     flex-shrink: 0;
 }
@@ -378,8 +389,8 @@ function onDragEnd () {
     border-radius: 6px;
     background: transparent;
     color: var(--color-muted-foreground);
-    cursor: pointer;
-    transition: all 0.25s ease;
+    cursor: default;
+    transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 .new-tab-button:hover {

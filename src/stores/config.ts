@@ -83,6 +83,13 @@ export interface TerminalConfig {
     outputNewlines: null | 'cr' | 'lf' | 'crlf' | 'implicit_cr' | 'implicit_lf'
     /** 以登录 shell 启动（-l，加载 ~/.zprofile 等登录配置），对齐 Tabby/Terminal.app */
     loginShell: boolean
+    /** 输入建议（自动补全） */
+    suggestions: {
+        enabled: boolean
+        trigger: 'auto' | 'manual'
+        delay: number
+        sources: { history: boolean, quickCommands: boolean, paths: boolean }
+    }
 }
 
 export interface AppearanceConfig {
@@ -141,6 +148,12 @@ export function defaultConfig (): ConfigStore {
             inputNewlines: null,
             outputNewlines: null,
             loginShell: true,
+            suggestions: {
+                enabled: true,
+                trigger: 'auto',
+                delay: 200,
+                sources: { history: true, quickCommands: true, paths: true },
+            },
         },
         appearance: {
             colorScheme: 'auto',
@@ -232,6 +245,8 @@ export function defaultHotkeys (): HotkeysConfig {
             'paste': [['⌘-V']],
             'clear': [['⌘-K']],
             'find': [['⌘-F']],
+            // Ctrl-Space 被 macOS 输入法切换占用，mac 用 ⌥Space
+            'suggestions-trigger': [['⌥-Space']],
             'quick-commands-palette': [['⌘-Shift-R']],
             // 默认不绑定（与 Tabby 一致），可在设置页快捷键录制
             'copy-current-path': [],
@@ -252,6 +267,7 @@ export function defaultHotkeys (): HotkeysConfig {
         'paste': [['Ctrl-Shift-V']],
         'clear': [['Ctrl-Shift-K']],
         'find': [['Ctrl-Shift-F']],
+        'suggestions-trigger': [['Ctrl-Space']],
         'quick-commands-palette': [['Ctrl-Shift-R']],
         'copy-current-path': [],
     }

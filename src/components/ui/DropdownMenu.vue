@@ -35,7 +35,7 @@ const emit = defineEmits<{
             <DropdownMenuContent
                 align="start"
                 :side-offset="4"
-                :class="cn('z-50 min-w-[10rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95', $attrs.class ?? '')"
+                :class="cn('z-50 min-w-[10rem] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95', $attrs.class ?? '')"
             >
                 <template v-for="item in props.items" :key="item.key">
                     <DropdownMenuSeparator v-if="item.separatorBefore" class="-mx-1 my-1 h-px bg-border" />

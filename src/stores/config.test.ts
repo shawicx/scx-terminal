@@ -22,7 +22,7 @@ import {
     type TerminalProfile,
     type FlushOp,
 } from './config'
-import { getKeyName, metaKeyName, altKeyName, normalizeHotkeysConfig } from '@/lib/hotkeys/hotkeys'
+import { getKeyName, metaKeyName, altKeyName, normalizeHotkeysConfig, parseKeystroke } from '@/lib/hotkeys/hotkeys'
 import type { Shell } from '@/services/shells'
 import type { TerminalColorScheme } from '@/lib/colorSchemes'
 
@@ -51,6 +51,15 @@ describe('config deepMerge', () => {
         const merged = deepMerge({ list: [1, 2, 3], flag: false }, { list: [9], flag: true })
         expect(merged.list).toEqual([9])
         expect(merged.flag).toBe(true)
+    })
+
+    it('keeps nested terminal.suggestions defaults when a snapshot lacks the key', () => {
+        const config = defaultConfig()
+        deepMerge(config, { terminal: { fontSize: 16 } })
+        expect(config.terminal.suggestions).toEqual(defaultConfig().terminal.suggestions)
+        // 部分持久化的 suggestions（缺 sources 二级）同样由默认值兜底
+        deepMerge(config, { terminal: { suggestions: { enabled: false } } })
+        expect(config.terminal.suggestions).toEqual({ ...defaultConfig().terminal.suggestions, enabled: false })
     })
 })
 
@@ -168,6 +177,12 @@ describe('default hotkeys', () => {
         const hotkeys = defaultHotkeys()
         expect(hotkeys['pane-forward']).toEqual([[`${metaKeyName}-${altKeyName}-${pressedKeyName('ArrowRight')}`]])
         expect(hotkeys['pane-backward']).toEqual([[`${metaKeyName}-${altKeyName}-${pressedKeyName('ArrowLeft')}`]])
+    })
+
+    it('suggestions trigger default is producible by the keystroke parser', () => {
+        // 输入建议手动唤起热键可被解析器产出（mac ⌥Space / 非 mac Ctrl-Space）
+        expect(parseKeystroke('⌥-Space').join('-')).toBe('⌥-Space')
+        expect(parseKeystroke('Ctrl-Space').join('-')).toBe('Ctrl-Space')
     })
 
     it('defaults stay normalized (idempotent under normalizeHotkeysConfig)', () => {

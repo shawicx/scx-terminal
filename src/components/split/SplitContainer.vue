@@ -21,9 +21,9 @@ const emit = defineEmits<{
 }>()
 
 const branchEl = ref<HTMLElement>()
-type PaneHandle = { focus (): void, copy (): void, paste (): void, clear (): void, find (): void, getWorkingDirectory (): Promise<string | null>, sendText (text: string, execute?: boolean): void }
+type PaneHandle = { focus (): void, copy (): void, paste (): void, clear (): void, find (): void, triggerSuggestions (): void, getWorkingDirectory (): Promise<string | null>, sendText (text: string, execute?: boolean): void }
 const paneRefs = new Map<string, PaneHandle>()
-type ContainerHandle = { focusLeaf (id: string): void, invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find'): void, getLeafCwd (id: string): Promise<string | null | undefined>, sendTextToLeaf (id: string, text: string, execute?: boolean): void }
+type ContainerHandle = { focusLeaf (id: string): void, invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find' | 'triggerSuggestions'): void, getLeafCwd (id: string): Promise<string | null | undefined>, sendTextToLeaf (id: string, text: string, execute?: boolean): void }
 const containerRefs = new Map<string, ContainerHandle>()
 
 function registerPane (id: string, comp: unknown) {
@@ -49,8 +49,8 @@ function focusLeaf (id: string) {
     }
 }
 
-/** Runs a pane method (copy/paste/clear/find/focus) on the given leaf. */
-function invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find'): void {
+/** Runs a pane method (copy/paste/clear/find/triggerSuggestions/focus) on the given leaf. */
+function invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find' | 'triggerSuggestions'): void {
     paneRefs.get(id)?.[method]()
     for (const container of containerRefs.values()) {
         container?.invokeOnLeaf(id, method)

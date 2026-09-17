@@ -182,6 +182,12 @@ export function useCommands () {
             handler: () => terminalTabApi.current?.find(),
         })
         register({
+            id: 'open-suggestions', group: 'terminal', hotkeyId: 'suggestions-trigger',
+            label: () => t('commands.openSuggestions'),
+            enabled: () => !!terminalTabApi.current,
+            handler: () => terminalTabApi.current?.triggerSuggestions(),
+        })
+        register({
             id: 'copy-current-path', group: 'terminal', hotkeyId: 'copy-current-path',
             label: () => t('commands.copyCurrentPath'),
             enabled: () => !!terminalTabApi.current,

@@ -22,10 +22,12 @@ import ColorSchemePicker from '@/components/settings/ColorSchemePicker.vue'
 import { useConfigStore, defaultFirstProfiles, type QuickCommand, type SshProfile, type TerminalProfile } from '@/stores/config'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
+import { formatKeystrokeForDisplay } from '@/lib/hotkeys/hotkeys'
 import { builtinColorSchemes, defaultDarkColorScheme, type TerminalColorScheme } from '@/lib/colorSchemes'
 import { parseItermColorsFile } from '@/lib/itermColors'
 import { groupQuickCommandSections, parseQuickCommandParams, previewQuickCommand } from '@/lib/quickCommands'
 import { listSystemFonts } from '@/services/fonts'
+import { clearHistory } from '@/services/history'
 import type { NewlineMode } from '@/lib/middleware/streamProcessing'
 
 const { t } = useI18n()
@@ -45,7 +47,9 @@ const languageOptions = computed(() => [
 ])
 
 function bindingFor (hotkeyId: string): string {
-    return (store.hotkeys[hotkeyId] ?? []).map(sequence => sequence.join('-')).join(', ')
+    return (store.hotkeys[hotkeyId] ?? [])
+        .map(sequence => sequence.map(formatKeystrokeForDisplay).join(' '))
+        .join(', ')
 }
 
 function startRecording (hotkeyId: string): void {
@@ -691,6 +695,22 @@ const newlineOptions = computed(() => [
     { value: 'implicit_lf', label: t('settings.newlinesImplicitLf') },
 ])
 
+const suggestionsTriggerOptions = computed(() => [
+    { value: 'auto', label: t('settings.suggestionsTriggerAuto') },
+    { value: 'manual', label: t('settings.suggestionsTriggerManual') },
+])
+
+/**
+ * @description 清空全部命令历史并刷新内存索引（设置页入口）
+ * @returns Promise<void>
+ *
+ * @example await onClearHistory()
+ *
+ */
+async function onClearHistory (): Promise<void> {
+    await clearHistory()
+}
+
 /**
  * @description 换行转换配置的双向绑定：配置值为 null 表示不转换，UI 用 'auto' 占位
  * @param key 配置键（'inputNewlines' | 'outputNewlines'）
@@ -975,6 +995,35 @@ async function openConfigDir (): Promise<void> {
                 <div class="settings-field row">
                     <Label>{{ t('settings.boldInBright') }}</Label>
                     <Switch v-model="store.terminal.drawBoldTextInBrightColors" />
+                </div>
+                <Separator />
+                <p class="hint">{{ t('settings.suggestionsTitle') }}</p>
+                <div class="settings-field row">
+                    <Label>{{ t('settings.suggestionsEnabled') }}</Label>
+                    <Switch v-model="store.terminal.suggestions.enabled" />
+                </div>
+                <div class="settings-field">
+                    <Label>{{ t('settings.suggestionsTrigger') }}</Label>
+                    <Select v-model="store.terminal.suggestions.trigger" :options="suggestionsTriggerOptions" class="w-44" />
+                </div>
+                <div class="settings-field">
+                    <Label>{{ t('settings.suggestionsDelay') }} <span class="value-hint">{{ store.terminal.suggestions.delay }}</span></Label>
+                    <Slider v-model="store.terminal.suggestions.delay" :min="100" :max="1000" :step="50" />
+                </div>
+                <div class="settings-field row">
+                    <Label>{{ t('settings.suggestionsSourceHistory') }}</Label>
+                    <Switch v-model="store.terminal.suggestions.sources.history" />
+                </div>
+                <div class="settings-field row">
+                    <Label>{{ t('settings.suggestionsSourceQuickCommands') }}</Label>
+                    <Switch v-model="store.terminal.suggestions.sources.quickCommands" />
+                </div>
+                <div class="settings-field row">
+                    <Label>{{ t('settings.suggestionsSourcePaths') }}</Label>
+                    <Switch v-model="store.terminal.suggestions.sources.paths" />
+                </div>
+                <div class="settings-field">
+                    <Button variant="outline" @click="onClearHistory">{{ t('settings.suggestionsClearHistory') }}</Button>
                 </div>
             </template>
 
@@ -1495,7 +1544,7 @@ async function openConfigDir (): Promise<void> {
     font-size: 13px;
     text-align: left;
     cursor: default;
-    transition: all 0.25s ease;
+    transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 .settings-nav-item:hover {
@@ -1503,8 +1552,9 @@ async function openConfigDir (): Promise<void> {
     color: var(--color-accent-foreground);
 }
 
+/* 选中态用 primary 混色，与悬停态（accent）明确区分 */
 .settings-nav-item.active {
-    background: var(--color-accent);
+    background: color-mix(in oklch, var(--color-primary) 14%, transparent);
     color: var(--color-foreground);
 }
 
@@ -1542,7 +1592,7 @@ async function openConfigDir (): Promise<void> {
 }
 
 .value-hint.mono {
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
 }
 
@@ -1630,8 +1680,8 @@ async function openConfigDir (): Promise<void> {
     border-radius: 6px;
     background: transparent;
     color: var(--color-foreground);
-    font-family: var(--font-mono, monospace);
-    font-size: 11px;
+    font-family: var(--font-mono);
+    font-size: 12px;
     line-height: 1.5;
     outline: none;
     resize: vertical;
@@ -1650,7 +1700,7 @@ async function openConfigDir (): Promise<void> {
     margin-bottom: 12px;
     border: 1px dashed var(--color-border);
     border-radius: 8px;
-    transition: all 0.15s;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .key-drop-zone.active {
@@ -1695,7 +1745,7 @@ async function openConfigDir (): Promise<void> {
     color: var(--color-muted-foreground);
     font-size: 13px;
     cursor: default;
-    transition: all 0.25s ease;
+    transition: color 0.25s ease, border-color 0.25s ease;
 }
 
 .profile-new-button:hover {
@@ -1713,15 +1763,16 @@ async function openConfigDir (): Promise<void> {
     background: transparent;
     text-align: left;
     cursor: default;
-    transition: all 0.25s ease;
+    transition: background-color 0.25s ease;
 }
 
 .profile-item:hover {
     background: var(--color-accent);
 }
 
+/* 选中态用 primary 混色，与悬停态（accent）明确区分 */
 .profile-item.active {
-    background: var(--color-accent);
+    background: color-mix(in oklch, var(--color-primary) 14%, transparent);
     color: var(--color-foreground);
 }
 
@@ -1744,8 +1795,8 @@ async function openConfigDir (): Promise<void> {
     border-radius: 4px;
     background: var(--color-primary);
     color: var(--color-primary-foreground);
-    font-size: 10px;
-    line-height: 16px;
+    font-size: 11px;
+    line-height: 18px;
 }
 
 .profile-item-command {
@@ -1769,7 +1820,7 @@ async function openConfigDir (): Promise<void> {
     border-radius: 6px;
     background: transparent;
     color: var(--color-foreground);
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     resize: vertical;
     outline: none;
@@ -1851,8 +1902,8 @@ async function openConfigDir (): Promise<void> {
     border-radius: 4px;
     background: var(--color-accent);
     color: var(--color-accent-foreground);
-    font-size: 10px;
-    line-height: 14px;
+    font-size: 11px;
+    line-height: 16px;
 }
 
 .qc-command-input {
@@ -1862,7 +1913,7 @@ async function openConfigDir (): Promise<void> {
     border-radius: 6px;
     background: transparent;
     color: var(--color-foreground);
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     resize: vertical;
     outline: none;
@@ -1901,7 +1952,7 @@ async function openConfigDir (): Promise<void> {
 
 .import-label {
     display: inline-flex;
-    cursor: pointer;
+    cursor: default;
 }
 
 /* 与 Button outline/sm 同视觉，但保持非交互元素（label 才能激活隐藏的 file input） */
@@ -1946,7 +1997,7 @@ async function openConfigDir (): Promise<void> {
     color: var(--color-muted-foreground);
     font-size: 12px;
     cursor: default;
-    transition: all 0.25s ease;
+    transition: color 0.25s ease, border-color 0.25s ease, background-color 0.25s ease;
 }
 
 .custom-scheme-chip:hover {
@@ -1974,7 +2025,7 @@ async function openConfigDir (): Promise<void> {
     padding: 10px 12px;
     border: 1px solid var(--color-border);
     border-radius: 8px;
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: 13px;
     white-space: nowrap;
     overflow: hidden;
@@ -1989,7 +2040,7 @@ async function openConfigDir (): Promise<void> {
     width: 14px;
     height: 14px;
     border-radius: 3px;
-    border: 1px solid rgba(128, 128, 128, 0.4);
+    border: 1px solid var(--color-border);
 }
 
 .scheme-slots {
@@ -2019,7 +2070,7 @@ async function openConfigDir (): Promise<void> {
     border: 1px solid var(--color-border);
     border-radius: 4px;
     background: transparent;
-    cursor: pointer;
+    cursor: default;
 }
 
 .scheme-hex-input {
@@ -2030,8 +2081,8 @@ async function openConfigDir (): Promise<void> {
     border-radius: 4px;
     background: transparent;
     color: var(--color-foreground);
-    font-family: monospace;
-    font-size: 11px;
+    font-family: var(--font-mono);
+    font-size: 12px;
     outline: none;
 }
 
@@ -2042,11 +2093,11 @@ async function openConfigDir (): Promise<void> {
     border-radius: 6px;
     background: var(--color-secondary);
     color: var(--color-foreground);
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     text-align: center;
     cursor: default;
-    transition: all 0.25s ease;
+    transition: border-color 0.25s ease;
 }
 
 .hotkey-binding:hover {

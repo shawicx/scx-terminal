@@ -176,13 +176,13 @@ watch(selectedOption, option => {
 
 .searchable-input {
     width: 100%;
-    height: 32px;
+    height: 36px;
     padding: 0 26px 0 10px;
     border: 1px solid var(--color-input);
     border-radius: 6px;
     background: transparent;
     color: var(--color-foreground);
-    font-size: 12px;
+    font-size: 14px;
     outline: none;
     cursor: default;
 }
@@ -204,14 +204,14 @@ watch(selectedOption, option => {
     top: calc(100% + 4px);
     left: 0;
     right: 0;
-    z-index: 50;
+    z-index: var(--z-menu);
     max-height: 256px;
     overflow-y: auto;
     padding: 4px;
     background: var(--color-popover);
     color: var(--color-popover-foreground);
     border: 1px solid var(--color-border);
-    border-radius: 8px;
+    border-radius: var(--radius);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
@@ -222,7 +222,7 @@ watch(selectedOption, option => {
     gap: 8px;
     padding: 4px 8px;
     border-radius: 4px;
-    font-size: 12px;
+    font-size: 13px;
     cursor: default;
 }
 
@@ -247,14 +247,14 @@ watch(selectedOption, option => {
     border-radius: 4px;
     background: var(--color-primary);
     color: var(--color-primary-foreground);
-    font-size: 10px;
-    line-height: 15px;
+    font-size: 11px;
+    line-height: 16px;
 }
 
 .searchable-empty {
     padding: 8px;
     text-align: center;
     color: var(--color-muted-foreground);
-    font-size: 12px;
+    font-size: 13px;
 }
 </style>

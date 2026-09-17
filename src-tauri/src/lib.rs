@@ -1,5 +1,7 @@
 mod config;
 mod fonts;
+mod fsutil;
+mod history;
 pub mod proc_cwd;
 mod pty;
 mod secrets;
@@ -35,6 +37,12 @@ pub fn run() {
             pty::pty_get_cwd,
             shells::list_shells,
             fonts::list_fonts,
+            fsutil::fs_list_dir,
+            fsutil::fs_read_text_file,
+            history::history_record,
+            history::history_list,
+            history::history_import,
+            history::history_clear,
             config::config_load,
             config::config_load_legacy_yaml,
             config::config_archive_legacy_yaml,
@@ -85,6 +93,8 @@ pub fn run() {
             app.manage(secrets::SecretsState::new(&data_dir));
             // 应用配置库（config.db）：与 secrets.db 同目录，初始化失败同样 fast-fail
             app.manage(config::ConfigState::new(&data_dir));
+            // 命令历史库（history.db）：初始化失败同样 fast-fail
+            app.manage(history::HistoryState::new(&data_dir));
             // the webview owns keyboard shortcuts (⌘T/⌘W are handled in-app),
             // and removing the menu keeps ⌘W from closing the window
             app.remove_menu()?;

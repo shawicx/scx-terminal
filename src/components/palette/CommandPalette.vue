@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useConfigStore } from '@/stores/config'
 import { useCommands, paletteOpen } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
-import { metaKeyName } from '@/lib/hotkeys/hotkeys'
+import { formatKeystrokeForDisplay } from '@/lib/hotkeys/hotkeys'
 import { fuzzyMatch } from '@/lib/utils/fuzzy'
 
 const { t } = useI18n()
@@ -29,7 +29,7 @@ const items = computed<PaletteItem[]>(() => {
             label: command.label(),
             hotkey: command.hotkeyId
                 ? (config.store.hotkeys[command.hotkeyId] ?? [])
-                    .map(sequence => sequence.join('-'))
+                    .map(sequence => sequence.map(formatKeystrokeForDisplay).join(' '))
                     .join(', ')
                 : '',
             handler: command.handler,
@@ -83,13 +83,6 @@ function onInputKeydown (event: KeyboardEvent): void {
     }
 }
 
-function displayHotkey (hotkey: string): string {
-    if (!hotkey) {
-        return ''
-    }
-    return metaKeyName === '⌘' ? hotkey : hotkey
-}
-
 watch(paletteOpen, value => {
     if (value) {
         open()
@@ -123,7 +116,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', close))
                         @mousemove="selectedIndex = index"
                     >
                         <span class="palette-item-label">{{ item.label }}</span>
-                        <span class="palette-item-hotkey">{{ displayHotkey(item.hotkey) }}</span>
+                        <span class="palette-item-hotkey">{{ item.hotkey }}</span>
                     </button>
                     <div v-if="items.length === 0" class="palette-empty">
                         {{ t('palette.noResults') }}
@@ -133,106 +126,4 @@ onBeforeUnmount(() => window.removeEventListener('resize', close))
         </div>
     </Teleport>
 </template>
-
-<style scoped>
-.palette-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    background: rgba(0, 0, 0, 0.35);
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    padding-top: 12vh;
-    animation: 0.125s ease-out paletteFadeIn;
-}
-
-.palette {
-    width: 520px;
-    max-width: 90vw;
-    background: var(--color-popover);
-    color: var(--color-popover-foreground);
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
-    overflow: hidden;
-    animation: 0.125s cubic-bezier(0, 0, 0.2, 1) paletteZoomIn;
-}
-
-.palette-input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 12px 14px;
-    border: none;
-    border-bottom: 1px solid var(--color-border);
-    background: transparent;
-    color: var(--color-foreground);
-    font-size: 14px;
-    outline: none;
-}
-
-.palette-input::placeholder {
-    color: var(--color-muted-foreground);
-}
-
-.palette-list {
-    max-height: 320px;
-    overflow-y: auto;
-    padding: 6px;
-}
-
-.palette-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    width: 100%;
-    padding: 8px 10px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--color-foreground);
-    font-size: 13px;
-    text-align: left;
-    cursor: default;
-    transition: background 0.1s ease;
-}
-
-.palette-item.selected {
-    background: var(--color-accent);
-}
-
-.palette-item-hotkey {
-    color: var(--color-muted-foreground);
-    font-size: 11px;
-    font-family: monospace;
-    flex-shrink: 0;
-}
-
-.palette-empty {
-    padding: 16px;
-    text-align: center;
-    color: var(--color-muted-foreground);
-    font-size: 13px;
-}
-
-@keyframes paletteFadeIn {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
-}
-
-@keyframes paletteZoomIn {
-    from {
-        transform: scale(0.96);
-        opacity: 0.4;
-    }
-    to {
-        transform: scale(1);
-        opacity: 1;
-    }
-}
-</style>
+<!-- 共用样式（遮罩/面板/输入框/条目/动画）见 src/assets/styles/palette.css -->

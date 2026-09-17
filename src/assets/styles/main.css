@@ -22,6 +22,16 @@
     --input: oklch(0.88 0 0);
     --ring: oklch(0.55 0.16 255);
     --radius: 0.5rem;
+    /* chrome 界面等宽字体（路径/指纹/热键等），scoped 样式统一引用 */
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    /* 浮层层级体系：--z-menu(50) 与 reka-ui 弹层的 Tailwind z-50 同层，新增浮层不得手写裸数值 */
+    --z-split-spanner: 10;
+    --z-pane-overlay: 20;
+    --z-suggestion-menu: 30;
+    --z-side-panel: 40;
+    --z-menu: 50;
+    --z-modal: 100;
+    --z-palette: 1000;
 }
 
 .dark {
@@ -101,7 +111,14 @@ body,
 ::-webkit-scrollbar-thumb {
     background: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
     border-radius: 4px;
-    transition: width 0.125s ease, background 0.25s ease;
+    transition: background 0.25s ease;
+}
+
+/* 自绘交互控件（scoped 样式未定义 focus 样式的按钮等）的统一键盘焦点环；
+   自带 focus 样式的控件（Button/输入框）以各自规则为准 */
+:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
 }
 
 ::-webkit-scrollbar-thumb:hover {

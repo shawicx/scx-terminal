@@ -50,7 +50,7 @@ function onPointerUp (event: PointerEvent) {
 <style scoped>
 .split-spanner {
     flex-shrink: 0;
-    z-index: 10;
+    z-index: var(--z-split-spanner);
     transition: background 0.125s ease;
 }
 

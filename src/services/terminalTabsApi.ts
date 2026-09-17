@@ -13,6 +13,8 @@ export interface TerminalTabApi {
     paste (): void
     clear (): void
     find (): void
+    /** 手动唤起活动窗格的输入建议菜单 */
+    triggerSuggestions (): void
     /** 向活动窗格会话写入文本（快捷命令；execute=true 补换行立即执行） */
     sendTextToActivePane (text: string, execute?: boolean): void
     /** 活动窗格会话的当前工作目录（新标签继承与「复制当前路径」用） */

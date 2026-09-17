@@ -11,11 +11,18 @@ import { resolveColorScheme } from '@/lib/colorSchemes'
 import type { TerminalProfile } from '@/stores/config'
 import { encodeUTF8 } from '@/lib/utils/bytes'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
+import Button from '@/components/ui/Button.vue'
 import HostKeyDialog from '@/components/terminal/HostKeyDialog.vue'
 import SftpPanel from '@/components/terminal/SftpPanel.vue'
 import type { HostKeyChallenge } from '@/services/ssh'
 import { useConfigStore } from '@/stores/config'
 import { useThemeStore } from '@/stores/theme'
+import SuggestionMenu from '@/components/terminal/SuggestionMenu.vue'
+import { SuggestionsController, type SuggestionsUiState } from '@/lib/suggestions/controller'
+import type { QuickCommandSource } from '@/lib/suggestions/suggestionEngine'
+import { importShellHistoryForProfile } from '@/services/history'
+import { listLocalDir, SshPathLister } from '@/services/pathCompletion'
+import { openQuickCommandPalette } from '@/services/quickCommandPalette'
 
 const props = defineProps<{
     active: boolean
@@ -120,6 +127,90 @@ function onSearchKeydown (event: KeyboardEvent): void {
     }
 }
 
+// ---- 输入建议（自动补全）：controller 每窗格一个，随会话销毁 ----
+const suggestionState = ref<SuggestionsUiState>({ open: false, items: [], selectedIndex: 0 })
+const suggestionAnchor = ref<{ left: number, top: number, hostHeight: number, maxWidth: number }>({ left: 0, top: 0, hostHeight: 0, maxWidth: 0 })
+let suggestions: SuggestionsController | null = null
+let sshPathLister: SshPathLister | null = null
+// setupSuggestions 时保存的宿主元素引用：onBeforeUnmount 里组件卸载后 resolveHostElement 可能拿不到，
+// add/remove 事件监听共用同一引用保证对称
+let suggestionHostEl: HTMLElement | null = null
+
+/**
+ * @description 历史分桶键：本地按档案、SSH 按主机（同源优先、全局兜底的「源」）
+ */
+function historySourceKey (): string {
+    if (props.profile.type === 'ssh') {
+        return `ssh:${props.profile.user}@${props.profile.host}:${props.profile.port}`
+    }
+    return `local:${props.profile.id}`
+}
+
+/** 建议运行配置（每次评估现读，配置变更即时生效） */
+function suggestionsConfig () {
+    const conf = configStore.store.terminal.suggestions
+    return {
+        enabled: conf?.enabled ?? true,
+        trigger: conf?.trigger ?? 'auto',
+        delay: conf?.delay ?? 200,
+        sources: conf?.sources ?? { history: true, quickCommands: true, paths: true },
+    }
+}
+
+/** 创建本窗格的建议控制器，并保存宿主元素引用供事件监听 add/remove 共用 */
+function setupSuggestions (): void {
+    suggestionHostEl = resolveHostElement()
+    suggestions = new SuggestionsController({
+        config: suggestionsConfig,
+        isAlternateScreen: () => frontend?.isAlternateScreenActive() ?? false,
+        isFocusedPane: () => props.active,
+        readLine: () => frontend?.readLogicalLineNow() ?? null,
+        readLineAbove: up => frontend?.readLogicalLineAbove(up) ?? null,
+        readCursorPrefix: () => frontend?.readCursorPrefix() ?? null,
+        anchorRect: () => frontend?.getSuggestionAnchorRect() ?? null,
+        sourceKey: historySourceKey,
+        cwd: async () => session?.getWorkingDirectory() ?? null,
+        sshId: () => (session instanceof SshSession ? session.sshSessionId : null),
+        listDir: async dir => {
+            if (session instanceof SshSession && session.sshSessionId) {
+                sshPathLister ??= new SshPathLister(session.sshSessionId)
+                return sshPathLister.list(dir)
+            }
+            return listLocalDir(dir)
+        },
+        quickCommands: (): QuickCommandSource[] => configStore.store.quickCommands.map(qc => ({
+            id: qc.id,
+            name: qc.name,
+            command: qc.command,
+            groupName: configStore.store.quickCommandGroups.find(group => group.id === qc.groupId)?.name ?? null,
+        })),
+        sendInput: text => session?.feedFromTerminal(encodeUTF8(text)),
+        openQuickCommandForm: quickCommandId => openQuickCommandPalette(quickCommandId),
+        onState: state => {
+            suggestionState.value = state
+            if (state.open) {
+                const rect = frontend?.getSuggestionAnchorRect()
+                if (rect) {
+                    suggestionAnchor.value = { left: rect.left, top: rect.top, hostHeight: rect.hostHeight, maxWidth: rect.hostWidth * 0.6 }
+                }
+            }
+        },
+    })
+}
+
+/** host capture keydown：菜单打开时拦截导航键（先于 xterm textarea，不进热键状态机） */
+function onHostKeydownCapture (event: KeyboardEvent): void {
+    if (suggestionState.value.open && suggestions?.handleKeydown(event)) {
+        event.preventDefault()
+        event.stopPropagation()
+    }
+}
+
+/** 菜单条目点击回调：接受选中项（补全不执行） */
+function onSuggestionSelect (index: number): void {
+    suggestions?.acceptAt(index, false)
+}
+
 /**
  * @description 从剪贴板读取文本并写入当前会话（粘贴）
  * @returns Promise<void>
@@ -128,6 +219,7 @@ function onSearchKeydown (event: KeyboardEvent): void {
 async function pasteFromClipboard (): Promise<void> {
     const text = await readClipboardText()
     if (text) {
+        suggestions?.close(false)
         session?.feedFromTerminal(encodeUTF8(text.replace(/\r\n/g, '\n')))
     }
 }
@@ -168,6 +260,7 @@ defineExpose({
     paste: () => pasteFromClipboard(),
     clear: () => frontend?.clear(),
     find: () => openSearch(),
+    triggerSuggestions: () => suggestions?.triggerManually(),
     getWorkingDirectory,
     sendText,
     toggleSftp: () => {
@@ -268,7 +361,12 @@ watch(() => themeStore.epoch, () => {
 
 const searchNoResults = computed(() => searchOpen.value && !!searchQuery.value && searchResultCount.value === 0)
 
-onMounted(async () => {
+/**
+ * @description 创建会话与前端并挂载到宿主元素（onMounted 与重试共用）
+ * @returns Promise<void>
+ *
+ */
+async function start (): Promise<void> {
     try {
         const context = createFrontendContext()
         // 中间件配置在会话构造期读取（退格/换行/OSC 52），配置变更对新窗格生效
@@ -287,8 +385,14 @@ onMounted(async () => {
             return
         }
 
-        frontend.input$.subscribe(data => session!.feedFromTerminal(data))
-        session.output$.subscribe(data => void frontend!.write(data))
+        frontend.input$.subscribe(data => {
+            suggestions?.notifyInput(data)
+            session!.feedFromTerminal(data)
+        })
+        session.output$.subscribe(data => {
+            void frontend!.write(data)
+            suggestions?.notifyOutput()
+        })
         frontend.resize$.subscribe(({ columns, rows }) => session!.resize(columns, rows))
         frontend.title$.subscribe(title => emit('title', title))
         frontend.bell$.subscribe(() => frontend!.visualBell())
@@ -330,6 +434,12 @@ onMounted(async () => {
         // 实际尺寸补一次 resize——不一致会破坏 zsh PROMPT_SP 补行等行宽敏感行为
         const { columns, rows } = frontend.getSize()
         session.resize(columns, rows)
+        setupSuggestions()
+        suggestionHostEl?.addEventListener('keydown', onHostKeydownCapture, true)
+        // PromptTracker 以 awaitingPromptLearn 启动：先排一次静默，让首个提示符在任何输出前被学习
+        suggestions?.notifyOutput()
+        // 本地档案首次使用时导入 shell history 冷启动（幂等，fire-and-forget）
+        void importShellHistoryForProfile(props.profile)
         if (props.active) {
             frontend.focus()
         }
@@ -339,10 +449,39 @@ onMounted(async () => {
         console.error('terminal pane failed to start', error)
         mountError.value = String(error instanceof Error ? error.message : error)
     }
+}
+
+/**
+ * @description 启动失败后重试：清理半初始化的会话/前端/建议控制器后重新走 start
+ * @returns Promise<void>
+ *
+ * @example 点击窗格错误浮层中的「重试」按钮
+ *
+ */
+async function retryStart (): Promise<void> {
+    mountError.value = ''
+    suggestionHostEl?.removeEventListener('keydown', onHostKeydownCapture, true)
+    suggestionHostEl = null
+    suggestions?.destroy()
+    suggestions = null
+    void sshPathLister?.close()
+    sshPathLister = null
+    frontend?.destroy()
+    frontend = null
+    void session?.destroy()
+    session = null
+    await start()
+}
+
+onMounted(() => {
+    void start()
 })
 
 // re-focus and repair the renderer when the tab becomes visible again
 watch(() => props.active, active => {
+    if (!active) {
+        suggestions?.close(false)
+    }
     if (active && frontend) {
         frontend.reactivate()
         frontend.focus()
@@ -352,6 +491,12 @@ watch(() => props.active, active => {
 onBeforeUnmount(() => {
     disposed = true
     void session?.destroy()
+    suggestionHostEl?.removeEventListener('keydown', onHostKeydownCapture, true)
+    suggestionHostEl = null
+    suggestions?.destroy()
+    suggestions = null
+    void sshPathLister?.close()
+    sshPathLister = null
     frontend?.destroy()
     session = null
     frontend = null
@@ -368,7 +513,10 @@ onBeforeUnmount(() => {
             :ssh-id="sshSessionId"
             @close="sftpOpen = false"
         />
-        <div v-if="mountError" class="mount-error">{{ mountError }}</div>
+        <div v-if="mountError" class="mount-error">
+            <span class="mount-error-text">{{ mountError }}</span>
+            <Button variant="outline" size="sm" @click="retryStart">{{ t('terminal.retry') }}</Button>
+        </div>
         <HostKeyDialog
             v-if="hostKeyChallenge"
             :challenge="hostKeyChallenge"
@@ -389,6 +537,16 @@ onBeforeUnmount(() => {
             <button class="search-button" @click="runSearch(true)"><ChevronDown :size="13" /></button>
             <button class="search-button" @click="closeSearch"><X :size="13" /></button>
         </div>
+        <SuggestionMenu
+            v-if="suggestionState.open"
+            :items="suggestionState.items"
+            :selected-index="suggestionState.selectedIndex"
+            :left="suggestionAnchor.left"
+            :top="suggestionAnchor.top"
+            :host-height="suggestionAnchor.hostHeight"
+            :max-width="suggestionAnchor.maxWidth"
+            @select="onSuggestionSelect"
+        />
     </div>
 </template>
 
@@ -403,17 +561,20 @@ onBeforeUnmount(() => {
     inset: 0;
 }
 
-/* SFTP 面板开启时收缩终端区域（xterm 的 ResizeObserver 自动 refit） */
+/* SFTP 面板开启时收缩终端区域（xterm 的 ResizeObserver 自动 refit）；
+   min() 与 SftpPanel 面板宽度保持同一表达式，窄窗格下两侧按比例分摊 */
 .terminal-host.with-sftp {
-    inset: 0 400px 0 0;
+    inset: 0 min(400px, 60%) 0 0;
 }
 
 .mount-error {
     position: absolute;
     inset: 0;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 12px;
     padding: 16px;
     background: var(--color-background);
     color: var(--color-destructive);
@@ -422,11 +583,16 @@ onBeforeUnmount(() => {
     white-space: pre-wrap;
 }
 
+.mount-error-text {
+    max-width: 560px;
+    word-break: break-all;
+}
+
 .search-bar {
     position: absolute;
     top: 6px;
     right: 18px;
-    z-index: 20;
+    z-index: var(--z-pane-overlay);
     display: flex;
     align-items: center;
     gap: 4px;
@@ -434,7 +600,7 @@ onBeforeUnmount(() => {
     background: var(--color-popover);
     color: var(--color-popover-foreground);
     border: 1px solid var(--color-border);
-    border-radius: 8px;
+    border-radius: var(--radius);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
     animation: 0.125s cubic-bezier(0, 0, 0.2, 1) searchFadeIn;
 }
@@ -465,7 +631,7 @@ onBeforeUnmount(() => {
     background: transparent;
     color: var(--color-muted-foreground);
     cursor: default;
-    transition: all 0.25s ease;
+    transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 .search-button:hover {

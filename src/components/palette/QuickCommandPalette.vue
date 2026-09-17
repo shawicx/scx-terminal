@@ -255,52 +255,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', close))
 </template>
 
 <style scoped>
-.palette-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    background: rgba(0, 0, 0, 0.35);
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    padding-top: 12vh;
-    animation: 0.125s ease-out paletteFadeIn;
-}
-
-.palette {
-    width: 520px;
-    max-width: 90vw;
-    background: var(--color-popover);
-    color: var(--color-popover-foreground);
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
-    overflow: hidden;
-    animation: 0.125s cubic-bezier(0, 0, 0.2, 1) paletteZoomIn;
-}
-
-.palette-input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 12px 14px;
-    border: none;
-    border-bottom: 1px solid var(--color-border);
-    background: transparent;
-    color: var(--color-foreground);
-    font-size: 14px;
-    outline: none;
-}
-
-.palette-input::placeholder {
-    color: var(--color-muted-foreground);
-}
-
-.palette-list {
-    max-height: 320px;
-    overflow-y: auto;
-    padding: 6px;
-}
-
+/* 共用样式（遮罩/面板/输入框/条目/动画）见 src/assets/styles/palette.css */
 .palette-section-title {
     padding: 8px 10px 4px;
     font-size: 11px;
@@ -308,27 +263,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', close))
     text-transform: uppercase;
     letter-spacing: 0.04em;
     user-select: none;
-}
-
-.palette-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    width: 100%;
-    padding: 7px 10px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--color-foreground);
-    font-size: 13px;
-    text-align: left;
-    cursor: default;
-    transition: background 0.1s ease;
-}
-
-.palette-item.selected {
-    background: var(--color-accent);
 }
 
 .palette-item-main {
@@ -347,23 +281,13 @@ onBeforeUnmount(() => window.removeEventListener('resize', close))
 .palette-item-preview {
     color: var(--color-muted-foreground);
     font-size: 11px;
-    font-family: monospace;
+    font-family: var(--font-mono);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.palette-item-hotkey {
-    color: var(--color-muted-foreground);
-    font-size: 11px;
-    flex-shrink: 0;
-}
-
 .palette-empty {
-    padding: 16px;
-    text-align: center;
-    color: var(--color-muted-foreground);
-    font-size: 13px;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -371,13 +295,19 @@ onBeforeUnmount(() => window.removeEventListener('resize', close))
 }
 
 .palette-empty-action {
-    border: none;
+    border: 1px solid transparent;
     border-radius: 6px;
     padding: 4px 12px;
     background: var(--color-accent);
     color: var(--color-accent-foreground);
     font-size: 12px;
     cursor: default;
+    transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.palette-empty-action:hover {
+    border-color: var(--color-ring);
+    color: var(--color-foreground);
 }
 
 .palette-fill-header {
@@ -394,7 +324,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', close))
     margin-top: 2px;
     color: var(--color-muted-foreground);
     font-size: 11px;
-    font-family: monospace;
+    font-family: var(--font-mono);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -420,7 +350,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', close))
     width: 130px;
     color: var(--color-muted-foreground);
     font-size: 12px;
-    font-family: monospace;
+    font-family: var(--font-mono);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -435,7 +365,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', close))
     background: transparent;
     color: var(--color-foreground);
     font-size: 13px;
-    font-family: monospace;
+    font-family: var(--font-mono);
     outline: none;
 }
 
@@ -448,25 +378,5 @@ onBeforeUnmount(() => window.removeEventListener('resize', close))
     border-top: 1px solid var(--color-border);
     color: var(--color-muted-foreground);
     font-size: 11px;
-}
-
-@keyframes paletteFadeIn {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
-}
-
-@keyframes paletteZoomIn {
-    from {
-        transform: scale(0.96);
-        opacity: 0.4;
-    }
-    to {
-        transform: scale(1);
-        opacity: 1;
-    }
 }
 </style>

@@ -157,7 +157,7 @@ function selectScheme (name: string): void {
 .scheme-search-icon {
     position: absolute;
     left: 10px;
-    color: var(--muted-foreground);
+    color: var(--color-muted-foreground);
     pointer-events: none;
 }
 
@@ -173,17 +173,17 @@ function selectScheme (name: string): void {
     border: none;
     border-radius: 6px;
     background: transparent;
-    color: var(--foreground);
-    cursor: pointer;
+    color: var(--color-foreground);
+    cursor: default;
     font-size: 12px;
 }
 
 .scheme-group-header:hover {
-    background: var(--accent);
+    background: var(--color-accent);
 }
 
 .scheme-chevron {
-    color: var(--muted-foreground);
+    color: var(--color-muted-foreground);
     transition: transform 0.15s ease;
 }
 
@@ -197,7 +197,7 @@ function selectScheme (name: string): void {
 }
 
 .scheme-group-count {
-    color: var(--muted-foreground);
+    color: var(--color-muted-foreground);
     font-size: 11px;
 }
 
@@ -213,22 +213,22 @@ function selectScheme (name: string): void {
     flex-direction: column;
     gap: 6px;
     padding: 8px 10px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--color-border);
     border-radius: 8px;
-    background: var(--card);
-    color: var(--foreground);
-    cursor: pointer;
+    background: var(--color-card);
+    color: var(--color-foreground);
+    cursor: default;
     text-align: left;
     transition: border-color 0.12s ease;
 }
 
 .scheme-entry:hover {
-    border-color: var(--ring);
+    border-color: var(--color-ring);
 }
 
 .scheme-entry.active {
-    border-color: var(--primary);
-    box-shadow: 0 0 0 1px var(--primary);
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 1px var(--color-primary);
 }
 
 .scheme-entry-auto {
@@ -255,8 +255,8 @@ function selectScheme (name: string): void {
     flex-shrink: 0;
     padding: 1px 6px;
     border-radius: 999px;
-    background: var(--secondary);
-    color: var(--muted-foreground);
+    background: var(--color-secondary);
+    color: var(--color-muted-foreground);
     font-size: 10px;
 }
 
@@ -271,7 +271,7 @@ function selectScheme (name: string): void {
     width: 8px;
     height: 8px;
     border-radius: 999px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--color-border);
 }
 
 .scheme-entry-preview {
@@ -279,7 +279,7 @@ function selectScheme (name: string): void {
     flex-direction: column;
     gap: 2px;
     padding: 6px 10px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--color-border);
     border-radius: 6px;
     font-size: 12px;
     line-height: 1.5;
@@ -292,7 +292,7 @@ function selectScheme (name: string): void {
 }
 
 .scheme-empty {
-    color: var(--muted-foreground);
+    color: var(--color-muted-foreground);
     font-size: 12px;
     padding: 8px 0;
 }

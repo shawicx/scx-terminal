@@ -3,10 +3,11 @@
               删除/重命名/新建目录。复用所属窗格已认证的 SSH 连接；会话断开自动报错关闭。
 -->
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowUp, File as FileIcon, Folder, FolderPlus, RefreshCw, Trash2, Upload, X } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
+import Dialog from '@/components/ui/Dialog.vue'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
 import type { SftpFileEntry, TransferProgress } from '@/services/sftp'
 import { closeSftp, openSftp, readSftpDir, sftpMkdir, sftpRemoveDir, sftpRemoveFile, sftpRename, sftpDownload, sftpUpload } from '@/services/sftp'
@@ -142,28 +143,68 @@ async function uploadFiles (): Promise<void> {
     }
 }
 
-async function createDirectory (): Promise<void> {
-    const name = window.prompt(t('sftp.newDirPrompt'))
-    if (!name?.trim()) {
-        return
-    }
-    error.value = ''
-    try {
-        await sftpMkdir(sftpId.value, joinPath(path.value, name.trim()))
-        await loadDir(path.value)
-    } catch (e) {
-        error.value = String(e instanceof Error ? e.message : e)
+// ---- 新建目录 / 重命名：应用内弹窗（替代 window.prompt，与全局 Dialog 风格一致） ----
+const prompt = ref<{ kind: 'mkdir' } | { kind: 'rename', entry: SftpFileEntry } | null>(null)
+const promptValue = ref('')
+
+const promptTitle = computed(() => prompt.value?.kind === 'rename' ? t('sftp.rename') : t('sftp.newDir'))
+const promptPlaceholder = computed(() => prompt.value?.kind === 'rename' ? t('sftp.renamePrompt') : t('sftp.newDirPrompt'))
+
+/**
+ * @description 函数 ref：弹窗输入框挂载时立即聚焦（卸载时 el 为 null，忽略）
+ * @param el 挂载/卸载的 input 元素
+ * @returns void
+ *
+ */
+function setPromptInput (el: unknown): void {
+    if (el) {
+        (el as HTMLInputElement).focus()
     }
 }
 
-async function renameEntry (entry: SftpFileEntry): Promise<void> {
-    const name = window.prompt(t('sftp.renamePrompt'), entry.name)
-    if (!name?.trim() || name === entry.name) {
+/**
+ * @description 打开「新建目录」弹窗（预填空值）
+ * @returns void
+ *
+ */
+function promptNewDir (): void {
+    prompt.value = { kind: 'mkdir' }
+    promptValue.value = ''
+}
+
+/**
+ * @description 打开「重命名」弹窗（预填当前名称）
+ * @param entry 目标条目
+ * @returns void
+ *
+ */
+function promptRename (entry: SftpFileEntry): void {
+    prompt.value = { kind: 'rename', entry }
+    promptValue.value = entry.name
+}
+
+/**
+ * @description 提交目录/重命名弹窗：执行对应远端操作并刷新列表
+ * @returns Promise<void>
+ *
+ */
+async function commitPrompt (): Promise<void> {
+    const current = prompt.value
+    if (!current) {
+        return
+    }
+    const name = promptValue.value.trim()
+    prompt.value = null
+    if (!name || (current.kind === 'rename' && name === current.entry.name)) {
         return
     }
     error.value = ''
     try {
-        await sftpRename(sftpId.value, entry.path, joinPath(path.value, name.trim()))
+        if (current.kind === 'mkdir') {
+            await sftpMkdir(sftpId.value, joinPath(path.value, name))
+        } else {
+            await sftpRename(sftpId.value, current.entry.path, joinPath(path.value, name))
+        }
         await loadDir(path.value)
     } catch (e) {
         error.value = String(e instanceof Error ? e.message : e)
@@ -206,7 +247,7 @@ function onMenuSelect (entry: SftpFileEntry, key: string): void {
     if (key === 'download') {
         void downloadEntry(entry)
     } else if (key === 'rename') {
-        void renameEntry(entry)
+        promptRename(entry)
     } else if (key === 'delete') {
         void removeEntry(entry)
     }
@@ -272,7 +313,7 @@ defineExpose({ refresh })
 <template>
     <div class="sftp-panel">
         <div class="sftp-toolbar">
-            <Button variant="ghost" size="icon" :title="t('sftp.goUp')" @click="goUp">
+            <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('sftp.goUp')" @click="goUp">
                 <ArrowUp :size="14" />
             </Button>
             <input
@@ -281,10 +322,10 @@ defineExpose({ refresh })
                 spellcheck="false"
                 @keydown.enter="jumpToDraft"
             />
-            <Button variant="ghost" size="icon" :title="t('sftp.refresh')" @click="refresh">
+            <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('sftp.refresh')" @click="refresh">
                 <RefreshCw :size="14" />
             </Button>
-            <Button variant="ghost" size="icon" :title="t('sftp.close')" @click="close">
+            <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('sftp.close')" @click="close">
                 <X :size="14" />
             </Button>
         </div>
@@ -310,8 +351,8 @@ defineExpose({ refresh })
                     <Folder v-if="entry.isDir" class="sftp-entry-icon dir" :size="14" />
                     <FileIcon v-else class="sftp-entry-icon" :size="14" />
                     <span class="sftp-entry-name">{{ entry.name }}</span>
-                    <span class="sftp-entry-meta">{{ entry.isDir ? '—' : formatSize(entry.size) }}</span>
-                    <span class="sftp-entry-meta">{{ formatTime(entry.mtimeMs) }}</span>
+                    <span class="sftp-entry-meta sftp-entry-size">{{ entry.isDir ? '—' : formatSize(entry.size) }}</span>
+                    <span class="sftp-entry-meta sftp-entry-time">{{ formatTime(entry.mtimeMs) }}</span>
                 </div>
             </ContextMenu>
         </div>
@@ -322,7 +363,7 @@ defineExpose({ refresh })
                     <Upload :size="13" />
                     {{ t('sftp.upload') }}
                 </Button>
-                <Button variant="ghost" size="sm" @click="createDirectory">
+                <Button variant="ghost" size="sm" @click="promptNewDir">
                     <FolderPlus :size="13" />
                     {{ t('sftp.newDir') }}
                 </Button>
@@ -353,6 +394,21 @@ defineExpose({ refresh })
                 </div>
             </div>
         </div>
+
+        <Dialog v-if="prompt" :title="promptTitle" :width="380" @cancel="prompt = null">
+            <input
+                :ref="setPromptInput"
+                v-model="promptValue"
+                class="sftp-prompt-input"
+                spellcheck="false"
+                :placeholder="promptPlaceholder"
+                @keydown.enter.prevent="commitPrompt"
+            />
+            <template #footer>
+                <Button variant="outline" size="sm" @click="prompt = null">{{ t('sftp.cancel') }}</Button>
+                <Button size="sm" @click="commitPrompt">{{ t('sftp.confirm') }}</Button>
+            </template>
+        </Dialog>
     </div>
 </template>
 
@@ -366,8 +422,8 @@ export default { name: 'SftpPanel' }
     top: 0;
     right: 0;
     bottom: 0;
-    width: 400px;
-    z-index: 30;
+    width: min(400px, 60%);
+    z-index: var(--z-side-panel);
     display: flex;
     flex-direction: column;
     background: var(--color-background);
@@ -403,14 +459,14 @@ export default { name: 'SftpPanel' }
 .sftp-path {
     flex: 1 1 0;
     min-width: 0;
-    height: 28px;
+    height: 32px;
     padding: 0 8px;
     border: 1px solid var(--color-input);
     border-radius: 6px;
     background: transparent;
     color: var(--color-foreground);
-    font-family: var(--font-mono, monospace);
-    font-size: 11px;
+    font-family: var(--font-mono);
+    font-size: 12px;
     outline: none;
 }
 
@@ -456,7 +512,7 @@ export default { name: 'SftpPanel' }
 }
 
 .sftp-entry.selected {
-    background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+    background: color-mix(in oklch, var(--color-primary) 14%, transparent);
 }
 
 .sftp-entry-icon {
@@ -476,10 +532,21 @@ export default { name: 'SftpPanel' }
     white-space: nowrap;
 }
 
+/* 大小/时间两列固定宽度右对齐，保证逐行对齐 */
 .sftp-entry-meta {
     flex-shrink: 0;
     font-size: 11px;
     color: var(--color-muted-foreground);
+}
+
+.sftp-entry-size {
+    width: 56px;
+    text-align: right;
+}
+
+.sftp-entry-time {
+    width: 112px;
+    text-align: right;
 }
 
 .sftp-bottom {
@@ -520,7 +587,7 @@ export default { name: 'SftpPanel' }
 
 .sftp-transfer-dismiss {
     color: var(--color-muted-foreground);
-    cursor: pointer;
+    cursor: default;
 }
 
 .sftp-transfer-bar {
@@ -547,5 +614,24 @@ export default { name: 'SftpPanel' }
     font-size: 11px;
     color: var(--color-destructive);
     word-break: break-all;
+}
+
+.sftp-prompt-input {
+    width: 100%;
+    box-sizing: border-box;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--color-input);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-foreground);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    outline: none;
+}
+
+.sftp-prompt-input:focus {
+    border-color: var(--color-ring);
+    box-shadow: 0 0 0 1px var(--color-ring);
 }
 </style>

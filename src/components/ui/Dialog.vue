@@ -53,21 +53,23 @@ onBeforeUnmount(() => {
 .dialog-overlay {
     position: fixed;
     inset: 0;
-    z-index: 100;
+    z-index: var(--z-modal);
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.45);
+    background: rgba(0, 0, 0, 0.4);
+    animation: 0.125s ease-out dialogFadeIn;
 }
 
 .dialog-panel {
     max-width: calc(100vw - 48px);
     padding: 16px 18px;
     border: 1px solid var(--color-border);
-    border-radius: 10px;
+    border-radius: var(--radius);
     background: var(--color-popover);
     color: var(--color-popover-foreground);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    animation: 0.125s cubic-bezier(0, 0, 0.2, 1) dialogZoomIn;
 }
 
 .dialog-title {
@@ -86,5 +88,25 @@ onBeforeUnmount(() => {
     justify-content: flex-end;
     gap: 8px;
     margin-top: 14px;
+}
+
+@keyframes dialogFadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes dialogZoomIn {
+    from {
+        transform: scale(0.96);
+        opacity: 0.4;
+    }
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
 }
 </style>

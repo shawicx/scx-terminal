@@ -7,6 +7,7 @@ import { useConfigStore } from './stores/config'
 import { useThemeStore } from './stores/theme'
 import '../node_modules/tw-animate-css/dist/tw-animate.css'
 import './assets/styles/main.css'
+import './assets/styles/palette.css'
 
 async function bootstrap (): Promise<void> {
     const app = createApp(App)
