@@ -2,10 +2,12 @@
  * @description SSH 远程 shell 会话：对接 Rust russh 会话（services/ssh.ts SshProxy）。
  *              连接/认证/指纹确认失败以错误文本打进终端缓冲（同 LocalSession 的
  *              "Could not start" 模式，不抛异常）；cwd 跟踪仅依赖远端 shell 的
- *              OSC 7/1337 上报（BaseSession 中间件已解析），无进程探测可用。
+ *              OSC 7/1337 上报（BaseSession 中间件已解析），无进程探测可用；
+ *              kbd-interactive 凭据挑战应答与记住密码回存。
  */
 import { BaseSession, type BaseSessionOptions } from './baseSession'
-import { SshProxy, type HostKeyChallenge } from '@/services/ssh'
+import { SshProxy, type HostKeyChallenge, type KbdAnswer, type KbdChallenge } from '@/services/ssh'
+import { setProfilePassword } from '@/services/secrets'
 import { encodeUTF8 } from '@/lib/utils/bytes'
 import { nanoid } from 'nanoid'
 
@@ -25,6 +27,8 @@ export interface SshSessionOptions {
 export interface SshSessionSetup extends BaseSessionOptions {
     /** 主机指纹确认回调（返回是否接受；UI 层弹对话框实现） */
     onHostKey?: (challenge: HostKeyChallenge) => Promise<boolean>
+    /** kbd-interactive / 密码挑战回调（返回应答；null = 取消。多轮挑战会多次调用） */
+    onKeyboardInteractive?: (challenge: KbdChallenge) => Promise<KbdAnswer | null>
 }
 
 export class SshSession extends BaseSession {
@@ -49,6 +53,25 @@ export class SshSession extends BaseSession {
             })()
         })
 
+        // kbd-interactive / 合成密码挑战：回调挂起等 UI 应答；「记住」仅对单一密码型挑战
+        // 生效，多轮时以最后一轮为准（成功后回存见 start 尾部）
+        // 注：初值用 as 显式联合类型——闭包内赋值不参与 CFA，否则此处被收窄为 null
+        let lastSaveable = null as { remember: boolean, password: string } | null
+        proxy.subscribe('kbdchallenge', payload => {
+            void (async () => {
+                const challenge = payload as KbdChallenge
+                const answer = this.setup.onKeyboardInteractive
+                    ? await this.setup.onKeyboardInteractive(challenge)
+                    : null
+                if (answer && challenge.prompts.length === 1 && !challenge.prompts[0].echo) {
+                    lastSaveable = { remember: answer.remember, password: answer.responses[0] ?? '' }
+                } else {
+                    lastSaveable = null
+                }
+                await proxy.respondKbd(answer ? answer.responses : null).catch(() => {})
+            })()
+        })
+
         try {
             await proxy.start({
                 id: `ssh-${nanoid(10)}`,
@@ -64,6 +87,11 @@ export class SshSession extends BaseSession {
         } catch (error) {
             this.emitOutput(encodeUTF8(`\r\nSSH connection to ${options.host}:${options.port} failed:\r\n${String(error)}\r\n`))
             return
+        }
+
+        // 认证成功后按最后一轮「记住密码」回存（失败/取消路径已在上面 return，不会到达）
+        if (lastSaveable?.remember) {
+            void setProfilePassword(options.profileId, lastSaveable.password).catch(() => {})
         }
 
         this.proxy = proxy

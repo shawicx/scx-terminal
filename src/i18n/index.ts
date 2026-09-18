@@ -299,6 +299,10 @@ const zhCN = {
         hostKeyFingerprint: '指纹',
         hostKeyAccept: '信任并连接',
         hostKeyReject: '拒绝',
+        kbdTitle: 'SSH 身份验证',
+        kbdRemember: '记住密码',
+        kbdSubmit: '连接',
+        kbdCancel: '取消',
     },
     commands: {
         commandPalette: '打开命令面板',
@@ -657,6 +661,10 @@ const en = {
         hostKeyFingerprint: 'Fingerprint',
         hostKeyAccept: 'Trust and connect',
         hostKeyReject: 'Reject',
+        kbdTitle: 'SSH authentication',
+        kbdRemember: 'Remember password',
+        kbdSubmit: 'Connect',
+        kbdCancel: 'Cancel',
     },
     commands: {
         commandPalette: 'Show command palette',

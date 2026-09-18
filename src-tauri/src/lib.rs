@@ -100,6 +100,7 @@ pub fn run() {
             ssh::ssh_kill,
             ssh::ssh_ack_data,
             ssh::ssh_confirm_host_key,
+            ssh::ssh_respond_kbd,
             dev_log,
         ])
         .setup(|app| {

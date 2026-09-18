@@ -8,6 +8,7 @@ import SettingsView from '@/components/settings/SettingsView.vue'
 import SftpTabContent from '@/components/sftp/SftpTabContent.vue'
 import ForwardingTabContent from '@/components/forwarding/ForwardingTabContent.vue'
 import HostKeyDialog from '@/components/terminal/HostKeyDialog.vue'
+import CredentialDialog from '@/components/terminal/CredentialDialog.vue'
 import TransferPopover from '@/components/sftp/TransferPopover.vue'
 import CommandPalette from '@/components/palette/CommandPalette.vue'
 import QuickCommandPalette from '@/components/palette/QuickCommandPalette.vue'
@@ -17,7 +18,7 @@ import { useTransfersStore } from '@/stores/transfers'
 import { useForwardingStore } from '@/stores/forwarding'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
-import { pendingHostKey, resolvePendingHostKey } from '@/services/sshConnections'
+import { pendingHostKey, resolvePendingHostKey, pendingKbdChallenge, resolvePendingKbd } from '@/services/sshConnections'
 
 const store = useTabsStore()
 const config = useConfigStore()
@@ -123,6 +124,12 @@ watch(() => config.store.appearance.language, language => {
             :challenge="pendingHostKey"
             @accept="resolvePendingHostKey(true)"
             @reject="resolvePendingHostKey(false)"
+        />
+        <CredentialDialog
+            v-if="pendingKbdChallenge"
+            :challenge="pendingKbdChallenge"
+            @submit="(responses: string[], remember: boolean) => resolvePendingKbd({ responses, remember })"
+            @cancel="resolvePendingKbd(null)"
         />
     </div>
 </template>

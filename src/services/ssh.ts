@@ -2,6 +2,7 @@
  * @description Rust SSH 会话（russh）的前端句柄：连接选项、二进制输出通道（带 ack 背压与
  *              订阅前缓冲）、exit/close/hostkey 事件监听与指纹确认应答。
  *              结构对照 services/pty.ts 的 TauriPTYProxy（Tauri IPC 数据面约定一致）。
+ *              支持 kbd-interactive 凭据挑战事件与应答。
  */
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -28,6 +29,27 @@ export interface HostKeyChallenge {
     fingerprint: string
     keyType: string
     changed: boolean
+}
+
+/** kbd-interactive / 合成密码挑战的单个提问（事件 `ssh:{id}:kbdchallenge` 载荷） */
+export interface KbdPrompt {
+    /** 服务器原文提示语（如 "Password: " / "Verification code:"），直接作为输入框 label */
+    prompt: string
+    /** false = 密码/验证码（不回显）；true = 普通问题（明文） */
+    echo: boolean
+}
+
+/** kbd-interactive / 合成密码挑战（事件 `ssh:{id}:kbdchallenge` 载荷） */
+export interface KbdChallenge {
+    name: string
+    instructions: string
+    prompts: KbdPrompt[]
+}
+
+/** 弹窗一轮应答：responses 对位 prompts；remember 仅前端使用（记住密码回存），不过 IPC */
+export interface KbdAnswer {
+    responses: string[]
+    remember: boolean
 }
 
 type SshEventHandler = (payload?: unknown) => void
@@ -59,7 +81,7 @@ export class SshProxy {
         this.id = options.id
         // 事件监听必须先于 invoke 注册：hostkey 事件在连接握手期间发出，
         // 而 ssh_connect 要等指纹确认才返回（否则事件丢失 → 死锁）
-        for (const event of ['exit', 'close', 'hostkey']) {
+        for (const event of ['exit', 'close', 'hostkey', 'kbdchallenge']) {
             this.unlisteners.push(await listen(`ssh:${this.id}:${event}`, e => {
                 for (const handler of this.handlers[event] ?? []) {
                     handler(e.payload)
@@ -81,6 +103,20 @@ export class SshProxy {
     async confirmHostKey (accepted: boolean): Promise<void> {
         if (this.id) {
             await invoke('ssh_confirm_host_key', { id: this.id, accepted })
+        }
+    }
+
+    /**
+     * @description 应答 kbd-interactive 凭据挑战（对应 `ssh:${id}:kbdchallenge` 事件；仅认证阶段有效）
+     * @param responses 对位每个 prompt 的应答；null = 用户取消
+     * @returns Promise<void>
+     *
+     * @example await proxy.respondKbd(['hunter2'])
+     *
+     */
+    async respondKbd (responses: string[] | null): Promise<void> {
+        if (this.id) {
+            await invoke('ssh_respond_kbd', { id: this.id, responses })
         }
     }
 

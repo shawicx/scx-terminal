@@ -13,8 +13,9 @@ import { encodeUTF8 } from '@/lib/utils/bytes'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
 import Button from '@/components/ui/Button.vue'
 import HostKeyDialog from '@/components/terminal/HostKeyDialog.vue'
+import CredentialDialog from '@/components/terminal/CredentialDialog.vue'
 import ForwardPanel from '@/components/terminal/ForwardPanel.vue'
-import type { HostKeyChallenge } from '@/services/ssh'
+import type { HostKeyChallenge, KbdChallenge, KbdAnswer } from '@/services/ssh'
 import { autoStartRules, ruleToSpec } from '@/lib/portForwarding'
 import { startForward } from '@/services/forward'
 import { registerPaneSession, unregisterPaneSession } from '@/services/sshConnections'
@@ -78,6 +79,31 @@ function resolveHostKey (accepted: boolean): void {
     hostKeyChallenge.value = null
     hostKeyResolver?.(accepted)
     hostKeyResolver = null
+}
+
+// ---- SSH 凭据挑战（kbd-interactive / 密码请求）：SshSession 回调 → 对话框 → resolve 应答 ----
+const kbdChallenge = ref<KbdChallenge | null>(null)
+let kbdResolver: ((answer: KbdAnswer | null) => void) | null = null
+
+/**
+ * @description SSH 认证需要凭据输入时挂起等待对话框应答（多轮挑战重复调用）
+ * @param challenge 服务器挑战（name/instructions/prompts）
+ * @returns Promise<KbdAnswer | null> 应答；null = 取消
+ *
+ * @example await onKeyboardInteractive({ name: '', instructions: '', prompts: [{ prompt: 'Password: ', echo: false }] })
+ *
+ */
+function onKeyboardInteractive (challenge: KbdChallenge): Promise<KbdAnswer | null> {
+    return new Promise(resolve => {
+        kbdResolver = resolve
+        kbdChallenge.value = challenge
+    })
+}
+
+function resolveKbd (answer: KbdAnswer | null): void {
+    kbdChallenge.value = null
+    kbdResolver?.(answer)
+    kbdResolver = null
 }
 
 /**
@@ -411,6 +437,7 @@ async function start (): Promise<void> {
             inputNewlines: configStore.store.terminal.inputNewlines,
             outputNewlines: configStore.store.terminal.outputNewlines,
             onHostKey,
+            onKeyboardInteractive,
         })
         frontend = new XTermWebGLFrontend(context)
         frontend.configure({ terminalColorScheme: paneColorScheme.value })
@@ -458,6 +485,11 @@ async function start (): Promise<void> {
                 width: null,
                 height: null,
             })
+            // 连接尝试已终结（成功/失败）：关闭可能残留的凭据弹窗；
+            // 晚到的提交经 respondKbd 找不到 waiter 静默返回（同 hostkey 语义）
+            if (kbdChallenge.value) {
+                resolveKbd(null)
+            }
             // 连接建立后启动档案 autoStart 转发（会话 id 此刻可用）
             if (session instanceof SshSession && session.sshSessionId) {
                 registeredSshId = session.sshSessionId
@@ -569,6 +601,12 @@ onBeforeUnmount(() => {
             :challenge="hostKeyChallenge"
             @accept="resolveHostKey(true)"
             @reject="resolveHostKey(false)"
+        />
+        <CredentialDialog
+            v-if="kbdChallenge"
+            :challenge="kbdChallenge"
+            @submit="(responses: string[], remember: boolean) => resolveKbd({ responses, remember })"
+            @cancel="resolveKbd(null)"
         />
         <div v-if="searchOpen" class="search-bar">
             <input

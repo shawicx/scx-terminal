@@ -221,6 +221,9 @@ pub struct SshManager {
     sessions: Arc<Mutex<HashMap<String, Arc<SshSession>>>>,
     /// connect 进行中等待前端指纹确认的应答通道（连接成功后移除）
     hostkey_waiters: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+    /// 认证进行中等待前端 kbd-interactive 应答的通道：每轮挑战 insert 一个条目，
+    /// `ssh_respond_kbd` 应答时移除。Sender 发送 `None` = 用户取消
+    kbd_waiters: Arc<Mutex<HashMap<String, oneshot::Sender<Option<Vec<String>>>>>>,
 }
 
 impl SshManager {
@@ -308,11 +311,176 @@ async fn try_default_private_keys(handle: &mut client::Handle<ScxHandler>, user:
     Ok(false)
 }
 
-/// 按档案 auth 策略认证；auto = agent → 密钥链条目 → 默认私钥 → 库中密码（若有）
+/// 判定挑战是否为「单一密码型 prompt」（恰好一个 echo=false）。
+/// Rust 侧用于库存密码静默自动应答条件；前端「记住密码」勾选框显示用同规则（TS 各自实现）。
+///
+/// # Arguments
+///
+/// * `prompts` - 服务器挑战的 prompt 列表
+///
+/// # Returns
+///
+/// true = 单一不回显 prompt
+///
+/// # Examples
+///
+/// `is_single_secret_prompt(&[Prompt { prompt: "Password:".into(), echo: false }]) // true`
+fn is_single_secret_prompt(prompts: &[russh::client::Prompt]) -> bool {
+    prompts.len() == 1 && !prompts[0].echo
+}
+
+/// 发一轮 kbd-interactive 挑战给前端并等待应答：注册 oneshot → emit 事件 → await。
+///
+/// # Arguments
+///
+/// * `app` - AppHandle（事件发射）
+/// * `kbd_waiters` - SshManager 的挑战应答表（每轮 insert，应答时由命令移除）
+/// * `id` - 连接尝试 id
+/// * `name` / `instructions` - 服务器原文（可为空）
+/// * `prompts` - 服务器 prompt 列表
+///
+/// # Returns
+///
+/// `Some(responses)` 用户应答；`None` 取消或通道关闭（连接断开）
+async fn ask_frontend(
+    app: &AppHandle,
+    kbd_waiters: &Arc<Mutex<HashMap<String, oneshot::Sender<Option<Vec<String>>>>>>,
+    id: &str,
+    name: &str,
+    instructions: &str,
+    prompts: &[russh::client::Prompt],
+) -> Option<Vec<String>> {
+    let (reply_tx, reply_rx) = oneshot::channel();
+    kbd_waiters.lock().unwrap().insert(id.to_string(), reply_tx);
+    let payload_prompts: Vec<serde_json::Value> = prompts
+        .iter()
+        .map(|p| serde_json::json!({ "prompt": p.prompt, "echo": p.echo }))
+        .collect();
+    let _ = app.emit(
+        &format!("ssh:{id}:kbdchallenge"),
+        serde_json::json!({ "name": name, "instructions": instructions, "prompts": payload_prompts }),
+    );
+    reply_rx.await.ok().flatten()
+}
+
+/// 纯 password 兜底：库存密码直接认证；无库存则合成单一密码挑战弹窗后认证（单次机会）。
+/// 仅当服务器不支持 kbd-interactive 时被调用。
+///
+/// # Arguments
+///
+/// * `handle` - 已建立的连接句柄
+/// * `stored` - 密钥库已存密码（可能 None）
+/// * `options` - 连接选项
+/// * `app` / `kbd_waiters` - 挑战应答通道（见 ask_frontend）
+///
+/// # Returns
+///
+/// `Ok(())` 认证成功；`Err` 取消/失败文本
+async fn password_fallback(
+    handle: &mut client::Handle<ScxHandler>,
+    stored: Option<String>,
+    options: &SshConnectOptions,
+    app: &AppHandle,
+    kbd_waiters: &Arc<Mutex<HashMap<String, oneshot::Sender<Option<Vec<String>>>>>>,
+) -> Result<(), String> {
+    let password = match stored {
+        Some(password) => password,
+        None => {
+            let prompts = vec![russh::client::Prompt { prompt: "Password:".to_string(), echo: false }];
+            let responses = ask_frontend(app, kbd_waiters, &options.id, "", "", &prompts)
+                .await
+                .ok_or_else(|| "authentication cancelled".to_string())?;
+            responses.into_iter().next().unwrap_or_default()
+        }
+    };
+    match handle.authenticate_password(options.user.clone(), password).await {
+        Ok(result) if result.success() => Ok(()),
+        Ok(_) => Err("authentication failed (password)".to_string()),
+        Err(e) => Err(format!("password auth failed: {e}")),
+    }
+}
+
+/// 密码类认证统一入口（password 档案与 auto 链条末尾共用）：kbd-interactive 优先——
+/// 库存密码对单一密码型挑战第一轮静默自动应答（只此一轮，失败重发后走弹窗），
+/// 其余挑战发前端弹窗；弹窗轮数上限 5。仅当**首轮 start 即 Failure/Err**（服务器不支持
+/// kbd-interactive）才回退纯 password 兜底；进入过 InfoRequest 轮次后的 Failure 即最终失败。
+///
+/// # Arguments
+///
+/// * `handle` - 已建立的连接句柄
+/// * `secrets` - 加密库状态（读库存密码）
+/// * `options` - 连接选项
+/// * `app` / `kbd_waiters` - 挑战应答通道（见 ask_frontend）
+///
+/// # Returns
+///
+/// `Ok(())` 认证成功；`Err` 取消/超限/失败文本
+///
+/// # Examples
+///
+/// `try_password_like(&mut handle, &secrets, &options, &app, &kbd_waiters).await?;`
+async fn try_password_like(
+    handle: &mut client::Handle<ScxHandler>,
+    secrets: &SecretsState,
+    options: &SshConnectOptions,
+    app: &AppHandle,
+    kbd_waiters: &Arc<Mutex<HashMap<String, oneshot::Sender<Option<Vec<String>>>>>>,
+) -> Result<(), String> {
+    let stored = secrets::load_password(secrets, &options.profile_id).ok().flatten();
+    let mut response = handle
+        .authenticate_keyboard_interactive_start(options.user.clone(), None)
+        .await;
+    let mut auto_answered = false;
+    let mut rounds: u32 = 0;
+    loop {
+        match response {
+            Ok(russh::client::KeyboardInteractiveAuthResponse::Success) => return Ok(()),
+            Ok(russh::client::KeyboardInteractiveAuthResponse::InfoRequest { name, instructions, prompts }) => {
+                if !auto_answered && stored.is_some() && is_single_secret_prompt(&prompts) {
+                    auto_answered = true;
+                    let password = stored.clone().unwrap_or_default();
+                    response = handle.authenticate_keyboard_interactive_respond(vec![password]).await;
+                    continue;
+                }
+                rounds += 1;
+                if rounds > 5 {
+                    return Err("too many authentication prompts".to_string());
+                }
+                match ask_frontend(app, kbd_waiters, &options.id, &name, &instructions, &prompts).await {
+                    Some(responses) => {
+                        response = handle.authenticate_keyboard_interactive_respond(responses).await;
+                    }
+                    None => return Err("authentication cancelled".to_string()),
+                }
+            }
+            // 首轮 start 即 Failure/Err = 服务器不支持 kbd-interactive → 纯 password 兜底；
+            // 进入过轮次后到达这里（rounds > 0 或已自动应答）= 应答被拒 → 最终失败，不兜底
+            _ if rounds == 0 && !auto_answered => {
+                return password_fallback(handle, stored, options, app, kbd_waiters).await;
+            }
+            _ => return Err("authentication failed".to_string()),
+        }
+    }
+}
+
+/// 按档案 auth 策略认证；auto = agent → 密钥链条目 → 默认私钥 → 密码类（kbd 优先 + password 兜底）
+///
+/// # Arguments
+///
+/// * `handle` - 已建立的连接句柄
+/// * `secrets` - 加密库状态
+/// * `options` - 连接选项
+/// * `app` / `kbd_waiters` - kbd-interactive 挑战应答通道（见 ask_frontend）
+///
+/// # Returns
+///
+/// `Ok(())` 认证成功；`Err` 失败文本
 async fn authenticate(
     handle: &mut client::Handle<ScxHandler>,
     secrets: &SecretsState,
     options: &SshConnectOptions,
+    app: &AppHandle,
+    kbd_waiters: &Arc<Mutex<HashMap<String, oneshot::Sender<Option<Vec<String>>>>>>,
 ) -> Result<(), String> {
     match options.auth.as_str() {
         "agent" => {
@@ -329,15 +497,7 @@ async fn authenticate(
             }
             Err("authentication failed (publicKey)".to_string())
         }
-        "password" => {
-            let password = secrets::load_password(secrets, &options.profile_id)?
-                .ok_or("no password configured")?;
-            match handle.authenticate_password(options.user.clone(), password).await {
-                Ok(result) if result.success() => Ok(()),
-                Ok(_) => Err("authentication failed (password)".to_string()),
-                Err(e) => Err(format!("password auth failed: {e}")),
-            }
-        }
+        "password" => try_password_like(handle, secrets, options, app, kbd_waiters).await,
         _ => {
             if try_agent(handle, &options.user).await.unwrap_or(false) {
                 return Ok(());
@@ -350,14 +510,15 @@ async fn authenticate(
             } else if try_default_private_keys(handle, &options.user).await.unwrap_or(false) {
                 return Ok(());
             }
-            if let Ok(Some(password)) = secrets::load_password(secrets, &options.profile_id) {
-                if let Ok(result) = handle.authenticate_password(options.user.clone(), password).await {
-                    if result.success() {
-                        return Ok(());
+            try_password_like(handle, secrets, options, app, kbd_waiters)
+                .await
+                .map_err(|e| {
+                    if e == "authentication failed (password)" {
+                        "authentication failed (tried agent, private keys, password)".to_string()
+                    } else {
+                        e
                     }
-                }
-            }
-            Err("authentication failed (tried agent, private keys, password)".to_string())
+                })
         }
     }
 }
@@ -411,12 +572,13 @@ pub async fn ssh_connect(
         forward_registry: forward_manager.registry(),
     };
     let address = (options.host.as_str(), options.port);
+    let kbd_waiters = manager.kbd_waiters.clone();
 
     let connected = async {
         let mut handle = client::connect(config, address, handler)
             .await
             .map_err(|e| format!("could not connect to {}:{}: {e}", options.host, options.port))?;
-        authenticate(&mut handle, &secrets, &options).await?;
+        authenticate(&mut handle, &secrets, &options, &app, &kbd_waiters).await?;
 
         // headless：认证即完成（无 PTY/shell/数据通道），连接句柄交断连 watcher 看护
         if options.headless.unwrap_or(false) {
@@ -440,6 +602,7 @@ pub async fn ssh_connect(
     .await;
 
     manager.hostkey_waiters.lock().unwrap().remove(&id);
+    manager.kbd_waiters.lock().unwrap().remove(&id);
 
     let (connection, channel) = connected?;
     let queue = Arc::new(PtyDataQueue::new(data_channel));
@@ -649,5 +812,54 @@ pub fn ssh_ack_data(manager: State<'_, SshManager>, id: String, length: usize) {
 pub fn ssh_confirm_host_key(manager: State<'_, SshManager>, id: String, accepted: bool) {
     if let Some(reply) = manager.hostkey_waiters.lock().unwrap().remove(&id) {
         let _ = reply.send(accepted);
+    }
+}
+
+/// 前端应答 kbd-interactive 凭据挑战（认证阶段，每轮 `ssh:{id}:kbdchallenge` 事件后调用）
+///
+/// # Arguments
+///
+/// * `manager` - 全局 SSH 会话管理器
+/// * `id` - 连接尝试 id（与事件 `ssh:{id}:kbdchallenge` 一致）
+/// * `responses` - 对位每个 prompt 的应答；`None` = 用户取消
+///
+/// # Examples
+///
+/// `invoke('ssh_respond_kbd', { id, responses: ['hunter2'] })`
+#[tauri::command]
+pub fn ssh_respond_kbd(manager: State<'_, SshManager>, id: String, responses: Option<Vec<String>>) {
+    if let Some(reply) = manager.kbd_waiters.lock().unwrap().remove(&id) {
+        let _ = reply.send(responses);
+    }
+}
+
+#[cfg(test)]
+mod kbd_tests {
+    use super::is_single_secret_prompt;
+    use russh::client::Prompt;
+
+    /// 构造单个 Prompt 的便捷函数
+    fn prompt(echo: bool) -> Prompt {
+        Prompt { prompt: "Password: ".to_string(), echo }
+    }
+
+    #[test]
+    fn single_hidden_prompt_is_single_secret() {
+        assert!(is_single_secret_prompt(&[prompt(false)]));
+    }
+
+    #[test]
+    fn single_echoed_prompt_is_not_single_secret() {
+        assert!(!is_single_secret_prompt(&[prompt(true)]));
+    }
+
+    #[test]
+    fn multiple_prompts_are_not_single_secret() {
+        assert!(!is_single_secret_prompt(&[prompt(false), prompt(false)]));
+    }
+
+    #[test]
+    fn empty_prompts_are_not_single_secret() {
+        assert!(!is_single_secret_prompt(&[]));
     }
 }

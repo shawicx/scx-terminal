@@ -8,7 +8,8 @@
 import { reactive, ref } from 'vue'
 import { nanoid } from 'nanoid'
 import { useConfigStore } from '@/stores/config'
-import { SshProxy, type HostKeyChallenge } from '@/services/ssh'
+import { SshProxy, type HostKeyChallenge, type KbdChallenge, type KbdAnswer } from '@/services/ssh'
+import { setProfilePassword } from '@/services/secrets'
 import { SshConnectionRegistry } from '@/lib/sshConnectionRegistry'
 
 export type ProfileConnectionStatus = 'idle' | 'connecting' | 'connected' | 'failed'
@@ -25,6 +26,10 @@ export const registryVersion = ref(0)
 /** 全局待确认的主机指纹（App 层 HostKeyDialog 呈现）与对应连接代理 */
 export const pendingHostKey = ref<HostKeyChallenge | null>(null)
 let pendingHostKeyProxy: SshProxy | null = null
+
+/** 全局待应答的凭据挑战（App 层 CredentialDialog 呈现）与对应应答 resolver */
+export const pendingKbdChallenge = ref<KbdChallenge | null>(null)
+let pendingKbdResolver: ((answer: KbdAnswer | null) => void) | null = null
 
 /** headless 连接的代理登记（disconnect 时 kill） */
 const headlessProxies = new Map<string, SshProxy>()
@@ -46,6 +51,10 @@ async function connectHeadless (profileId: string): Promise<string> {
     }
     connectionStates[profileId] = 'connecting'
     connectionErrors[profileId] = ''
+    // kbd-interactive / 密码挑战：挂全局弹窗等应答；「记住」仅对单一密码型挑战生效，
+    // 以最后一轮为准，连接成功后回存（见 start 成功分支）
+    // 注：初值用 as 显式联合类型——闭包内赋值不参与 CFA，否则此处被收窄为 null
+    let saveable = null as { remember: boolean, password: string } | null
     const proxy = new SshProxy()
     proxy.subscribe('hostkey', payload => {
         pendingHostKey.value = payload as HostKeyChallenge
@@ -55,6 +64,22 @@ async function connectHeadless (profileId: string): Promise<string> {
         headlessProxies.delete(proxy.getID())
         registry.noteHeadlessDead(proxy.getID())
         refreshMirror()
+    })
+    proxy.subscribe('kbdchallenge', payload => {
+        const challenge = payload as KbdChallenge
+        pendingKbdChallenge.value = challenge
+        void (async () => {
+            const answer = await new Promise<KbdAnswer | null>(resolve => {
+                pendingKbdResolver = resolve
+            })
+            pendingKbdResolver = null
+            if (answer && challenge.prompts.length === 1 && !challenge.prompts[0].echo) {
+                saveable = { remember: answer.remember, password: answer.responses[0] ?? '' }
+            } else {
+                saveable = null
+            }
+            await proxy.respondKbd(answer ? answer.responses : null).catch(() => {})
+        })()
     })
     try {
         await proxy.start({
@@ -70,11 +95,22 @@ async function connectHeadless (profileId: string): Promise<string> {
             headless: true,
         })
     } catch (error) {
+        // 连接失败：关闭可能残留的全局凭据弹窗（认证已终结）
+        pendingKbdChallenge.value = null
+        pendingKbdResolver?.(null)
+        pendingKbdResolver = null
         connectionStates[profileId] = 'failed'
         connectionErrors[profileId] = String(error instanceof Error ? error.message : error)
         registryVersion.value += 1
         throw error
     }
+    // 认证成功后按最后一轮「记住密码」回存；防御性关闭残留全局弹窗
+    if (saveable?.remember) {
+        void setProfilePassword(profileId, saveable.password).catch(() => {})
+    }
+    pendingKbdChallenge.value = null
+    pendingKbdResolver?.(null)
+    pendingKbdResolver = null
     headlessProxies.set(proxy.getID(), proxy)
     connectionStates[profileId] = 'connected'
     registryVersion.value += 1
@@ -212,4 +248,18 @@ export function resolvePendingHostKey (accepted: boolean): void {
     pendingHostKey.value = null
     void pendingHostKeyProxy?.confirmHostKey(accepted).catch(() => {})
     pendingHostKeyProxy = null
+}
+
+/**
+ * @description 应答全局凭据挑战（App 层 CredentialDialog 按钮 → 待应答连接的 respond）
+ * @param answer 弹窗应答；null = 取消
+ * @returns void
+ *
+ * @example resolvePendingKbd({ responses: ['hunter2'], remember: true })
+ *
+ */
+export function resolvePendingKbd (answer: KbdAnswer | null): void {
+    pendingKbdChallenge.value = null
+    pendingKbdResolver?.(answer)
+    pendingKbdResolver = null
 }
