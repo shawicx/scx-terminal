@@ -6,6 +6,8 @@
 
 export interface BufferLineAccess {
     getLineText (y: number, trimRight: boolean): string | null
+    /** 行 [0, endX) 列区间的字符文本（不 trim）：cursorX 是列数而偏移按字符计，宽字符须经此换算 */
+    getLineTextRange (y: number, endX: number): string | null
     isWrapped (y: number): boolean
     readonly cursorX: number
     readonly cursorY: number
@@ -40,7 +42,12 @@ export function readLogicalLine (access: BufferLineAccess): LogicalLine | null {
         segments.unshift(segment)
     }
     const text = segments.join('')
-    return { text, cursorOffset: text.length - tail.length + access.cursorX }
+    // 光标偏移按字符计：cursorX 是列数（宽字符占 2 列），列区间文本长度才是光标前的字符数；
+    // 区间不可读时退回列数近似（ASCII 行二者相等）
+    const beforeCursor = access.getLineTextRange(access.cursorY, access.cursorX)
+    const cursorOffset = text.length - tail.length
+        + (beforeCursor !== null ? beforeCursor.length : access.cursorX)
+    return { text, cursorOffset }
 }
 
 /**
@@ -178,6 +185,27 @@ export class PromptTracker {
         if (this.destroyed) {
             return
         }
+        this.scheduleSilence()
+    }
+
+    /**
+     * @description 直接记录一条命令文本（粘贴 / 快捷命令 autoRun 等绕过 input$ 的执行路径）：
+     *              此类命令无法靠静默回显采集（届时 buffer 已滚到新提示符），源文本即命令本身；
+     *              多行粘贴 = 多条命令顺序执行，单命令模型下只记录最后一条非空行（已知局限）
+     * @param command 命令源文本（可多行）
+     * @returns void
+     *
+     * @example tracker.recordDirect('git status\n')
+     *
+     */
+    recordDirect (command: string): void {
+        if (this.destroyed) {
+            return
+        }
+        const lines = command.split(/\r\n|\r|\n/).map(line => line.trim()).filter(line => line.length > 0)
+        const last = lines.at(-1)
+        this.pendingRecord = last !== undefined ? last : null
+        this.awaitingPromptLearn = true // 命令已提交：新提示符到来后学习
         this.scheduleSilence()
     }
 

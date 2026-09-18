@@ -7,14 +7,22 @@ import {
     type BufferLineAccess, type PromptTrackerHost,
 } from './promptTracker'
 
-/** 构造 mock buffer：lines 为各物理行文本（索引即 y），wrapped 标记哪些行是上一行的延续 */
-function makeAccess (lines: string[], wrappedFlags: boolean[], cursorX: number, cursorY: number): BufferLineAccess {
+/** 构造 mock buffer：lines 为各物理行文本（索引即 y），wrapped 标记哪些行是上一行的延续；
+ *  ranges 可选覆盖某行的列区间读取（模拟宽字符的列→字符映射） */
+function makeAccess (
+    lines: string[],
+    wrappedFlags: boolean[],
+    cursorX: number,
+    cursorY: number,
+    ranges?: Record<number, (endX: number) => string | null>,
+): BufferLineAccess {
     return {
         getLineText: (y, trimRight) => {
             const text = lines[y]
             if (text === undefined) return null
             return trimRight ? text.trimEnd() : text
         },
+        getLineTextRange: (y, endX) => ranges?.[y]?.(endX) ?? lines[y]?.slice(0, endX) ?? null,
         isWrapped: y => wrappedFlags[y] ?? false,
         cursorX,
         cursorY,
@@ -31,6 +39,23 @@ describe('readLogicalLine', () => {
         // 20 列终端：第一物理段满 20 字符，光标在第二段第 3 列
         const line = readLogicalLine(makeAccess(['01234567890123456789', 'xyz'], [false, true], 3, 1))
         expect(line).toEqual({ text: '01234567890123456789xyz', cursorOffset: 23 })
+    })
+
+    it('counts cursorOffset in chars, not cell columns (wide chars occupy 2 cells)', () => {
+        // 行 'echo 中文 more'：'中文' 各占 2 列。光标在 ' m' 之后 = 11 列，但光标前只有 9 个字符
+        const range = (endX: number): string | null => {
+            let chars = ''
+            let cells = 0
+            for (const ch of 'echo 中文 more') {
+                const width = (ch.codePointAt(0) ?? 0) > 0x2e7f ? 2 : 1 // CJK 宽，ASCII 窄
+                if (cells + width > endX) break
+                chars += ch
+                cells += width
+            }
+            return chars
+        }
+        const line = readLogicalLine(makeAccess(['echo 中文 more', ''], [false, false], 11, 0, { 0: range }))
+        expect(line).toEqual({ text: 'echo 中文 more', cursorOffset: 9 })
     })
 
     it('returns null when the cursor line is unavailable', () => {
@@ -85,6 +110,10 @@ describe('PromptTracker', () => {
                 const text = all[y]
                 if (text === undefined) return null
                 return trimRight ? text.trimEnd() : text
+            },
+            getLineTextRange: (y, endX) => {
+                const all = [...state.above, state.line]
+                return all[y]?.slice(0, endX) ?? null
             },
             isWrapped: _y => false,
             get cursorX () { return state.cursorX },
@@ -165,6 +194,33 @@ describe('PromptTracker', () => {
         expect(tracker.promptLength).toBe(13) // 未学习（保持旧值）
         // 但回车时的命令仍被记录
         expect(tracker.takeRecordedCommand()).toBe('gi')
+        tracker.destroy()
+    })
+
+    it('recordDirect records the pasted command text as-is (single line)', () => {
+        const { host } = makeHost({ line: 'user@mac ~ % ', cursorX: 13, above: [] })
+        const tracker = new PromptTracker(host)
+        tracker.recordDirect('echo pasted\r\n')
+        vi.advanceTimersByTime(250)
+        expect(tracker.takeRecordedCommand()).toBe('echo pasted')
+        tracker.destroy()
+    })
+
+    it('recordDirect keeps only the last non-empty line of a multi-line paste', () => {
+        const { host } = makeHost({ line: 'user@mac ~ % ', cursorX: 13, above: [] })
+        const tracker = new PromptTracker(host)
+        tracker.recordDirect('echo one\necho two\n\n')
+        vi.advanceTimersByTime(250)
+        expect(tracker.takeRecordedCommand()).toBe('echo two')
+        tracker.destroy()
+    })
+
+    it('recordDirect records nothing for whitespace-only content', () => {
+        const { host } = makeHost({ line: 'user@mac ~ % ', cursorX: 13, above: [] })
+        const tracker = new PromptTracker(host)
+        tracker.recordDirect('\n \n')
+        vi.advanceTimersByTime(250)
+        expect(tracker.takeRecordedCommand()).toBeNull()
         tracker.destroy()
     })
 })

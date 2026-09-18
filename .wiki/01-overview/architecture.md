@@ -5,19 +5,27 @@
 ```text
 ┌───────────────────────────── WebView (Vue 3) ─────────────────────────────┐
 │  App.vue 外壳                                                               │
-│   ├── TitleBar（自定义标题栏 + 标签栏 + 设置入口）                            │
-│   ├── TerminalTabContent × N（每个终端标签一棵分屏树，v-show 常驻）           │
-│   │    └── SplitContainer（递归） → TerminalPane（每叶一个终端）             │
-│   │         ├── XTermWebGLFrontend（xterm.js 渲染 + 输入/resize 事件流）      │
-│   │         └── LocalSession（BaseSession + 中间件栈 + TauriPTYProxy）       │
-│  ├── SettingsView / CommandPalette                                          │
-│  └── Pinia stores：tabs / config / theme；services：commands/hotkeys/shells │
+│   ├── TitleBar（自定义标题栏：拖拽区/传输/隧道指示器/设置入口）                 │
+│   │    └── TabStrip（标签条；tabBarPosition=bottom 时移至内容区下方）          │
+│   ├── 标签内容 × N（v-show 常驻）：                                          │
+│   │    ├─ TerminalTabContent（每终端标签一棵分屏树）                          │
+│   │    │    └── SplitContainer（递归） → TerminalPane（每叶一个终端）          │
+│   │    │         ├── XTermWebGLFrontend（xterm.js 渲染 + 输入/resize 事件流）   │
+│   │    │         └── LocalSession / SshSession（BaseSession + 中间件栈）       │
+│   │    ├─ SftpTabContent（双栏文件传输）                                      │
+│   │    └─ ForwardingTabContent（隧道管理器）                                  │
+│  ├── SettingsView / CommandPalette / QuickCommandPalette / TransferPopover  │
+│  └── Pinia stores：tabs/config/theme/transfers/forwarding；                  │
+│     services：commands/hotkeys/ssh/sshConnections/sftp/forward/history 等   │
 └────────────────────────────── Tauri IPC ───────────────────────────────────┘
          invoke 命令（JSON） │ Channel 二进制输出流 + ack │ emit 事件
 ┌───────────────────────────── Rust (src-tauri) ────────────────────────────┐
-│  lib.rs：插件注册、PtyManager 状态、11 个命令                                │
-│  pty.rs：portable-pty 会话（读线程 + 背压队列 + UTF-8 切分 + 清理线程）        │
-│  shells.rs（/etc/shells 探测）│ config.rs（YAML 配置读写）                    │
+│  lib.rs：插件注册、PtyManager 等状态、invoke_handler 命令注册                 │
+│  pty.rs（portable-pty 会话：读线程+背压队列+清理线程）                        │
+│  ssh.rs（russh 会话/认证/TOFU/kbd-interactive）│ sftp.rs（russh-sftp）       │
+│  forward.rs（-L/-R/-D 转发）│ transfers.rs（上传/下载任务中心）               │
+│  config.rs（SQLite config.db，实体级 CRUD+迁移）│ secrets.rs（加密密钥链）    │
+│  history.rs（history.db）│ fsutil.rs│proc_cwd.rs│fonts.rs│shells.rs         │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -32,7 +40,7 @@
 ## 数据流总览
 
 **输入（键盘 → shell）**：
-`xterm onData` → `Frontend.input$` → `TerminalPane` 接线 → `BaseSession.feedFromTerminal` → 中间件栈（当前仅 OSC 处理器透传）→ `LocalSession.write` → `invoke('pty_write')` → master fd。
+`xterm onData` → `Frontend.input$` → `TerminalPane` 接线（同时喂建议 PromptTracker）→ `BaseSession.feedFromTerminal` → 中间件栈（输入换行转换/退格映射）→ `LocalSession.write` → `invoke('pty_write')` → master fd（SSH 会话走 `invoke('ssh_write')`）。
 
 **输出（shell → 屏幕）**：
 Rust 读线程 → `PtyDataQueue`（背压）→ `Channel<InvokeResponseBody::Raw>` 二进制 → `TauriPTYProxy`（无订阅者时先缓冲 pendingChunks）→ `LocalSession` ack + `emitOutput` → 中间件 → `BaseSession.initialDataBuffer`（attach 前暂存）→ `Frontend.write` 流控 → `xterm.write`。

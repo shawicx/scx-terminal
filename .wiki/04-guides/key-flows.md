@@ -55,7 +55,7 @@ tabs.openTerminalTab()（stores/tabs.ts：{ id, type:'terminal', title:'' } 并�
 
 ```text
 store.appearance.colorScheme = 'Dracula'
-→ config store 防抖 500ms 持久化（config_save YAML）
+→ config store 防抖 500ms 持久化（computeOps 差异 flush → SQLite config.db，settings 分片 settings_set_section）
 → theme store watch 触发 apply()：
     resolveColorScheme(pref, 系统亮暗) → scheme
     isDark = isColorSchemeDark(scheme) → <html>.dark 类 + style.colorScheme

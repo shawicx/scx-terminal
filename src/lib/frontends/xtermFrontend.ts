@@ -524,6 +524,7 @@ export class XTermFrontend extends Frontend {
         const buffer = this.xterm.buffer.active
         return {
             getLineText: (y, trimRight) => buffer.getLine(y)?.translateToString(trimRight) ?? null,
+            getLineTextRange: (y, endX) => buffer.getLine(y)?.translateToString(false, 0, endX) ?? null,
             isWrapped: y => buffer.getLine(y)?.isWrapped ?? false,
             get cursorX () { return buffer.cursorX },
             get cursorY () { return buffer.cursorY },

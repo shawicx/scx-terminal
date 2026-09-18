@@ -28,7 +28,8 @@ fn expand_tilde_std (path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-/// 列目录（内部实现，命令函数转发）：错误返回空数组
+/// 列目录（内部实现，命令函数转发）：错误返回空数组；点文件全量返回，
+/// 可见性由前端补全引擎按补全前缀统一决定（本地/SSH 同一规则）
 fn fs_list_dir_inner (path: String) -> std::io::Result<Vec<FsDirEntry>> {
     let mut entries = Vec::new();
     // read_dir 失败（不存在/无权限）静默为 Ok(空)——与函数注释和测试契约一致
@@ -37,9 +38,6 @@ fn fs_list_dir_inner (path: String) -> std::io::Result<Vec<FsDirEntry>> {
     };
     for entry in dir.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
-            continue; // 隐藏文件不进补全（与常见 shell 默认一致）
-        }
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
         entries.push(FsDirEntry { name, is_dir });
     }
@@ -164,6 +162,13 @@ mod tests {
     fn list_dir_missing_path_returns_empty () {
         let entries = fs_list_dir_inner("/nonexistent-scx-path-xyz".into()).unwrap();
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn list_dir_includes_hidden_entries () {
+        // $HOME 下普遍存在点文件：Rust 侧全量返回，可见性由前端补全引擎按前缀决定
+        let entries = fs_list_dir_inner("~".into()).unwrap();
+        assert!(entries.iter().any(|e| e.name.starts_with('.')));
     }
 
     #[test]

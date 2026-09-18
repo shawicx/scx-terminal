@@ -176,7 +176,9 @@ async function pathSuggestions (context: SuggestionContext, listDir: (dir: strin
         return []
     }
     return entries
-        .filter(entry => entry.name.startsWith(split.prefix))
+        // 点文件仅当补全前缀本身以 . 开头才显示（本地/SSH 同一规则；lister 全量返回）
+        .filter(entry => entry.name.startsWith(split.prefix)
+            && (split.prefix.startsWith('.') || !entry.name.startsWith('.')))
         .slice(0, MAX_PATHS)
         .map(entry => {
             // 目录段保持未引用（POSIX 只在词首展开 ~，整词加引号会令 ~ 失效），仅引用 basename

@@ -190,6 +190,14 @@ function suggestionsConfig () {
     }
 }
 
+/** 菜单锚点刷新：从前端取光标像素位置写入 suggestionAnchor（open 与 resize 重锚共用） */
+function refreshSuggestionAnchor (): void {
+    const rect = frontend?.getSuggestionAnchorRect()
+    if (rect) {
+        suggestionAnchor.value = { left: rect.left, top: rect.top, hostHeight: rect.hostHeight, maxWidth: rect.hostWidth * 0.6 }
+    }
+}
+
 /** 创建本窗格的建议控制器，并保存宿主元素引用供事件监听 add/remove 共用 */
 function setupSuggestions (): void {
     suggestionHostEl = resolveHostElement()
@@ -222,10 +230,7 @@ function setupSuggestions (): void {
         onState: state => {
             suggestionState.value = state
             if (state.open) {
-                const rect = frontend?.getSuggestionAnchorRect()
-                if (rect) {
-                    suggestionAnchor.value = { left: rect.left, top: rect.top, hostHeight: rect.hostHeight, maxWidth: rect.hostWidth * 0.6 }
-                }
+                refreshSuggestionAnchor()
             }
         },
     })
@@ -253,7 +258,12 @@ async function pasteFromClipboard (): Promise<void> {
     const text = await readClipboardText()
     if (text) {
         suggestions?.close(false)
-        session?.feedFromTerminal(encodeUTF8(text.replace(/\r\n/g, '\n')))
+        const normalized = text.replace(/\r\n/g, '\n')
+        session?.feedFromTerminal(encodeUTF8(normalized))
+        // 含换行的粘贴会直接执行：绕过 input$ 的命令经源文本直录历史
+        if (/\r|\n/.test(normalized)) {
+            suggestions?.notifyDirectRecord(normalized)
+        }
     }
 }
 
@@ -270,6 +280,10 @@ async function pasteFromClipboard (): Promise<void> {
 function sendText (text: string, execute = false): void {
     const normalized = text.replace(/\r\n/g, '\n')
     session?.feedFromTerminal(encodeUTF8(execute ? normalized + '\n' : normalized))
+    // autoRun 或自带换行 = 命令直接执行：同粘贴路径直录历史
+    if (execute || /\r|\n/.test(normalized)) {
+        suggestions?.notifyDirectRecord(normalized)
+    }
     frontend?.focus()
 }
 
@@ -455,7 +469,13 @@ async function start (): Promise<void> {
             void frontend!.write(data)
             suggestions?.notifyOutput()
         })
-        frontend.resize$.subscribe(({ columns, rows }) => session!.resize(columns, rows))
+        frontend.resize$.subscribe(({ columns, rows }) => {
+            session!.resize(columns, rows)
+            // 菜单 open 时随 refit 重锚定：resize 后软换行/单元格尺寸变化，旧像素位置已失效
+            if (suggestionState.value.open) {
+                refreshSuggestionAnchor()
+            }
+        })
         frontend.title$.subscribe(title => emit('title', title))
         frontend.bell$.subscribe(() => frontend!.visualBell())
         session.destroyed$.subscribe(() => {

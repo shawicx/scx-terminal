@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TitleBar from '@/components/titlebar/TitleBar.vue'
+import TabStrip from '@/components/titlebar/TabStrip.vue'
 import TerminalTabContent from '@/components/terminal/TerminalTabContent.vue'
 import SettingsView from '@/components/settings/SettingsView.vue'
 import SftpTabContent from '@/components/sftp/SftpTabContent.vue'
@@ -78,6 +79,9 @@ watch(() => config.store.quickCommands, quickCommands => {
     registerQuickCommandCommands(quickCommands)
 }, { deep: true })
 
+// 标签栏位置（bottom 时标题栏不再内嵌标签条，由下方独立标签条接管）
+const tabBarBottom = computed(() => config.store.appearance.tabBarPosition === 'bottom')
+
 // follow the configured UI language ('auto' follows the OS)
 watch(() => config.store.appearance.language, language => {
     if (language === 'zh-CN' || language === 'en') {
@@ -116,6 +120,7 @@ watch(() => config.store.appearance.language, language => {
                 <SettingsView v-else />
             </div>
         </div>
+        <TabStrip v-if="tabBarBottom" position="bottom" />
         <CommandPalette />
         <QuickCommandPalette />
         <TransferPopover />

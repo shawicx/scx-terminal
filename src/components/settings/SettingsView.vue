@@ -48,6 +48,11 @@ const languageOptions = computed(() => [
     { value: 'en', label: 'English' },
 ])
 
+const tabBarPositionOptions = computed(() => [
+    { value: 'top', label: t('settings.tabBarTop') },
+    { value: 'bottom', label: t('settings.tabBarBottom') },
+])
+
 function bindingFor (hotkeyId: string): string {
     return (store.hotkeys[hotkeyId] ?? [])
         .map(sequence => sequence.map(formatKeystrokeForDisplay).join(' '))
@@ -753,6 +758,14 @@ const cursorOptions = computed(() => [
     { value: 'underline', label: t('settings.cursorStyleUnderline') },
 ])
 
+/** 字重下拉：常规/加粗 + CSS 数值档（xterm 透传给字体渲染） */
+const fontWeightOptions = computed(() => [
+    { value: 'normal', label: t('settings.weightNormal') },
+    { value: 'bold', label: t('settings.weightBold') },
+    ...(['100', '200', '300', '400', '500', '600', '700', '800', '900'] as const)
+        .map(weight => ({ value: weight, label: weight })),
+])
+
 // ---- quick commands page ----
 const selectedQuickCommandId = ref<string | null>(null)
 const selectedQuickCommand = computed(() =>
@@ -1176,6 +1189,14 @@ async function openConfigDir (): Promise<void> {
                                 :placeholder="t('settings.searchPlaceholder')"
                             />
                             <Input v-else v-model="store.terminal.font" placeholder="monospace" class="w-60" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.fontWeight') }}</Label>
+                            <Select v-model="store.terminal.fontWeight" :options="fontWeightOptions" class="w-44" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.fontWeightBold') }}</Label>
+                            <Select v-model="store.terminal.fontWeightBold" :options="fontWeightOptions" class="w-44" />
                         </div>
                         <div class="settings-card-row stacked">
                             <div class="settings-row-head">
@@ -1790,6 +1811,10 @@ async function openConfigDir (): Promise<void> {
                         <div class="settings-card-row">
                             <Label>{{ t('settings.language') }}</Label>
                             <Select v-model="store.appearance.language" :options="languageOptions" class="w-44" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.tabBarPosition') }}</Label>
+                            <Select v-model="store.appearance.tabBarPosition" :options="tabBarPositionOptions" class="w-44" />
                         </div>
                     </div>
                 </div>

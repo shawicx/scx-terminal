@@ -23,15 +23,15 @@ scx-terminal 是一个用 **Tauri v2 + Vue 3 + xterm.js** 构建的 macOS 桌面
 │   ├── project-overview.md          项目定位、功能清单、技术栈、已知限制
 │   └── architecture.md              三层架构、模块边界、数据流总览
 ├── 02-frontend/
-│   ├── app-shell-and-tabs.md        应用外壳：App/TitleBar/标签 store/命令面板
+│   ├── app-shell-and-tabs.md        应用外壳：App/TitleBar/TabStrip/标签 store/命令面板
 │   ├── terminal-rendering.md        xterm 前端：attach、配色应用、resize、搜索
-│   ├── sessions-and-middleware.md   会话层：Base/LocalSession、中间件、PTY 代理
+│   ├── sessions-and-middleware.md   会话层：Base/Local/SSH Session、中间件、PTY 代理
 │   ├── split-panes.md               分屏：不可变树模型与容器渲染
-│   ├── config-and-theming.md        配置持久化与主题（配色库 + UI 跟随配色）
+│   ├── config-and-theming.md        配置持久化（SQLite config.db 差异 flush）与主题
 │   └── hotkeys-and-commands.md      热键状态机与命令注册表
 ├── 03-backend/
 │   ├── pty-lifecycle.md             Rust PTY：spawn、读线程、背压、kill/清理
-│   ├── commands-and-config.md       命令注册、YAML 配置、shell 探测
+│   ├── commands-and-config.md       命令注册、SQLite 配置库、shell 探测
 │   └── capabilities-and-window.md   tauri.conf、capabilities、窗口与安全
 ├── 04-guides/
 │   ├── development.md               环境要求、命令、测试、常见坑

@@ -4,9 +4,10 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/App.vue` | 应用骨架：TitleBar + 标签内容区 + CommandPalette；启动时创建首个标签；注册命令与全局键盘监听；语言跟随 |
+| `src/App.vue` | 应用骨架：TitleBar + 标签内容区（terminal/sftp/forwarding/settings 四类标签）+ CommandPalette；启动时创建首个标签；注册命令与全局键盘监听；语言跟随；`tabBarPosition=bottom` 时在内容区下方渲染独立标签条 |
 | `src/main.ts` | bootstrap：Pinia → **先加载配置再初始化主题** → Vue errorHandler / window error / unhandledrejection 全部转发到 Rust `dev_log`（`tauri dev` 控制台可见） |
-| `src/components/titlebar/TitleBar.vue` | 自定义标题栏（macOS Overlay 标题栏）：交通灯占位、标签条（右键菜单/重命名/颜色标记）、`+` 新建、设置齿轮。⚠️ 拖拽/双击缩放全靠元素上的 `data-tauri-drag-region`（Tauri 原生：mousedown 拖动、macOS 双击在 mouseup 调 `internal_toggle_maximize`）——**不要再自绑 `@dblclick` 缩放**，双重 toggle 会竞态，表现为「最大化双击还原时大概率又弹回最大化」 |
+| `src/components/titlebar/TitleBar.vue` | 自定义标题栏（macOS Overlay 标题栏）：交通灯占位、传输/隧道指示器、设置齿轮；`tabBarPosition=top`（默认）时内嵌 TabStrip。⚠️ 拖拽/双击缩放全靠元素上的 `data-tauri-drag-region`（Tauri 原生：mousedown 拖动、macOS 双击在 mouseup 调 `internal_toggle_maximize`）——**不要再自绑 `@dblclick` 缩放**，双重 toggle 会竞态，表现为「最大化双击还原时大概率又弹回最大化」 |
+| `src/components/titlebar/TabStrip.vue` | 标签条：标签列表（右键菜单/行内重命名/颜色标记/拖拽排序）+ `+` 新建下拉。top 模式内嵌 TitleBar（`display:contents` 不引入额外盒子）；bottom 模式独立成条（圆角/描边/激活下探方向翻转），由 App.vue 挂载 |
 | `src/stores/tabs.ts` | 标签状态（`tabs` / `activeId` / `activeTab`）与动作（含 `renameTab` / `setTabColor` / `closeOtherTabs`） |
 | `src/components/palette/CommandPalette.vue` | 命令面板：模糊搜索命令并执行；打开期间 `hotkeys.disable()` 暂停全局热键 |
 | `src/components/ui/ContextMenu.vue` | 通用右键菜单（reka-ui ContextMenu 封装）：`items` 传入菜单项（含 `swatch` 色块、`danger`、分隔线），`select(key)` 回传 |
@@ -21,18 +22,20 @@
 - `closeTab()` 关闭最后一个标签时自动开一个新终端标签；`closeOtherTabs(id)` 只保留指定标签。
 - 所有标签的 DOM 常驻（`App.vue` 用 `v-show`），后台会话不中断——对标 Tabby 行为。`App.vue` 以 `:profile-id` 传给 `TerminalTabContent`，其内部解析档案对象（精确匹配 → 默认档案 → `fallbackProfile()` 兜底）。
 - 标签标题来源：shell OSC 0/2 → `frontend.title$` → `TerminalTabContent.setPaneTitle` → `tabs.setTitle`；显示优先级为 `manualTitle`（右键"重命名"，行内输入，Enter/失焦提交、Esc 取消、空串清除）> `title`（OSC 上报）> 回退文案。`setTitle` 不会覆盖 `manualTitle`。
-- 标签右键菜单（TitleBar 内 `ContextMenu`）：重命名 / 关闭标签页 / 关闭其他标签页 / 颜色标记（7 色预设色板小圆点，同色再点清除；`Tab.color` 在标签上渲染为色点）。
-- 标题栏「+」按钮为档案下拉菜单（`ui/DropdownMenu.vue`）：列出全部 local 档案（`defaultFirstProfiles` 置顶排序，默认档案带标记），点击按该档案开新标签。
+- 标签右键菜单（TabStrip 内 `ContextMenu`）：重命名 / 关闭标签页 / 关闭其他标签页 / 颜色标记（7 色预设色板小圆点，同色再点清除；`Tab.color` 在标签上渲染为色点）。
+- 标签条「+」按钮为档案下拉菜单（`ui/DropdownMenu.vue`）：本地档案在前（`defaultFirstProfiles` 置顶排序，默认档案带标记），分隔线后按分组排列 SSH 档案，点击按该档案开新标签。
 
 ## 布局层级（曾出过 0 宽度坍塌 bug，改动前先读）
 
 ```text
 .app-shell (flex column, 100vh)
 ├── TitleBar
+│    └── TabStrip（tabBarPosition=top 时内嵌；bottom 时不渲染）
 └── .tab-content (flex:1, position:relative)
     └── .tab-pane (position:absolute inset:0, v-show 切换)
         └── .terminal-tab-content (height:100%, display:flex)
             └── SplitContainer.split-root (flex:1 1 0, min-width/height:0)   ← 必须有 flex 尺寸
+└── TabStrip position="bottom"（仅 tabBarPosition=bottom 时）
 ```
 
 `.split-root` 缺失时根分栏容器按内容计算宽度，而其内容（`.terminal-pane`）是绝对定位不占流内尺寸 → 根容器宽度为 0、终端不可见。该类定义在 `src/components/terminal/TerminalTabContent.vue`。

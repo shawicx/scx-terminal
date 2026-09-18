@@ -170,4 +170,22 @@ describe('SuggestionsController', () => {
         vi.doUnmock('@/services/history')
         expect(recorded).toEqual([['local:p1', 'git che']])
     })
+
+    it('records pasted commands via notifyDirectRecord after silence (bypasses input$)', async () => {
+        const recorded: [string, string][] = []
+        vi.doMock('@/services/history', () => ({
+            ensureHistoryLoaded: async () => {},
+            getHistorySnapshot: () => [],
+            recordHistory: (source: string, command: string) => recorded.push([source, command]),
+        }))
+        const { SuggestionsController: Controller } = await import('./controller')
+        const host = makeHost()
+        const controller = new Controller(host)
+        // 粘贴路径不产生任何 input$ 通知：直录后靠输出静默落库
+        controller.notifyDirectRecord('echo pasted\n')
+        await vi.advanceTimersByTimeAsync(500)
+        controller.destroy()
+        vi.doUnmock('@/services/history')
+        expect(recorded).toEqual([['local:p1', 'echo pasted']])
+    })
 })

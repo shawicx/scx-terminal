@@ -1,6 +1,6 @@
 # IPC 契约总表（前端 ↔ Rust）
 
-注册处：`src-tauri/src/lib.rs` `invoke_handler`。前端调用方：`src/services/pty.ts`（pty_*）、`src/services/ssh.ts`（ssh_*）、`src/services/secrets.ts`（key_*/cred_*）、`src/services/sftp.ts`（sftp_*）、`src/services/forward.ts`（forward_*）、`src/services/shells.ts`（list_shells）、`src/services/fonts.ts`（list_fonts）、`src/stores/config.ts`（config_*）、`src/main.ts` 与 `SettingsView.vue`（dev_log / config_dir_path / opener 插件）。
+注册处：`src-tauri/src/lib.rs` `invoke_handler`。前端调用方：`src/services/pty.ts`（pty_*）、`src/services/ssh.ts`（ssh_*）、`src/services/secrets.ts`（key_*/cred_*）、`src/services/sftp.ts`（sftp_*）、`src/services/forward.ts`（forward_*）、`src/services/history.ts`（history_*）、`src/services/pathCompletion.ts`（fs_list_dir）、`src/components/sftp/SftpBrowserPane.vue`（fs_browse_dir/fs_home_dir）、`src/services/shells.ts`（list_shells）、`src/services/fonts.ts`（list_fonts）、`src/stores/config.ts`（config_*）、`src/main.ts` 与 `SettingsView.vue`（dev_log / config_dir_path / opener 插件）。
 
 ## invoke 命令
 
@@ -19,15 +19,24 @@
 | `ssh_resize` | JS→Rust | `id`、`cols: u32`、`rows: u32` | `()` 或错误 | **async** | `window_change` |
 | `ssh_kill` | JS→Rust | `id` | `()` 或错误 | **async** | 关 channel + `disconnect` + 停队列 |
 | `ssh_ack_data` | JS→Rust | `id`、`length: usize` | `()` | sync | 背压恢复（语义同 pty_ack_data） |
-| `ssh_confirm_host_key` | JS→Rust | `id`、`accepted: bool` | `()` | sync | 应答 `ssh:{id}:hostkey` 事件（oneshot） |
+| `ssh_confirm_host_key` | JS→Rust | `id`、`accepted: bool` | `()` | sync | 应答 `ssh:{id}:hostkey` 事件（oneshot；Rust 侧等待上限 120s，超时视为拒绝） |
+| `ssh_respond_kbd` | JS→Rust | `id`、`responses: Option<Vec<String>>`（None = 用户取消） | `()` | sync | 应答 `ssh:{id}:kbdchallenge` 事件（每轮一个 oneshot；等待上限 300s） |
 | `sftp_open` | JS→Rust | `sshId` | `{id, home}` | **async** | 同连接开第二 channel 跑 `sftp` subsystem（russh-sftp 3.0）；`SshSession.open_sftp_channel()` 封装 |
 | `sftp_read_dir` | JS→Rust | `id`、`path` | `FileEntry[]` | **async** | readdir 一次拿全元数据（size/mtime/isDir），目录优先排序 |
 | `sftp_mkdir` / `sftp_rename` / `sftp_remove_file` / `sftp_remove_dir` | JS→Rust | `id` + 路径参数 | `()` | **async** | 文件管理 |
-| `sftp_download` / `sftp_upload` | JS→Rust | `id`、remotePath/localPath、`progress: Channel<TransferProgress>` | `()`（立即返回） | **async**+spawn | 256KB 分块流式，进度 ≥1MB 节流推送，done/error 收尾；`File` 须显式 `shutdown()` |
+| `sftp_download` / `sftp_upload` | JS→Rust | `id`（sftp 会话）、remotePath/localPath | `string`（传输任务 id） | **async** | TransferManager 后台任务（目录递归聚合为单任务、AtomicBool 取消）；进度经全局事件 `sftp-transfers-changed` 全量快照推送，终态历史保留 100 条 |
+| `sftp_transfers` | JS→Rust | `sshId?`（过滤指定连接） | `TransferSnapshot[]` | sync | 传输任务快照列表（含历史） |
+| `sftp_transfer_cancel` / `sftp_transfers_clear` | JS→Rust | `id` / `sshId?` | `()` 或错误 / `()` | sync | 取消活动任务 / 清空终态历史 |
 | `sftp_close` | JS→Rust | `id` | `()` | **async** | 关会话（面板关闭/会话退出时调用） |
 | `forward_start` | JS→Rust | `options: ForwardOptions`（camelCase：**sshId**/kind=local\|remote\|dynamic/**listenHost**/**listenPort**（0=自动分配并回填）/targetHost?/targetPort?/ruleId?） | `ForwardState` | **async** | 端口转发：-L 本地 TcpListener→direct-tcpip；-R `tcpip_forward` 请求 server 监听（入站 channel 经 `ScxHandler::server_channel_open_forwarded_tcpip` 按端口路由）；-D fast-socks5 no-auth CONNECT→direct-tcpip；监听失败/连接不存在同步报错 |
 | `forward_stop` | JS→Rust | `id` | `()` | **async** | 停止转发（-R 先 `cancel_tcpip_forward`）；监听器与数据泵任务统一 abort |
 | `forward_list` | JS→Rust | `sshId` | `ForwardState[]` | sync | 该连接全部转发状态（面板打开时全量拉取；连接不存在返回空数组） |
+| `forward_list_all` | JS→Rust | 无 | `ForwardState[]` | sync | 全部连接的转发状态（隧道管理器页总览） |
+| `history_record` | JS→Rust | `source`（分桶键 local:{profileId} / ssh:{user}@{host}:{port}）、`command` | `()` 或错误 | sync | 记录命令到独立 history.db（去重提升） |
+| `history_list` / `history_import` / `history_clear` | JS→Rust | `source?`、`limit?` / `source`、`entries` / `source?` | `HistoryEntry[]` / `usize` / `()` | sync | 建议历史读取 / shell 历史批量导入（幂等）/ 清空（连带清 imported 标记） |
+| `fs_list_dir` | JS→Rust | `path`（~ 展开） | `FsDirEntry[]`（name/isDir） | sync | 路径补全列目录（错误静默空数组；**点文件全量返回**，可见性由前端引擎按补全前缀决定） |
+| `fs_read_text_file` | JS→Rust | `path` | `string \| null` | sync | 读文本文件（shell 历史导入源；不存在返回 null） |
+| `fs_browse_dir` / `fs_home_dir` | JS→Rust | `path`、`showHidden` / 无 | `FsBrowseEntry[]` / `string` | sync | SFTP 本地栏目录浏览（含 size/mtime，错误显式传播）/ 本地家目录 |
 | `pty_spawn` | JS→Rust | `options: SpawnOptions`（camelCase：file/args/env/cwd/cols/rows）、`channel: Channel` | `string`（会话 id，UUID） | **async**（线程池） | 建会话；输出经 channel 二进制流回传 |
 | `pty_write` | JS→Rust | `id: string`、`data: number[]`（字节） | `()` 或错误 | **async** | 写 master；前端吞掉错误（会话可能已退出） |
 | `pty_resize` | JS→Rust | `id`、`cols: u16`、`rows: u16` | `()` | sync | ioctl resize |
@@ -46,6 +55,7 @@
 | `profile_create` / `profile_update` / `profile_delete` | JS→Rust | `profile`（完整 JSON）/ `id` | `()` | sync | 档案增改删；create 缺 id、update 目标不存在报错；delete 幂等 |
 | `quick_command_create` / `quick_command_update` / `quick_command_delete` | JS→Rust | `command`（id/name/command/groupId?/autoRun）/ `id` | `()` | sync | 快捷命令增改删；update 保留 sort_order；delete 幂等 |
 | `quick_command_group_create` / `quick_command_group_update` / `quick_command_group_delete` | JS→Rust | `group`（id/name）/ `id` | `()` | sync | 分组增改删；delete 同事务把组内命令降级未分组 |
+| `ssh_group_create` / `ssh_group_update` / `ssh_group_delete` | JS→Rust | `group`（id/name）/ `id` | `()` | sync | SSH 分组增改删；delete 同事务把组内档案的 data JSON 移除 groupId |
 | `color_scheme_save` / `color_scheme_delete` | JS→Rust | `name`、`data` / `name` | `()` | sync | 自定义配色按 name upsert / 删（delete 幂等） |
 | `dev_log` | JS→Rust | `message: string` | `()` | sync | 前端日志转发到 stdout |
 
@@ -61,8 +71,10 @@
 | `pty:{id}:exit` | 退出码 JSON 或 `null` | 子进程 wait 返回 |
 | `ssh:{id}:exit` | `null` | SSH channel Eof/Close（输出泵末尾发出） |
 | `ssh:{id}:hostkey` | `{fingerprint, keyType, changed}` | KEX 后 TOFU 校验：未知/失配时发出，**前端必须在 invoke 前注册监听**（connect 挂起等应答，事后注册=事件丢失死锁） |
+| `ssh:{id}:kbdchallenge` | `{name, instructions, prompts: [{prompt, echo}]}` | kbd-interactive 每轮挑战（oneshot 应答经 `ssh_respond_kbd`；headless 连接经全局 `pendingKbdChallenge` 弹窗） |
 | `ssh:{id}:close` | （预留，当前不发） | — |
 | `forward:{sshId}:changed` | `ForwardState[]`（该连接完整快照，按 id 排序） | 转发启停/失败/端口回填时发出；SSH 会话断开（exit 路径）级联停止全部转发后发空快照 |
+| `sftp-transfers-changed` | `TransferSnapshot[]`（app 级全量快照） | 传输任务进度节流推送/终态变更（传输中心消费；速度=相邻快照差 EMA） |
 
 ## 数据通道（非事件、非普通 invoke 返回）
 

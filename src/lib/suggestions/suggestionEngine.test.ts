@@ -109,6 +109,26 @@ describe('computeSuggestions — paths', () => {
         expect(result).toEqual([])
     })
 
+    it('hides dotfiles unless the completion prefix starts with a dot', async () => {
+        const listDir = async () => [
+            { name: '.config', isDir: true },
+            { name: '.zshrc', isDir: false },
+            { name: 'Documents', isDir: true },
+        ]
+        // 前缀空（cat ~/）：点文件不可见
+        const plain = await computeSuggestions(
+            { ...baseCtx, typedLine: 'cat ~/', cursorOffset: 6, cwd: null },
+            { listDir },
+        )
+        expect(plain.map(s => s.label)).toEqual(['cat ~/Documents/'])
+        // 前缀 '.'（cat ~/.）：点文件可见、常规文件按前缀过滤
+        const dotted = await computeSuggestions(
+            { ...baseCtx, typedLine: 'cat ~/.', cursorOffset: 7, cwd: null },
+            { listDir },
+        )
+        expect(dotted.map(s => s.label)).toEqual(['cat ~/.config/', 'cat ~/.zshrc'])
+    })
+
     it('skips relative words when cwd is unknown', async () => {
         const listDir = async () => { throw new Error('should not be called') }
         const result = await computeSuggestions({ ...baseCtx, typedLine: 'cat Doc/', cursorOffset: 7, cwd: null }, { listDir })

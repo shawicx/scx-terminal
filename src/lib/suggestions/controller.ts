@@ -99,6 +99,11 @@ export class SuggestionsController {
         this.promptTracker.notifyOutput()
     }
 
+    /** 直接记录绕过 input$ 的执行路径（粘贴含换行 / 快捷命令 autoRun）的命令文本 */
+    notifyDirectRecord (text: string): void {
+        this.promptTracker.recordDirect(text)
+    }
+
     /** 手动触发（快捷键唤起；忽略 Esc 抑制与自动弹出延迟） */
     triggerManually (): void {
         this.suppressed = false
