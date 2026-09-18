@@ -31,6 +31,9 @@
     --z-side-panel: 40;
     --z-menu: 50;
     --z-modal: 100;
+    /* 菜单浮层必须盖过 --z-modal：Dialog（z-100）内的 Select/DropdownMenu/ContextMenu
+       下拉 portal 到 body，低于遮罩时点击落在遮罩上（选中失效并可能连带关闭弹窗） */
+    --z-menu-over-modal: 110;
     --z-palette: 1000;
 }
 

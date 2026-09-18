@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { Plus, Settings, X } from 'lucide-vue-next'
+import { ArrowRightLeft, ArrowUpDown, Plus, Settings, X } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { platform } from '@/lib/platform'
 import { useTabsStore, type Tab } from '@/stores/tabs'
 import { useConfigStore, defaultFirstProfiles, type LocalProfile, type SshProfile } from '@/stores/config'
+import { useTransfersStore } from '@/stores/transfers'
+import { useForwardingStore } from '@/stores/forwarding'
 import { terminalTabApi } from '@/services/terminalTabsApi'
+import { toggleTransferCenter } from '@/services/transferCenter'
 import { groupQuickCommandSections } from '@/lib/quickCommands'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
 import DropdownMenu from '@/components/ui/DropdownMenu.vue'
@@ -13,6 +16,8 @@ import DropdownMenu from '@/components/ui/DropdownMenu.vue'
 const { t } = useI18n()
 const store = useTabsStore()
 const config = useConfigStore()
+const transfersStore = useTransfersStore()
+const forwardingStore = useForwardingStore()
 
 const dragOverIndex = ref<number | null>(null)
 const dragFromIndex = ref<number | null>(null)
@@ -272,6 +277,34 @@ function onDragEnd () {
 
         <div class="drag-area" data-tauri-drag-region></div>
 
+        <!-- 传输中心指示器：运行数徽标 + 失败红点，点击唤起传输面板 -->
+        <button
+            class="titlebar-indicator"
+            :class="{ visible: transfersStore.transfers.length > 0 }"
+            :title="t('transfer.title')"
+            @click="toggleTransferCenter()"
+        >
+            <ArrowUpDown :size="14" />
+            <span v-if="transfersStore.activeTransfers.length > 0" class="indicator-badge">
+                {{ transfersStore.activeTransfers.length > 99 ? '99+' : transfersStore.activeTransfers.length }}
+            </span>
+            <span v-else-if="transfersStore.hasFailure" class="indicator-dot"></span>
+        </button>
+
+        <!-- 隧道管理器常驻入口（兼运行指示器）：运行数徽标 + 失败红点 -->
+        <button
+            class="titlebar-indicator"
+            :class="{ visible: forwardingStore.states.length > 0 }"
+            :title="t('forward.tabTitle')"
+            @click="store.openForwardingTab()"
+        >
+            <ArrowRightLeft :size="14" />
+            <span v-if="forwardingStore.activeStates.length > 0" class="indicator-badge">
+                {{ forwardingStore.activeStates.length > 99 ? '99+' : forwardingStore.activeStates.length }}
+            </span>
+            <span v-else-if="forwardingStore.failedStates.length > 0" class="indicator-dot"></span>
+        </button>
+
         <button class="new-tab-button settings-button" :title="t('commands.openSettings')" @click="store.openSettingsTab()">
             <Settings :size="14" />
         </button>
@@ -305,6 +338,7 @@ function onDragEnd () {
 
 .tab-header {
     display: flex;
+    flex-wrap: nowrap;
     align-items: center;
     gap: 6px;
     padding: 0 10px;
@@ -339,11 +373,14 @@ function onDragEnd () {
     box-shadow: inset 2px 0 0 var(--color-primary);
 }
 
+/* 文本列 + 关闭列的两列布局：标题占满剩余宽度（超长省略），× 恒定右列对齐 */
 .tab-title {
+    flex: 1 1 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
+    text-align: left;
 }
 
 .tab-color-dot {
@@ -419,5 +456,58 @@ function onDragEnd () {
 .settings-button {
     align-self: center;
     margin-right: 8px;
+}
+
+/* 标题栏指示器（传输/隧道）：无任务时仍可见但弱化，有任务徽标/红点时高亮 */
+.titlebar-indicator {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    align-self: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-muted-foreground);
+    opacity: 0.5;
+    cursor: default;
+    transition: background-color 0.25s ease, color 0.25s ease, opacity 0.25s ease;
+}
+
+.titlebar-indicator.visible {
+    opacity: 1;
+}
+
+.titlebar-indicator:hover {
+    background: var(--color-accent);
+    color: var(--color-accent-foreground);
+}
+
+.indicator-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    border-radius: 7px;
+    background: var(--color-primary);
+    color: var(--color-primary-foreground);
+    font-size: 9px;
+    line-height: 14px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.indicator-dot {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-destructive);
 }
 </style>

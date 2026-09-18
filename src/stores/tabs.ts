@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { nanoid } from 'nanoid'
 import { useConfigStore } from '@/stores/config'
 
-export type TabType = 'terminal' | 'settings'
+export type TabType = 'terminal' | 'settings' | 'sftp' | 'forwarding'
 
 export interface Tab {
     id: string
@@ -71,6 +71,50 @@ export const useTabsStore = defineStore('tabs', {
                 id: `settings-${nanoid()}`,
                 type: 'settings',
                 title: 'Settings',
+            }
+            this.tabs.push(tab)
+            this.activeId = tab.id
+            return tab
+        },
+        /**
+         * @description 打开档案的 SFTP 标签（本地/远端双栏文件传输；同一档案可开多个）
+         * @param profileId SSH 档案 id
+         * @returns Tab 新标签
+         *
+         * @example openSftpTab('ssh-web-01')
+         *
+         */
+        openSftpTab (profileId: string): Tab {
+            const config = useConfigStore()
+            const profile = config.store.profiles.find(p => p.id === profileId)
+            const tab: Tab = {
+                id: nanoid(),
+                type: 'sftp',
+                title: `SFTP · ${profile?.name ?? ''}`,
+                profileId,
+            }
+            this.tabs.push(tab)
+            this.activeId = tab.id
+            return tab
+        },
+        /**
+         * @description 打开隧道管理器标签（单实例；标题由 ForwardingTabContent 挂载时按
+         *              当前语言设置）
+         * @returns Tab 隧道管理器标签
+         *
+         * @example openForwardingTab()
+         *
+         */
+        openForwardingTab (): Tab {
+            const existing = this.tabs.find(t => t.type === 'forwarding')
+            if (existing) {
+                this.activeId = existing.id
+                return existing
+            }
+            const tab: Tab = {
+                id: `forwarding-${nanoid()}`,
+                type: 'forwarding',
+                title: '',
             }
             this.tabs.push(tab)
             this.activeId = tab.id

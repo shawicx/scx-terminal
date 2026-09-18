@@ -5,15 +5,24 @@ import { useI18n } from 'vue-i18n'
 import TitleBar from '@/components/titlebar/TitleBar.vue'
 import TerminalTabContent from '@/components/terminal/TerminalTabContent.vue'
 import SettingsView from '@/components/settings/SettingsView.vue'
+import SftpTabContent from '@/components/sftp/SftpTabContent.vue'
+import ForwardingTabContent from '@/components/forwarding/ForwardingTabContent.vue'
+import HostKeyDialog from '@/components/terminal/HostKeyDialog.vue'
+import TransferPopover from '@/components/sftp/TransferPopover.vue'
 import CommandPalette from '@/components/palette/CommandPalette.vue'
 import QuickCommandPalette from '@/components/palette/QuickCommandPalette.vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useConfigStore } from '@/stores/config'
+import { useTransfersStore } from '@/stores/transfers'
+import { useForwardingStore } from '@/stores/forwarding'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
+import { pendingHostKey, resolvePendingHostKey } from '@/services/sshConnections'
 
 const store = useTabsStore()
 const config = useConfigStore()
+const transfersStore = useTransfersStore()
+const forwardingStore = useForwardingStore()
 const { registerDefaults, registerProfileCommands, registerQuickCommandCommands, bindHotkeys } = useCommands()
 const { locale } = useI18n()
 
@@ -46,6 +55,8 @@ onMounted(() => {
     registerProfileCommands(config.store.profiles)
     registerQuickCommandCommands(config.store.quickCommands)
     bindHotkeys()
+    void transfersStore.init()
+    void forwardingStore.init()
 
     document.addEventListener('keydown', onKeydown)
     document.addEventListener('keyup', onKeyup)
@@ -92,11 +103,27 @@ watch(() => config.store.appearance.language, language => {
                     :tab-active="tab.id === store.activeId"
                     :profile-id="tab.profileId"
                 />
+                <SftpTabContent
+                    v-else-if="tab.type === 'sftp'"
+                    :tab-id="tab.id"
+                    :profile-id="tab.profileId!"
+                />
+                <ForwardingTabContent
+                    v-else-if="tab.type === 'forwarding'"
+                    :tab-id="tab.id"
+                />
                 <SettingsView v-else />
             </div>
         </div>
         <CommandPalette />
         <QuickCommandPalette />
+        <TransferPopover />
+        <HostKeyDialog
+            v-if="pendingHostKey"
+            :challenge="pendingHostKey"
+            @accept="resolvePendingHostKey(true)"
+            @reject="resolvePendingHostKey(false)"
+        />
     </div>
 </template>
 

@@ -44,6 +44,17 @@ export function listForwards (sshId: string): Promise<ForwardState[]> {
 }
 
 /**
+ * @description 列出全部连接的转发状态（隧道管理器全量拉取，跨会话总览）
+ * @returns Promise<ForwardState[]>（按 id 排序）
+ *
+ * @example const states = await listAllForwards()
+ *
+ */
+export function listAllForwards (): Promise<ForwardState[]> {
+    return invoke<ForwardState[]>('forward_list_all')
+}
+
+/**
  * @description 订阅某 SSH 连接的转发状态变化（快照全量同步，直接整体替换本地状态）
  * @param sshId SSH 会话 id
  * @param cb 快照回调

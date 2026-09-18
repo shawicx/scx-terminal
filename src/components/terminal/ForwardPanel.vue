@@ -6,20 +6,21 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowRightLeft, Globe, Play, Plus, Square, X } from 'lucide-vue-next'
+import { ArrowRightLeft, BookmarkPlus, Play, Plus, Square, X } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
-import Select from '@/components/ui/Select.vue'
+import ForwardRuleFormDialog from '@/components/forwarding/ForwardRuleFormDialog.vue'
 import { listForwards, onForwardsChanged, startForward, stopForward } from '@/services/forward'
 import {
     describeForward, ruleToSpec, sanitizeForwarding,
-    type ForwardKind, type ForwardState, type PortForwarding,
+    type ForwardState, type PortForwarding,
 } from '@/lib/portForwarding'
+import { useTabsStore } from '@/stores/tabs'
 import type { SshProfile } from '@/stores/config'
 
 const props = defineProps<{
     /** 所属窗格的 SSH 会话 id（SshProxy.getID） */
     sshId: string
-    /** 窗格档案（读取已保存的转发规则） */
+    /** 窗格档案（读取已保存的转发规则；临时转发放学为规则时直改其 forwardings） */
     profile: SshProfile
 }>()
 
@@ -28,15 +29,10 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const tabsStore = useTabsStore()
 const states = ref<ForwardState[]>([])
 const error = ref('')
 let unlisten: (() => void) | null = null
-
-const kindOptions = computed(() => [
-    { value: 'local', label: t('forward.kindLocal') },
-    { value: 'remote', label: t('forward.kindRemote') },
-    { value: 'dynamic', label: t('forward.kindDynamic') },
-])
 
 /** 档案规则按 id 匹配运行态（autoStart 规则连接后已由 TerminalPane 自动启动） */
 const savedRules = computed<PortForwarding[]>(() => props.profile.forwardings ?? [])
@@ -44,6 +40,21 @@ const ruleState = (ruleId: string): ForwardState | undefined =>
     states.value.find(state => state.ruleId === ruleId)
 /** 临时转发（无规则 id 的运行态） */
 const tempStates = computed<ForwardState[]>(() => states.value.filter(state => state.ruleId === null))
+
+/**
+ * @description 规则行展示文案：运行中时用运行态的实际生效端口（listenPort=0 由
+ *              OS/server 分配后回填），未运行用规则配置
+ * @param rule 档案规则
+ * @returns string 展示串
+ *
+ */
+function describeRule (rule: PortForwarding): string {
+    const state = ruleState(rule.id)
+    if (state) {
+        return describeForward(state)
+    }
+    return describeForward(rule)
+}
 
 /**
  * @description 初始化：全量拉取当前快照并订阅变化（快照全量同步，直接整体替换）
@@ -94,52 +105,40 @@ async function startRule (rule: PortForwarding): Promise<void> {
     }
 }
 
-// ---- 添加临时转发（内联表单；不落档案，随连接结束消失） ----
-const showAdd = ref(false)
-const draft = ref<{ kind: ForwardKind, listenHost: string, listenPort: string, targetHost: string, targetPort: string }>({
-    kind: 'local',
-    listenHost: '127.0.0.1',
-    listenPort: '',
-    targetHost: '',
-    targetPort: '',
-})
-
-function resetDraft (): void {
-    draft.value = { kind: 'local', listenHost: '127.0.0.1', listenPort: '', targetHost: '', targetPort: '' }
-}
-
 /**
- * @description 取消添加临时转发（收起表单并复位草稿）
+ * @description 把临时转发保存为档案规则（实际生效端口一并固化；经 config store 持久化）
+ * @param state 临时转发运行态
  * @returns void
  *
  */
-function cancelAdd (): void {
-    showAdd.value = false
-    resetDraft()
+function saveStateAsRule (state: ForwardState): void {
+    const rule = sanitizeForwarding({
+        type: state.kind,
+        listenHost: state.listenHost,
+        listenPort: state.listenPort,
+        targetHost: state.targetHost,
+        targetPort: state.targetPort,
+        autoStart: false,
+    })
+    if (!rule) {
+        return
+    }
+    props.profile.forwardings = [...(props.profile.forwardings ?? []), rule]
 }
 
+// ---- 添加临时转发（共享规则表单；不落档案，随连接结束消失） ----
+const addOpen = ref(false)
+
 /**
- * @description 提交临时转发：经 sanitizeForwarding 校验归一后启动
+ * @description 提交临时转发表单：直接启动（ruleId=null）
+ * @param rule 归一化后的规则
  * @returns Promise<void>
  *
  */
-async function commitAdd (): Promise<void> {
+async function onAddSubmit (rule: PortForwarding): Promise<void> {
     error.value = ''
-    const rule = sanitizeForwarding({
-        type: draft.value.kind,
-        listenHost: draft.value.listenHost,
-        listenPort: draft.value.listenPort === '' ? 0 : draft.value.listenPort,
-        targetHost: draft.value.kind === 'dynamic' ? null : draft.value.targetHost,
-        targetPort: draft.value.kind === 'dynamic' ? null : draft.value.targetPort,
-    })
-    if (!rule) {
-        error.value = t('forward.invalidDraft')
-        return
-    }
     try {
         await startForward({ ...ruleToSpec(props.sshId, rule), ruleId: null })
-        showAdd.value = false
-        resetDraft()
     } catch (e) {
         error.value = String(e instanceof Error ? e.message : e)
     }
@@ -160,6 +159,9 @@ onBeforeUnmount(() => {
         <div class="forward-toolbar">
             <ArrowRightLeft :size="14" class="forward-title-icon" />
             <span class="forward-title">{{ t('forward.title') }}</span>
+            <button class="forward-manage" :title="t('forward.manageAll')" @click="tabsStore.openForwardingTab()">
+                {{ t('forward.manageAll') }}
+            </button>
             <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('forward.close')" @click="emit('close')">
                 <X :size="14" />
             </Button>
@@ -173,7 +175,7 @@ onBeforeUnmount(() => {
                 <div v-for="rule in savedRules" :key="rule.id" class="forward-row">
                     <span class="forward-badge" :class="rule.type">{{ rule.type === 'local' ? 'L' : rule.type === 'remote' ? 'R' : 'D' }}</span>
                     <div class="forward-row-main">
-                        <span class="forward-desc">{{ describeForward(rule) }}</span>
+                        <span class="forward-desc" :title="describeRule(rule)">{{ describeRule(rule) }}</span>
                         <span v-if="rule.autoStart" class="forward-tag">{{ t('forward.autoStartTag') }}</span>
                         <span v-if="ruleState(rule.id)?.status === 'failed'" class="forward-failed-text" :title="ruleState(rule.id)?.error ?? ''">{{ t('forward.failed') }}</span>
                     </div>
@@ -209,41 +211,31 @@ onBeforeUnmount(() => {
                         <span class="forward-desc">{{ describeForward(state) }}</span>
                         <span v-if="state.status === 'failed'" class="forward-failed-text" :title="state.error ?? ''">{{ state.error ?? t('forward.failed') }}</span>
                     </div>
+                    <Button variant="ghost" size="icon" class="h-6 w-6" :title="t('forward.saveAsRule')" @click="saveStateAsRule(state)">
+                        <BookmarkPlus :size="12" />
+                    </Button>
                     <Button variant="ghost" size="icon" class="h-6 w-6" :title="t('forward.stop')" @click="void stopState(state)">
                         <Square :size="12" />
                     </Button>
                 </div>
             </div>
-
-            <div v-if="showAdd" class="forward-add">
-                <div class="forward-add-row">
-                    <Select v-model="draft.kind" :options="kindOptions" />
-                </div>
-                <div class="forward-add-row">
-                    <input v-model="draft.listenHost" class="forward-input host" spellcheck="false" :placeholder="t('forward.listenHost')">
-                    <input v-model="draft.listenPort" class="forward-input port" spellcheck="false" :placeholder="t('forward.portAuto')">
-                </div>
-                <div v-if="draft.kind !== 'dynamic'" class="forward-add-row">
-                    <input v-model="draft.targetHost" class="forward-input host" spellcheck="false" :placeholder="t('forward.targetHost')">
-                    <input v-model="draft.targetPort" class="forward-input port" spellcheck="false" :placeholder="t('forward.targetPort')">
-                </div>
-                <p v-else class="forward-socks-hint">
-                    <Globe :size="12" />
-                    {{ t('forward.socksHint') }}
-                </p>
-                <div class="forward-add-actions">
-                    <Button variant="outline" size="sm" @click="cancelAdd">{{ t('forward.cancel') }}</Button>
-                    <Button size="sm" @click="void commitAdd()">{{ t('forward.add') }}</Button>
-                </div>
-            </div>
         </div>
 
         <div class="forward-bottom">
-            <Button v-if="!showAdd" variant="outline" size="sm" class="forward-add-button" @click="showAdd = true">
+            <Button variant="outline" size="sm" class="forward-add-button" @click="addOpen = true">
                 <Plus :size="13" />
                 {{ t('forward.add') }}
             </Button>
         </div>
+
+        <ForwardRuleFormDialog
+            v-model:open="addOpen"
+            :editing="null"
+            :show-auto-start="false"
+            :host-label="props.profile.name"
+            :title="t('forward.add')"
+            @submit="rule => void onAddSubmit(rule)"
+        />
     </div>
 </template>
 
@@ -299,6 +291,27 @@ export default { name: 'ForwardPanel' }
     flex: 1 1 0;
     font-size: 13px;
     font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 「管理全部」链接：跳转隧道管理器标签 */
+.forward-manage {
+    border: none;
+    padding: 2px 4px;
+    background: transparent;
+    color: var(--color-muted-foreground);
+    font-size: 11px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    cursor: default;
+    transition: color 0.25s ease;
+}
+
+.forward-manage:hover {
+    color: var(--color-foreground);
+    text-decoration: underline;
 }
 
 .forward-error {
@@ -399,63 +412,6 @@ export default { name: 'ForwardPanel' }
     white-space: nowrap;
     font-size: 11px;
     color: var(--color-destructive);
-}
-
-.forward-add {
-    margin: 6px 10px;
-    padding: 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.forward-add-row {
-    display: flex;
-    gap: 6px;
-}
-
-.forward-input {
-    height: 30px;
-    padding: 0 8px;
-    border: 1px solid var(--color-input);
-    border-radius: 6px;
-    background: transparent;
-    color: var(--color-foreground);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    outline: none;
-}
-
-.forward-input:focus {
-    border-color: var(--color-ring);
-    box-shadow: 0 0 0 1px var(--color-ring);
-}
-
-.forward-input.host {
-    flex: 1 1 0;
-    min-width: 0;
-}
-
-.forward-input.port {
-    width: 88px;
-    flex-shrink: 0;
-}
-
-.forward-socks-hint {
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: var(--color-muted-foreground);
-}
-
-.forward-add-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 6px;
 }
 
 .forward-bottom {

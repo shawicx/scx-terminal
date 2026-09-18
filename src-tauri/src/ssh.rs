@@ -34,6 +34,9 @@ pub struct SshConnectOptions {
     pub key_id: Option<String>,
     pub cols: u32,
     pub rows: u32,
+    /// 无终端会话的后台连接（SFTP 标签 / 独立隧道用）：跳过 PTY/shell/输出泵，
+    /// 由断连 watcher 轮询连接状态做清理；cols/rows 与 data_channel 被忽略
+    pub headless: Option<bool>,
 }
 
 /// 连接阶段的客户端 Handler：覆写 check_server_key 实现 TOFU 指纹确认；
@@ -415,6 +418,11 @@ pub async fn ssh_connect(
             .map_err(|e| format!("could not connect to {}:{}: {e}", options.host, options.port))?;
         authenticate(&mut handle, &secrets, &options).await?;
 
+        // headless：认证即完成（无 PTY/shell/数据通道），连接句柄交断连 watcher 看护
+        if options.headless.unwrap_or(false) {
+            return Ok::<_, String>((handle, None));
+        }
+
         let channel: russh::Channel<client::Msg> = handle
             .channel_open_session()
             .await
@@ -427,7 +435,7 @@ pub async fn ssh_connect(
             .request_shell(true)
             .await
             .map_err(|e| format!("failed to request shell: {e}"))?;
-        Ok::<_, String>((handle, channel))
+        Ok((handle, Some(channel)))
     }
     .await;
 
@@ -435,11 +443,17 @@ pub async fn ssh_connect(
 
     let (connection, channel) = connected?;
     let queue = Arc::new(PtyDataQueue::new(data_channel));
-    let (mut read_half, write_half) = channel.split();
+    let (mut read_half, write_half) = match channel {
+        Some(channel) => {
+            let (read, write) = channel.split();
+            (Some(read), Some(write))
+        }
+        None => (None, None),
+    };
 
     let session = Arc::new(SshSession {
         id: id.clone(),
-        write: tokio::sync::Mutex::new(Some(write_half)),
+        write: tokio::sync::Mutex::new(write_half),
         connection: tokio::sync::Mutex::new(Some(connection)),
         exited: Arc::new(AtomicBool::new(false)),
         queue: queue.clone(),
@@ -450,6 +464,33 @@ pub async fn ssh_connect(
         .unwrap()
         .insert(id.clone(), session.clone());
 
+    // headless 断连 watcher：russh Handle 无异步 wait，轮询 is_closed（3s）；
+    // 语义对齐输出泵的清理路径——exit 事件 + 会话移除 + 级联停该连接全部转发
+    if options.headless.unwrap_or(false) {
+        let app = app.clone();
+        let id_for_event = id.clone();
+        let sessions = manager.sessions.clone();
+        let watcher_session = session.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                let closed = {
+                    let connection = watcher_session.connection.lock().await;
+                    connection.as_ref().map(|handle| handle.is_closed()).unwrap_or(true)
+                };
+                if closed {
+                    break;
+                }
+            }
+            watcher_session.exited.store(true, Ordering::Release);
+            let _ = app.emit(&format!("ssh:{id_for_event}:exit"), serde_json::Value::Null);
+            sessions.lock().unwrap().remove(&id_for_event);
+            app.state::<ForwardManager>()
+                .stop_all_for_ssh(&app, &id_for_event);
+        });
+        return Ok(id);
+    }
+
     // 输出泵：channel 消息 → 背压队列 → 前端；EOF/Close 后发 exit 事件并自清理
     let exited_flag = session.exited.clone();
     {
@@ -458,7 +499,11 @@ pub async fn ssh_connect(
         let sessions = manager.sessions.clone();
         tauri::async_runtime::spawn(async move {
             loop {
-                match read_half.wait().await {
+                let message = match read_half.as_mut() {
+                    Some(half) => half.wait().await,
+                    None => break,
+                };
+                match message {
                     Some(ChannelMsg::Data { data }) => session.queue.push(data.to_vec()),
                     Some(ChannelMsg::ExtendedData { data, .. }) => session.queue.push(data.to_vec()),
                     Some(ChannelMsg::ExitStatus { .. }) => continue,

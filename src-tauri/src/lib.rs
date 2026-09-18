@@ -9,6 +9,7 @@ mod secrets;
 mod sftp;
 mod shells;
 mod ssh;
+mod transfers;
 
 use tauri::Manager;
 
@@ -29,6 +30,7 @@ pub fn run() {
         .manage(ssh::SshManager::new())
         .manage(sftp::SftpManager::new())
         .manage(forward::ForwardManager::new())
+        .manage(transfers::TransferManager::new())
         .invoke_handler(tauri::generate_handler![
             pty::pty_spawn,
             pty::pty_write,
@@ -42,8 +44,11 @@ pub fn run() {
             forward::forward_start,
             forward::forward_stop,
             forward::forward_list,
+            forward::forward_list_all,
             fsutil::fs_list_dir,
             fsutil::fs_read_text_file,
+            fsutil::fs_browse_dir,
+            fsutil::fs_home_dir,
             history::history_record,
             history::history_list,
             history::history_import,
@@ -86,6 +91,9 @@ pub fn run() {
             sftp::sftp_download,
             sftp::sftp_upload,
             sftp::sftp_close,
+            transfers::sftp_transfers,
+            transfers::sftp_transfer_cancel,
+            transfers::sftp_transfers_clear,
             ssh::ssh_connect,
             ssh::ssh_write,
             ssh::ssh_resize,

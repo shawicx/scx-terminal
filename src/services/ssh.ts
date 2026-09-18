@@ -19,6 +19,8 @@ export interface SSHConnectOptions {
     keyId: string | null
     cols: number
     rows: number
+    /** 无终端会话的后台连接（SFTP 标签/独立隧道）：跳过 PTY/shell，cols/rows/dataChannel 被忽略 */
+    headless?: boolean
 }
 
 /** 主机指纹确认请求（事件 `ssh:{id}:hostkey` 载荷） */

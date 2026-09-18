@@ -47,13 +47,16 @@ export function useCommands () {
     }
 
     const PROFILE_COMMAND_PREFIX = 'new-tab-profile:'
+    const SFTP_PROFILE_COMMAND_PREFIX = 'sftp-profile:'
 
     /**
      * 同步式注册"按档案新建标签"命令：先移除全部旧命令再按当前档案重建
-     * （档案增删改名后由 App.vue 的 watch 调用）；SSH 档案用「连接」文案与本地终端区分
+     * （档案增删改名后由 App.vue 的 watch 调用）；SSH 档案用「连接」文案与本地终端区分，
+     *              SSH 档案同时注册「在 SFTP 中打开」命令（双栏文件传输标签）
      */
     function registerProfileCommands (profiles: TerminalProfile[]): void {
-        commands.value = commands.value.filter(c => !c.id.startsWith(PROFILE_COMMAND_PREFIX))
+        commands.value = commands.value.filter(c =>
+            !c.id.startsWith(PROFILE_COMMAND_PREFIX) && !c.id.startsWith(SFTP_PROFILE_COMMAND_PREFIX))
         for (const profile of profiles) {
             if (profile.type !== 'local' && profile.type !== 'ssh') {
                 continue
@@ -66,6 +69,14 @@ export function useCommands () {
                     : t('commands.newTabWithProfile', { name: profile.name }),
                 handler: () => void openNewTerminalTabWithCwd(profile.id),
             })
+            if (profile.type === 'ssh') {
+                register({
+                    id: `${SFTP_PROFILE_COMMAND_PREFIX}${profile.id}`,
+                    group: 'sftp',
+                    label: () => t('commands.openSftpWithProfile', { name: profile.name }),
+                    handler: () => tabs.openSftpTab(profile.id),
+                })
+            }
         }
     }
 
@@ -196,6 +207,21 @@ export function useCommands () {
             handler: () => terminalTabApi.current?.toggleForward(),
         })
         register({
+            id: 'open-sftp', group: 'sftp',
+            label: () => t('commands.openSftp'),
+            enabled: () => {
+                const tab = tabs.activeTab
+                return !!tab?.profileId
+                    && config.store.profiles.some(p => p.id === tab.profileId && p.type === 'ssh')
+            },
+            handler: () => {
+                const profileId = tabs.activeTab?.profileId
+                if (profileId) {
+                    tabs.openSftpTab(profileId)
+                }
+            },
+        })
+        register({
             id: 'copy-current-path', group: 'terminal', hotkeyId: 'copy-current-path',
             label: () => t('commands.copyCurrentPath'),
             enabled: () => !!terminalTabApi.current,
@@ -218,6 +244,11 @@ export function useCommands () {
             id: 'open-settings', group: 'app',
             label: () => t('commands.openSettings'),
             handler: () => tabs.openSettingsTab(),
+        })
+        register({
+            id: 'open-forwarding', group: 'app',
+            label: () => t('commands.openForwarding'),
+            handler: () => tabs.openForwardingTab(),
         })
         register({
             id: 'toggle-color-scheme', group: 'app',
@@ -246,7 +277,7 @@ export function useCommands () {
     }
 
     const sortedCommands = computed(() => {
-        const groups = ['tab', 'terminal', 'quickCommand', 'app']
+        const groups = ['tab', 'terminal', 'sftp', 'quickCommand', 'app']
         return [...commands.value].sort((a, b) =>
             groups.indexOf(a.group) - groups.indexOf(b.group) || a.id.localeCompare(b.id))
     })

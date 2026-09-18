@@ -606,6 +606,27 @@ pub fn forward_list(forward_manager: State<'_, ForwardManager>, ssh_id: String) 
     forward_manager.states_for_ssh(&ssh_id)
 }
 
+/// 列出全部连接的转发状态（隧道管理器全量拉取，跨会话总览）
+///
+/// # Arguments
+///
+/// * `forward_manager` - 转发管理器
+///
+/// # Returns
+///
+/// Vec<ForwardState>（按 id 排序）
+///
+/// # Examples
+///
+/// `invoke('forward_list_all')`
+#[tauri::command]
+pub fn forward_list_all(forward_manager: State<'_, ForwardManager>) -> Vec<ForwardState> {
+    let forwards = forward_manager.forwards.lock().unwrap();
+    let mut states: Vec<ForwardState> = forwards.values().map(|handle| handle.snapshot()).collect();
+    states.sort_by(|a, b| a.id.cmp(&b.id));
+    states
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

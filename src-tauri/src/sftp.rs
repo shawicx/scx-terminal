@@ -1,19 +1,18 @@
 //! @description SFTP 文件面板后端：在同一 russh 连接上开第二 channel 跑 `sftp` subsystem
-//!              （russh-sftp 3.0），提供目录浏览/上传/下载（分块 + 进度 Channel）/文件管理命令。
+//!              （russh-sftp 3.0），提供目录浏览/文件管理命令；上传/下载经 transfers 模块
+//!              的 TransferManager 执行（事件广播进度、支持取消与目录递归）。
 //!              生命周期：SSH 会话断开后所有 SFTP 命令自然报错，前端据此关面板。
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use russh_sftp::client::SftpSession;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use serde::Serialize;
-use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 use crate::ssh::SshManager;
+use crate::transfers;
 
 /// 一条 SFTP 会话（绑定其来源 SSH 连接，便于排查）
 pub struct SftpHandle {
@@ -63,19 +62,6 @@ pub struct FileEntry {
 pub struct SftpOpened {
     pub id: String,
     pub home: String,
-}
-
-/// 传输进度/状态（经 Tauri Channel 推送）
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TransferProgress {
-    pub transfer_id: String,
-    pub path: String,
-    pub done: u64,
-    pub total: u64,
-    /// progress | done | error
-    pub state: String,
-    pub error: Option<String>,
 }
 
 fn entry_from(parent: &str, name: String, attrs: russh_sftp::client::fs::Metadata) -> FileEntry {
@@ -167,6 +153,15 @@ pub async fn sftp_read_dir(
     let mut entries: Vec<FileEntry> = read_dir
         .map(|entry| entry_from(&path, entry.file_name(), entry.metadata()))
         .collect();
+    // symlink 目录判定：readdir 元数据是 lstat 语义（isDir 恒 false），
+    // 跟随 stat 修正指向目录的 symlink（双击可进入）；stat 失败保持原值
+    for entry in entries.iter_mut() {
+        if entry.is_symlink {
+            if let Ok(meta) = handle.sftp.metadata(&entry.path).await {
+                entry.is_dir = meta.file_type().is_dir();
+            }
+        }
+    }
     entries.sort_by(|a, b| {
         b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
@@ -264,191 +259,62 @@ pub async fn sftp_close(sftp_manager: State<'_, SftpManager>, id: String) -> Res
     Ok(())
 }
 
-const TRANSFER_CHUNK: usize = 256 * 1024;
-/// 进度推送节流：每 ≥1MB 或完成时发一次
-const PROGRESS_STEP: u64 = 1024 * 1024;
-
-fn send_progress(channel: &Channel<TransferProgress>, progress: TransferProgress) {
-    let _ = channel.send(progress);
-}
-
-/// 下载远端文件到本地路径（分块流式 + 进度推送；命令立即返回，结果经 Channel 收尾）
+/// 下载远端文件/目录到本地路径（TransferManager 后台任务；进度经 `sftp-transfers-changed` 事件广播）
 ///
 /// # Arguments
 ///
+/// * `app` - AppHandle（事件发射）
 /// * `sftp_manager` - SFTP 会话管理器
 /// * `id` - SFTP 会话 id
-/// * `remote_path` - 远端文件绝对路径
-/// * `local_path` - 本地目标文件路径
-/// * `progress` - 进度 Channel（TransferProgress）
+/// * `remote_path` - 远端源路径（文件或目录）
+/// * `local_path` - 本地目标路径（与源同形）
+///
+/// # Returns
+///
+/// String 传输任务 id（`sftp_transfer_cancel` 可取消）
 ///
 /// # Examples
 ///
-/// `invoke('sftp_download', { id, remotePath, localPath, progress })`
+/// `invoke('sftp_download', { id, remotePath, localPath })`
 #[tauri::command]
 pub async fn sftp_download(
+    app: AppHandle,
     sftp_manager: State<'_, SftpManager>,
     id: String,
     remote_path: String,
     local_path: String,
-    progress: Channel<TransferProgress>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let handle = sftp_manager.handle(&id)?;
-    let transfer_id = Uuid::new_v4().to_string();
-    let remote = remote_path.clone();
-    let local = local_path.clone();
-    tauri::async_runtime::spawn(async move {
-        let result = run_download(&handle.sftp, &remote, &local, &transfer_id, &progress).await;
-        let state = match &result {
-            Ok(()) => "done",
-            Err(_) => "error",
-        };
-        send_progress(&progress, TransferProgress {
-            transfer_id,
-            path: remote,
-            done: 0,
-            total: 0,
-            state: state.to_string(),
-            error: result.err(),
-        });
-    });
-    Ok(())
+    Ok(transfers::start_download(&app, handle, remote_path, local_path))
 }
 
-async fn run_download(
-    sftp: &SftpSession,
-    remote: &str,
-    local: &str,
-    transfer_id: &str,
-    progress: &Channel<TransferProgress>,
-) -> Result<(), String> {
-    let mut remote_file = sftp.open(remote).await.map_err(|e| format!("open failed: {e}"))?;
-    let total = remote_file.metadata().await.ok().and_then(|m| m.size).unwrap_or(0);
-    if let Some(parent) = Path::new(local).parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|e| format!("mkdir failed: {e}"))?;
-    }
-    let mut local_file = tokio::fs::File::create(local).await.map_err(|e| format!("create failed: {e}"))?;
-    let mut buf = vec![0u8; TRANSFER_CHUNK];
-    let mut done: u64 = 0;
-    let mut last_report: u64 = 0;
-    loop {
-        let n = remote_file.read(&mut buf).await.map_err(|e| format!("read failed: {e}"))?;
-        if n == 0 {
-            break;
-        }
-        local_file.write_all(&buf[..n]).await.map_err(|e| format!("write failed: {e}"))?;
-        done += n as u64;
-        if done - last_report >= PROGRESS_STEP {
-            last_report = done;
-            send_progress(progress, TransferProgress {
-                transfer_id: transfer_id.to_string(),
-                path: remote.to_string(),
-                done,
-                total,
-                state: "progress".to_string(),
-                error: None,
-            });
-        }
-    }
-    local_file.flush().await.map_err(|e| format!("flush failed: {e}"))?;
-    remote_file.shutdown().await.map_err(|e| format!("close failed: {e}"))?;
-    send_progress(progress, TransferProgress {
-        transfer_id: transfer_id.to_string(),
-        path: remote.to_string(),
-        done,
-        total,
-        state: "done".to_string(),
-        error: None,
-    });
-    Ok(())
-}
-
-/// 上传本地文件到远端路径（分块流式 + 进度推送；命令立即返回）
+/// 上传本地文件/目录到远端路径（TransferManager 后台任务；语义同 sftp_download）
 ///
 /// # Arguments
 ///
+/// * `app` - AppHandle（事件发射）
 /// * `sftp_manager` - SFTP 会话管理器
 /// * `id` - SFTP 会话 id
-/// * `local_path` - 本地源文件路径
-/// * `remote_path` - 远端目标文件路径
-/// * `progress` - 进度 Channel
+/// * `local_path` - 本地源路径（文件或目录）
+/// * `remote_path` - 远端目标路径（与源同形）
+///
+/// # Returns
+///
+/// String 传输任务 id
 ///
 /// # Examples
 ///
-/// `invoke('sftp_upload', { id, localPath, remotePath, progress })`
+/// `invoke('sftp_upload', { id, localPath, remotePath })`
 #[tauri::command]
 pub async fn sftp_upload(
+    app: AppHandle,
     sftp_manager: State<'_, SftpManager>,
     id: String,
     local_path: String,
     remote_path: String,
-    progress: Channel<TransferProgress>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let handle = sftp_manager.handle(&id)?;
-    let transfer_id = Uuid::new_v4().to_string();
-    let remote = remote_path.clone();
-    let local = local_path.clone();
-    tauri::async_runtime::spawn(async move {
-        let result = run_upload(&handle.sftp, &local, &remote, &transfer_id, &progress).await;
-        let state = match &result {
-            Ok(()) => "done",
-            Err(_) => "error",
-        };
-        send_progress(&progress, TransferProgress {
-            transfer_id,
-            path: remote,
-            done: 0,
-            total: 0,
-            state: state.to_string(),
-            error: result.err(),
-        });
-    });
-    Ok(())
-}
-
-async fn run_upload(
-    sftp: &SftpSession,
-    local: &str,
-    remote: &str,
-    transfer_id: &str,
-    progress: &Channel<TransferProgress>,
-) -> Result<(), String> {
-    let mut local_file = tokio::fs::File::open(local).await.map_err(|e| format!("open failed: {e}"))?;
-    let total = local_file.metadata().await.map(|m| m.len()).unwrap_or(0);
-    let mut remote_file = sftp.create(remote).await.map_err(|e| format!("create failed: {e}"))?;
-    let mut buf = vec![0u8; TRANSFER_CHUNK];
-    let mut done: u64 = 0;
-    let mut last_report: u64 = 0;
-    loop {
-        let n = local_file.read(&mut buf).await.map_err(|e| format!("read failed: {e}"))?;
-        if n == 0 {
-            break;
-        }
-        remote_file.write_all(&buf[..n]).await.map_err(|e| format!("write failed: {e}"))?;
-        done += n as u64;
-        if done - last_report >= PROGRESS_STEP {
-            last_report = done;
-            send_progress(progress, TransferProgress {
-                transfer_id: transfer_id.to_string(),
-                path: remote.to_string(),
-                done,
-                total,
-                state: "progress".to_string(),
-                error: None,
-            });
-        }
-    }
-    remote_file.flush().await.map_err(|e| format!("flush failed: {e}"))?;
-    remote_file.shutdown().await.map_err(|e| format!("close failed: {e}"))?;
-    send_progress(progress, TransferProgress {
-        transfer_id: transfer_id.to_string(),
-        path: remote.to_string(),
-        done,
-        total,
-        state: "done".to_string(),
-        error: None,
-    });
-    Ok(())
+    Ok(transfers::start_upload(&app, handle, local_path, remote_path))
 }
 
 #[cfg(test)]

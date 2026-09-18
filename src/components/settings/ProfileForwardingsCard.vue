@@ -1,6 +1,6 @@
 <!--
-  @description SSH 档案编辑器的「端口转发规则」卡片：规则列表（启停时自动启动开关/编辑/删除
-              确认）+ Dialog 添加/编辑表单（类型 Select，目标字段按类型条件显隐）。
+  @description SSH 档案编辑器的「端口转发规则」卡片：规则列表（autoStart 开关/编辑/删除确认）；
+              添加/编辑表单复用共享的 ForwardRuleFormDialog（与隧道管理器/窗格面板同源）。
               直接编辑档案对象（与 SettingsView 既有编辑器一致的响应式直改模式）。
 -->
 <script setup lang="ts">
@@ -9,11 +9,9 @@ import { useI18n } from 'vue-i18n'
 import { ArrowRightLeft, Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import Dialog from '@/components/ui/Dialog.vue'
-import Input from '@/components/ui/Input.vue'
-import Label from '@/components/ui/Label.vue'
-import Select from '@/components/ui/Select.vue'
 import Switch from '@/components/ui/Switch.vue'
-import { describeForward, sanitizeForwarding, type ForwardKind, type PortForwarding } from '@/lib/portForwarding'
+import ForwardRuleFormDialog from '@/components/forwarding/ForwardRuleFormDialog.vue'
+import { describeForward, type PortForwarding } from '@/lib/portForwarding'
 import type { SshProfile } from '@/stores/config'
 
 const props = defineProps<{
@@ -24,77 +22,27 @@ const props = defineProps<{
 const { t } = useI18n()
 const rules = computed<PortForwarding[]>(() => props.profile.forwardings ?? [])
 
-const kindOptions = computed(() => [
-    { value: 'local', label: t('forward.kindLocal') },
-    { value: 'remote', label: t('forward.kindRemote') },
-    { value: 'dynamic', label: t('forward.kindDynamic') },
-])
-
-// ---- 添加 / 编辑：同一个 Dialog 表单（editingId 为 null = 新增） ----
-const editingId = ref<string | null>(null)
+// ---- 添加 / 编辑：共享规则表单（editingRule 为 null = 新增） ----
 const editorOpen = ref(false)
-const formError = ref('')
-const form = ref({
-    type: 'local' as ForwardKind,
-    listenHost: '127.0.0.1',
-    listenPort: '',
-    targetHost: '',
-    targetPort: '',
-    autoStart: false,
-})
+const editingRule = ref<PortForwarding | null>(null)
 
-/**
- * @description 打开添加表单（复位为默认草稿）
- * @returns void
- *
- */
 function openAdd (): void {
-    editingId.value = null
-    formError.value = ''
-    form.value = { type: 'local', listenHost: '127.0.0.1', listenPort: '', targetHost: '', targetPort: '', autoStart: false }
+    editingRule.value = null
     editorOpen.value = true
 }
 
-/**
- * @description 打开编辑表单（载入既有规则）
- * @param rule 待编辑规则
- * @returns void
- *
- */
 function openEdit (rule: PortForwarding): void {
-    editingId.value = rule.id
-    formError.value = ''
-    form.value = {
-        type: rule.type,
-        listenHost: rule.listenHost,
-        listenPort: String(rule.listenPort),
-        targetHost: rule.targetHost ?? '',
-        targetPort: rule.targetPort === null ? '' : String(rule.targetPort),
-        autoStart: rule.autoStart,
-    }
+    editingRule.value = rule
     editorOpen.value = true
 }
 
 /**
- * @description 提交表单：sanitize 校验归一后写回档案（新增或原位替换）
+ * @description 提交规则表单：写回档案 forwardings（新增或原位替换；config store watch 持久化）
+ * @param rule 归一化后的规则
  * @returns void
  *
  */
-function commitEditor (): void {
-    formError.value = ''
-    const rule = sanitizeForwarding({
-        id: editingId.value ?? undefined,
-        type: form.value.type,
-        listenHost: form.value.listenHost,
-        listenPort: form.value.listenPort === '' ? 0 : form.value.listenPort,
-        targetHost: form.value.type === 'dynamic' ? null : form.value.targetHost,
-        targetPort: form.value.type === 'dynamic' ? null : form.value.targetPort,
-        autoStart: form.value.autoStart,
-    })
-    if (!rule) {
-        formError.value = t('forward.invalidDraft')
-        return
-    }
+function onFormSubmit (rule: PortForwarding): void {
     const next = [...rules.value]
     const index = next.findIndex(entry => entry.id === rule.id)
     if (index === -1) {
@@ -103,7 +51,6 @@ function commitEditor (): void {
         next.splice(index, 1, rule)
     }
     props.profile.forwardings = next
-    editorOpen.value = false
 }
 
 /**
@@ -160,38 +107,13 @@ const confirming = ref<PortForwarding | null>(null)
             </Button>
         </div>
 
-        <Dialog v-if="editorOpen" :title="editingId ? t('forward.editRule') : t('forward.addRule')" :width="420" @cancel="editorOpen = false">
-            <div class="editor-grid">
-                <div class="editor-row">
-                    <Label>{{ t('forward.ruleType') }}</Label>
-                    <Select v-model="form.type" :options="kindOptions" />
-                </div>
-                <div class="editor-row">
-                    <Label>{{ t('forward.ruleListen') }}</Label>
-                    <div class="editor-pair">
-                        <Input v-model="form.listenHost" class="flex-1" spellcheck="false" />
-                        <Input v-model="form.listenPort" class="port" :placeholder="t('forward.portAuto')" spellcheck="false" />
-                    </div>
-                </div>
-                <div v-if="form.type !== 'dynamic'" class="editor-row">
-                    <Label>{{ t('forward.ruleTarget') }}</Label>
-                    <div class="editor-pair">
-                        <Input v-model="form.targetHost" class="flex-1" spellcheck="false" />
-                        <Input v-model="form.targetPort" class="port" spellcheck="false" />
-                    </div>
-                </div>
-                <p v-else class="editor-hint">{{ t('forward.socksHint') }}</p>
-                <div class="editor-row">
-                    <Label>{{ t('forward.autoStart') }}</Label>
-                    <Switch v-model="form.autoStart" />
-                </div>
-                <p v-if="formError" class="editor-error">{{ formError }}</p>
-            </div>
-            <template #footer>
-                <Button variant="outline" size="sm" @click="editorOpen = false">{{ t('forward.cancel') }}</Button>
-                <Button size="sm" @click="commitEditor">{{ t('sftp.confirm') }}</Button>
-            </template>
-        </Dialog>
+        <ForwardRuleFormDialog
+            v-model:open="editorOpen"
+            :editing="editingRule"
+            :host-label="profile.name"
+            :title="editingRule ? t('forward.editRule') : t('forward.addRule')"
+            @submit="rule => onFormSubmit(rule)"
+        />
 
         <Dialog v-if="confirming" :title="t('forward.deleteRuleConfirm')" :width="360" @cancel="confirming = null">
             <p class="confirm-text">{{ describeForward(confirming) }}</p>
@@ -276,48 +198,6 @@ export default { name: 'ProfileForwardingsCard' }
 
 .forwarding-add {
     margin-top: 8px;
-}
-
-.editor-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.editor-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.editor-row > :first-child {
-    width: 72px;
-    flex-shrink: 0;
-    text-align: right;
-}
-
-.editor-pair {
-    flex: 1 1 0;
-    display: flex;
-    gap: 8px;
-    min-width: 0;
-}
-
-.editor-pair .port {
-    width: 110px;
-    flex-shrink: 0;
-}
-
-.editor-hint {
-    margin: -4px 0 0 84px;
-    font-size: 12px;
-    color: var(--color-muted-foreground);
-}
-
-.editor-error {
-    margin: 0;
-    font-size: 12px;
-    color: var(--color-destructive);
 }
 
 .confirm-text {
