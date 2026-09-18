@@ -1195,6 +1195,14 @@ async function openConfigDir (): Promise<void> {
                             <Label>{{ t('settings.boldInBright') }}</Label>
                             <Switch v-model="store.terminal.drawBoldTextInBrightColors" />
                         </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.paletteGenerate') }}</Label>
+                            <Switch v-model="store.terminal.paletteGenerate" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.paletteHarmonious') }}</Label>
+                            <Switch v-model="store.terminal.paletteHarmonious" :disabled="!store.terminal.paletteGenerate" />
+                        </div>
                     </div>
                 </div>
 
