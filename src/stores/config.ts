@@ -7,6 +7,7 @@ import { platform } from '@/lib/platform'
 import { normalizeHotkeysConfig } from '@/lib/hotkeys/hotkeys'
 import { listShells, type Shell } from '@/services/shells'
 import type { TerminalColorScheme } from '@/lib/colorSchemes'
+import { sanitizeForwardings, type PortForwarding } from '@/lib/portForwarding'
 
 /** SSH 认证策略：auto = agent → 私钥（显式或 ~/.ssh/id_*）→ 密码（若配置） */
 export type SshAuthMethod = 'auto' | 'agent' | 'publicKey' | 'password'
@@ -42,6 +43,8 @@ export interface SshProfile {
     isDefault: boolean
     /** 所属分组 id（见 SshGroup）；缺省 = 默认分组 */
     groupId?: string
+    /** 端口转发规则（对标 Tabby：连接后可自动启动；运行态临时转发不落此字段） */
+    forwardings?: PortForwarding[]
 }
 
 /** 终端配置档案：type 为判别字段（local 本地 shell / ssh 远程连接） */
@@ -689,7 +692,8 @@ export const useConfigStore = defineStore('config', () => {
     /**
      * @description 清理 SSH 档案上的无效引用：已废弃的明文敏感字段（旧版 yaml 遗留的
      *              password/privateKeyPath——敏感数据已加密存 SQLite，不允许残留明文副本）
-     *              与悬空的 groupId（分组被删/旧数据残留，降级为默认分组）
+     *              与悬空的 groupId（分组被删/旧数据残留，降级为默认分组）；转发规则
+     *              逐条归一化（类型白名单/端口范围/目标必填），非法条目丢弃、空集删字段
      * @returns void
      *
      * @example sanitizeProfiles()
@@ -706,6 +710,12 @@ export const useConfigStore = defineStore('config', () => {
             delete legacy.privateKeyPath
             if (profile.groupId && !groupIds.has(profile.groupId)) {
                 delete legacy.groupId
+            }
+            const forwardings = sanitizeForwardings(legacy.forwardings)
+            if (forwardings && forwardings.length > 0) {
+                profile.forwardings = forwardings
+            } else {
+                delete legacy.forwardings
             }
         }
     }

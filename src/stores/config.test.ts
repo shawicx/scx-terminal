@@ -20,6 +20,7 @@ import {
     captureBaseline,
     emptyBaseline,
     type TerminalProfile,
+    type SshProfile,
     type FlushOp,
 } from './config'
 import { getKeyName, metaKeyName, altKeyName, normalizeHotkeysConfig, parseKeystroke } from '@/lib/hotkeys/hotkeys'
@@ -257,5 +258,35 @@ describe('profiles from shells', () => {
         }
         const merged = deepMerge({ profiles: [] as TerminalProfile[] }, { profiles: [sshProfile] })
         expect(merged.profiles).toEqual([sshProfile])
+    })
+
+    it('keeps SSH forwardings through deepMerge and flushes edits via profileUpdate', () => {
+        const sshProfile: TerminalProfile = {
+            id: 'ssh-1',
+            type: 'ssh',
+            name: 'prod',
+            host: 'p.example.com',
+            port: 22,
+            user: 'u',
+            auth: 'agent',
+            keyId: null,
+            colorScheme: null,
+            isDefault: false,
+            forwardings: [{ id: 'f1', type: 'local', listenHost: '127.0.0.1', listenPort: 8080, targetHost: 'db.internal', targetPort: 5432, autoStart: true }],
+        }
+        // 档案数组整体替换语义：forwardings 随档案存活（同 SSH 基础字段的既有回归口径）
+        const merged = deepMerge({ profiles: [] as TerminalProfile[] }, { profiles: [sshProfile] })
+        expect(merged.profiles).toEqual([sshProfile])
+
+        // 规则编辑 → 实体级 diff 产出 profileUpdate 且携带 forwardings
+        const config = defaultConfig()
+        config.profiles.push(sshProfile)
+        const baseline = captureBaseline(config)
+        sshProfile.forwardings = [{ id: 'f1', type: 'local', listenHost: '127.0.0.1', listenPort: 8080, targetHost: 'db.internal', targetPort: 5432, autoStart: false }]
+        const ops = computeOps(config, baseline)
+        expect(ops).toHaveLength(1)
+        const op = ops[0] as { kind: string, profile: SshProfile }
+        expect(op.kind).toBe('profileUpdate')
+        expect(op.profile.forwardings?.[0]?.autoStart).toBe(false)
     })
 })

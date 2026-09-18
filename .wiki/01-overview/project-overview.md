@@ -32,12 +32,13 @@ scx-terminal 是一个 macOS 桌面终端应用（Tauri v2 + Vue 3 + @xterm/xter
 | SSH 远程会话（M5）：russh 0.63、agent/私钥/密码认证、TOFU 指纹确认（读写系统 known_hosts）、keepalive、SSH 档案管理 | 可用 | `src-tauri/src/ssh.rs`、`src/services/ssh.ts`、`src/lib/sessions/sshSession.ts`、`ui/Dialog.vue`+`terminal/HostKeyDialog.vue` |
 | SSH 密钥链（M5.5，Termius 式）：密钥导入/应用内生成/管理，敏感内容 AES-256-GCM 加密存 SQLite（主密钥在系统钥匙串），档案按 keyId 直连 | 可用 | `src-tauri/src/secrets.rs`、`src/services/secrets.ts`、设置页「密钥」分页 |
 | SFTP 面板（M6）：SSH 窗格内右侧抽屉，目录浏览/上传/下载（进度）/删除/重命名/新建目录，复用已认证连接的第二 channel | 可用 | `src-tauri/src/sftp.rs`（russh-sftp 3.0）、`src/components/terminal/SftpPanel.vue`、`src/services/sftp.ts` |
+| 端口转发：本地（-L）/远程（-R）/动态（-D，SOCKS5）三种转发；SSH 档案持久化规则（连接时 autoStart，设置页管理）+ SSH 窗格右侧抽屉面板（临时添加/启停/状态）；转发绑定连接，会话断开级联停止 | 可用 | `src-tauri/src/forward.rs`（russh direct-tcpip/tcpip-forward + fast-socks5 1.0）、`src/components/terminal/ForwardPanel.vue`、`src/components/settings/ProfileForwardingsCard.vue`、`src/services/forward.ts`、`src/lib/portForwarding.ts` |
 
 ## 技术栈
 
 **前端**（`package.json`）：Vue 3.5、Pinia 4、rxjs 7（会话/前端事件流全部基于 Subject）、@xterm/xterm 5.5（addon-canvas / webgl / fit / search / unicode11）、Tailwind CSS 4（`@theme inline` token 体系）、reka-ui + class-variance-authority（UI 组件）、vue-i18n 11、yaml、nanoid。构建 Vite 8（端口 1420，`strictPort`，别名 `@` → `src/`），类型检查 `vue-tsc`，Lint `oxlint`，测试 `vitest`（node 环境）。
 
-**后端**（`src-tauri/Cargo.toml`）：tauri 2（feature `macos-private-api`）、portable-pty 0.9、russh 0.63（SSH 客户端）、russh-sftp 3.0（SFTP）、rusqlite 0.40 bundled + aes-gcm + keyring + getrandom（敏感数据加密库）、tauri-plugin-opener、tauri-plugin-clipboard-manager、serde/serde_json、uuid、font-loader 0.11（系统字体枚举）。Release profile：`lto`、`opt-level = "s"`、`strip`。
+**后端**（`src-tauri/Cargo.toml`）：tauri 2（feature `macos-private-api`）、portable-pty 0.9、russh 0.63（SSH 客户端）、russh-sftp 3.0（SFTP）、fast-socks5 1.0（动态转发 SOCKS5 服务端）、rusqlite 0.40 bundled + aes-gcm + keyring + getrandom（敏感数据加密库）、tauri-plugin-opener、tauri-plugin-clipboard-manager、serde/serde_json、uuid、font-loader 0.11（系统字体枚举）。Release profile：`lto`、`opt-level = "s"`、`strip`。
 
 **语言分布**（来自 codebase-memory 索引）：TypeScript 37 文件、Vue 15、Rust 6。
 

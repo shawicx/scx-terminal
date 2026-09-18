@@ -8,13 +8,16 @@ import { SshSession } from '@/lib/sessions/sshSession'
 import { XTermWebGLFrontend } from '@/lib/frontends/xtermFrontend'
 import { createFrontendContext, readClipboardText, writeClipboardText } from '@/lib/frontendContext'
 import { resolveColorScheme } from '@/lib/colorSchemes'
-import type { TerminalProfile } from '@/stores/config'
+import type { TerminalProfile, SshProfile } from '@/stores/config'
 import { encodeUTF8 } from '@/lib/utils/bytes'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
 import Button from '@/components/ui/Button.vue'
 import HostKeyDialog from '@/components/terminal/HostKeyDialog.vue'
 import SftpPanel from '@/components/terminal/SftpPanel.vue'
+import ForwardPanel from '@/components/terminal/ForwardPanel.vue'
 import type { HostKeyChallenge } from '@/services/ssh'
+import { autoStartRules, ruleToSpec } from '@/lib/portForwarding'
+import { startForward } from '@/services/forward'
 import { useConfigStore } from '@/stores/config'
 import { useThemeStore } from '@/stores/theme'
 import SuggestionMenu from '@/components/terminal/SuggestionMenu.vue'
@@ -44,8 +47,9 @@ let session: BaseSession | null = null
 let frontend: XTermWebGLFrontend | null = null
 let disposed = false
 
-// ---- SFTP 文件面板（SSH 档案专属）：右键菜单/expose 开关，随窗格销毁清理 ----
+// ---- SFTP 文件面板 / 端口转发面板（SSH 档案专属）：右键菜单/expose 开关，随窗格销毁清理 ----
 const sftpOpen = ref(false)
+const forwardOpen = ref(false)
 const sshSessionId = computed(() => (session instanceof SshSession ? session.sshSessionId : null))
 
 // ---- SSH 主机指纹确认（TOFU）：SshSession 回调 → 对话框 → resolve 应答 ----
@@ -265,7 +269,14 @@ defineExpose({
     sendText,
     toggleSftp: () => {
         if (props.profile.type === 'ssh') {
+            forwardOpen.value = false
             sftpOpen.value = !sftpOpen.value
+        }
+    },
+    toggleForward: () => {
+        if (props.profile.type === 'ssh') {
+            sftpOpen.value = false
+            forwardOpen.value = !forwardOpen.value
         }
     },
 })
@@ -292,7 +303,10 @@ const menuItems = computed<ContextMenuItemSpec[]>(() => [
     { key: 'clear', label: t('commands.clear'), separatorBefore: true },
     { key: 'find', label: t('commands.find') },
     ...(props.profile.type === 'ssh'
-        ? [{ key: 'sftp', label: t('sftp.menuToggle'), separatorBefore: true }]
+        ? [
+            { key: 'sftp', label: t('sftp.menuToggle'), separatorBefore: true },
+            { key: 'forward', label: t('forward.menuToggle') },
+        ]
         : []),
     { key: 'split-right', label: t('commands.splitRight'), separatorBefore: true },
     { key: 'split-down', label: t('commands.splitDown') },
@@ -331,6 +345,9 @@ function onMenuSelect (key: string): void {
         case 'sftp':
             sftpOpen.value = !sftpOpen.value
             break
+        case 'forward':
+            forwardOpen.value = !forwardOpen.value
+            break
         case 'close-pane':
             emit('closed')
             break
@@ -360,6 +377,24 @@ watch(() => themeStore.epoch, () => {
 })
 
 const searchNoResults = computed(() => searchOpen.value && !!searchQuery.value && searchResultCount.value === 0)
+
+/**
+ * @description SSH 会话建立成功后启动档案上 autoStart 的转发规则（失败仅告警：
+ *              面板中的手动启动会呈现具体错误；重试启动/重连会再次触发）
+ * @param sshId SSH 会话 id
+ * @param profile SSH 档案（读取 forwardings）
+ * @returns Promise<void>
+ *
+ */
+async function startAutoForwards (sshId: string, profile: SshProfile): Promise<void> {
+    for (const rule of autoStartRules(profile)) {
+        try {
+            await startForward(ruleToSpec(sshId, rule))
+        } catch (error) {
+            console.warn('auto-start forward failed', rule.id, error)
+        }
+    }
+}
 
 /**
  * @description 创建会话与前端并挂载到宿主元素（onMounted 与重试共用）
@@ -398,6 +433,7 @@ async function start (): Promise<void> {
         frontend.bell$.subscribe(() => frontend!.visualBell())
         session.destroyed$.subscribe(() => {
             sftpOpen.value = false
+            forwardOpen.value = false
             emit('closed')
         })
 
@@ -418,6 +454,10 @@ async function start (): Promise<void> {
                 width: null,
                 height: null,
             })
+            // 连接建立后启动档案 autoStart 转发（会话 id 此刻可用）
+            if (session instanceof SshSession && session.sshSessionId) {
+                void startAutoForwards(session.sshSessionId, props.profile)
+            }
         } else {
             await session.start({
                 command: props.profile.command,
@@ -506,12 +546,18 @@ onBeforeUnmount(() => {
 <template>
     <div ref="paneRoot" class="terminal-pane">
         <ContextMenu :items="menuItems" @open="onMenuOpen" @select="onMenuSelect">
-            <div class="terminal-host" :class="{ 'with-sftp': sftpOpen }"></div>
+            <div class="terminal-host" :class="{ 'with-sftp': sftpOpen, 'with-forward': forwardOpen }"></div>
         </ContextMenu>
         <SftpPanel
             v-if="sftpOpen && props.profile.type === 'ssh' && sshSessionId"
             :ssh-id="sshSessionId"
             @close="sftpOpen = false"
+        />
+        <ForwardPanel
+            v-if="forwardOpen && props.profile.type === 'ssh' && sshSessionId"
+            :ssh-id="sshSessionId"
+            :profile="props.profile"
+            @close="forwardOpen = false"
         />
         <div v-if="mountError" class="mount-error">
             <span class="mount-error-text">{{ mountError }}</span>
@@ -561,9 +607,10 @@ onBeforeUnmount(() => {
     inset: 0;
 }
 
-/* SFTP 面板开启时收缩终端区域（xterm 的 ResizeObserver 自动 refit）；
-   min() 与 SftpPanel 面板宽度保持同一表达式，窄窗格下两侧按比例分摊 */
-.terminal-host.with-sftp {
+/* SFTP / 端口转发面板开启时收缩终端区域（xterm 的 ResizeObserver 自动 refit）；
+   min() 与 SftpPanel/ForwardPanel 面板宽度保持同一表达式，窄窗格下两侧按比例分摊 */
+.terminal-host.with-sftp,
+.terminal-host.with-forward {
     inset: 0 min(400px, 60%) 0 0;
 }
 

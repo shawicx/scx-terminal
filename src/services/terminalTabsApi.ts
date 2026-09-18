@@ -15,6 +15,8 @@ export interface TerminalTabApi {
     find (): void
     /** 手动唤起活动窗格的输入建议菜单 */
     triggerSuggestions (): void
+    /** 开关活动窗格的端口转发面板（SSH 档案窗格有效） */
+    toggleForward (): void
     /** 向活动窗格会话写入文本（快捷命令；execute=true 补换行立即执行） */
     sendTextToActivePane (text: string, execute?: boolean): void
     /** 活动窗格会话的当前工作目录（新标签继承与「复制当前路径」用） */

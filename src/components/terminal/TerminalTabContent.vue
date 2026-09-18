@@ -107,6 +107,7 @@ const tabApi = {
     clear: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'clear'),
     find: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'find'),
     triggerSuggestions: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'triggerSuggestions'),
+    toggleForward: () => rootContainer.value?.invokeOnLeaf(activeLeafId.value, 'toggleForward'),
     sendTextToActivePane: (text: string, execute?: boolean) =>
         rootContainer.value?.sendTextToLeaf(activeLeafId.value, text, execute),
     getActivePaneCwd: async (): Promise<string | null> =>

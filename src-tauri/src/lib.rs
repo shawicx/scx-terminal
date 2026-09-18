@@ -1,5 +1,6 @@
 mod config;
 mod fonts;
+mod forward;
 mod fsutil;
 mod history;
 pub mod proc_cwd;
@@ -27,6 +28,7 @@ pub fn run() {
         .manage(pty::PtyManager::new())
         .manage(ssh::SshManager::new())
         .manage(sftp::SftpManager::new())
+        .manage(forward::ForwardManager::new())
         .invoke_handler(tauri::generate_handler![
             pty::pty_spawn,
             pty::pty_write,
@@ -37,6 +39,9 @@ pub fn run() {
             pty::pty_get_cwd,
             shells::list_shells,
             fonts::list_fonts,
+            forward::forward_start,
+            forward::forward_stop,
+            forward::forward_list,
             fsutil::fs_list_dir,
             fsutil::fs_read_text_file,
             history::history_record,

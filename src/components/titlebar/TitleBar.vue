@@ -316,7 +316,9 @@ function onDragEnd () {
     color: var(--color-muted-foreground);
     cursor: default;
     position: relative;
-    max-width: 200px;
+    /* 定宽（默认即最小宽度），标题超长省略：标题随 shell/目录上报变化时不引起标签宽度抖动 */
+    width: 140px;
+    min-width: 140px;
     transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
 }
 

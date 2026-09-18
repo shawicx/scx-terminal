@@ -11,9 +11,10 @@ use russh::keys::agent::client::AgentClient;
 use russh::keys::{self, ssh_key, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{client, ChannelMsg, Disconnect};
 use tauri::ipc::{Channel, InvokeResponseBody};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::oneshot;
 
+use crate::forward::{ForwardManager, ForwardRegistry, RemoteChannel};
 use crate::pty::PtyDataQueue;
 use crate::secrets::{self, SecretsState};
 
@@ -35,7 +36,8 @@ pub struct SshConnectOptions {
     pub rows: u32,
 }
 
-/// 连接阶段的客户端 Handler：覆写 check_server_key 实现 TOFU 指纹确认
+/// 连接阶段的客户端 Handler：覆写 check_server_key 实现 TOFU 指纹确认；
+/// 覆写 server_channel_open_forwarded_tcpip 把 -R 入站 channel 路由到转发任务
 struct ScxHandler {
     app: AppHandle,
     id: String,
@@ -43,6 +45,8 @@ struct ScxHandler {
     port: u16,
     /// 前端 hostkey 确认应答（ssh_confirm_host_key 发送）；None = 已消费（回调仅一次，防御性 Option）
     hostkey_reply: Option<oneshot::Receiver<bool>>,
+    /// -R 入站 channel 路由表（ForwardManager 注入，跨连接共享）
+    forward_registry: Arc<ForwardRegistry>,
 }
 
 impl client::Handler for ScxHandler {
@@ -73,6 +77,23 @@ impl client::Handler for ScxHandler {
             let _ = keys::known_hosts::learn_known_hosts(&self.host, self.port, &key);
         }
         Ok(accepted)
+    }
+
+    /// -R 入站 forwarded-tcpip channel：按 (会话 id, server 监听端口) 路由到转发任务；
+    /// 无路由时 RemoteChannel 随之 drop，reply 自动以 AdministrativelyProhibited 拒绝
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<client::Msg>,
+        _connected_address: &str,
+        connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        self.forward_registry
+            .dispatch(&self.id, connected_port, RemoteChannel { channel, reply });
+        Ok(())
     }
 }
 
@@ -109,6 +130,73 @@ impl SshSession {
         channel.request_subsystem(true, "sftp").await
             .map_err(|e| format!("failed to request sftp subsystem: {e}"))?;
         Ok(channel.into_stream())
+    }
+
+    /// 在本连接上开 direct-tcpip channel（-L/-D 转发的目标连接）
+    ///
+    /// # Arguments
+    ///
+    /// * `host` - 目标主机（远端侧解析）
+    /// * `port` - 目标端口
+    /// * `originator` / `originator_port` - 发起方地址（本地侧信息，仅透传给 server 记录）
+    ///
+    /// # Returns
+    ///
+    /// direct-tcpip channel；连接已关闭返回错误
+    ///
+    /// # Examples
+    ///
+    /// `let channel = session.open_direct_tcpip("db", 5432, "127.0.0.1", 0).await?;`
+    pub(crate) async fn open_direct_tcpip(
+        &self,
+        host: &str,
+        port: u16,
+        originator: &str,
+        originator_port: u16,
+    ) -> Result<russh::Channel<client::Msg>, String> {
+        let connection = self.connection.lock().await;
+        let handle = connection.as_ref().ok_or_else(|| "ssh session is closed".to_string())?;
+        handle
+            .channel_open_direct_tcpip(
+                host.to_string(),
+                u32::from(port),
+                originator.to_string(),
+                u32::from(originator_port),
+            )
+            .await
+            .map_err(|e| format!("failed to open direct-tcpip channel: {e}"))
+    }
+
+    /// 请求 server 监听端口（-R 注册）；port=0 时返回 server 实际分配端口，显式端口时返回 0
+    ///
+    /// # Returns
+    ///
+    /// u32 server 分配端口（port=0 时有意义）；连接已关闭或 server 拒绝返回错误
+    ///
+    /// # Examples
+    ///
+    /// `let granted = session.tcpip_forward("127.0.0.1", 0).await?;`
+    pub(crate) async fn tcpip_forward(&self, address: &str, port: u16) -> Result<u32, String> {
+        let connection = self.connection.lock().await;
+        let handle = connection.as_ref().ok_or_else(|| "ssh session is closed".to_string())?;
+        handle
+            .tcpip_forward(address.to_string(), u32::from(port))
+            .await
+            .map_err(|e| format!("tcpip-forward request failed: {e}"))
+    }
+
+    /// 取消 server 侧监听（停止 -R 转发时）
+    ///
+    /// # Examples
+    ///
+    /// `session.cancel_tcpip_forward("127.0.0.1", 8080).await?;`
+    pub(crate) async fn cancel_tcpip_forward(&self, address: &str, port: u16) -> Result<(), String> {
+        let connection = self.connection.lock().await;
+        let handle = connection.as_ref().ok_or_else(|| "ssh session is closed".to_string())?;
+        handle
+            .cancel_tcpip_forward(address.to_string(), u32::from(port))
+            .await
+            .map_err(|e| format!("cancel tcpip-forward failed: {e}"))
     }
 
     /// 主动断开：关 channel → 断连接 → 停队列（泵任务随后收到 EOF 并发出 exit 事件）
@@ -292,6 +380,7 @@ async fn authenticate(
 pub async fn ssh_connect(
     app: AppHandle,
     manager: State<'_, SshManager>,
+    forward_manager: State<'_, ForwardManager>,
     secrets: State<'_, SecretsState>,
     data_channel: Channel<InvokeResponseBody>,
     options: SshConnectOptions,
@@ -316,6 +405,7 @@ pub async fn ssh_connect(
         host: options.host.clone(),
         port: options.port,
         hostkey_reply: Some(reply_rx),
+        forward_registry: forward_manager.registry(),
     };
     let address = (options.host.as_str(), options.port);
 
@@ -379,6 +469,9 @@ pub async fn ssh_connect(
             session.exited.store(true, Ordering::Release);
             let _ = app.emit(&format!("ssh:{id_for_event}:exit"), serde_json::Value::Null);
             sessions.lock().unwrap().remove(&id_for_event);
+            // 会话断开：级联停止该连接全部转发（-R 路由注销、监听/数据泵 abort、端口释放）
+            app.state::<ForwardManager>()
+                .stop_all_for_ssh(&app, &id_for_event);
         });
     }
 

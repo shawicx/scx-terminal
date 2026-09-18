@@ -190,6 +190,12 @@ export function useCommands () {
             handler: () => terminalTabApi.current?.triggerSuggestions(),
         })
         register({
+            id: 'toggle-forward', group: 'terminal',
+            label: () => t('forward.menuToggle'),
+            enabled: () => !!terminalTabApi.current,
+            handler: () => terminalTabApi.current?.toggleForward(),
+        })
+        register({
             id: 'copy-current-path', group: 'terminal', hotkeyId: 'copy-current-path',
             label: () => t('commands.copyCurrentPath'),
             enabled: () => !!terminalTabApi.current,

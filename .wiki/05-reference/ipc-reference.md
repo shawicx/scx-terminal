@@ -1,6 +1,6 @@
 # IPC 契约总表（前端 ↔ Rust）
 
-注册处：`src-tauri/src/lib.rs` `invoke_handler`。前端调用方：`src/services/pty.ts`（pty_*）、`src/services/ssh.ts`（ssh_*）、`src/services/secrets.ts`（key_*/cred_*）、`src/services/sftp.ts`（sftp_*）、`src/services/shells.ts`（list_shells）、`src/services/fonts.ts`（list_fonts）、`src/stores/config.ts`（config_*）、`src/main.ts` 与 `SettingsView.vue`（dev_log / config_dir_path / opener 插件）。
+注册处：`src-tauri/src/lib.rs` `invoke_handler`。前端调用方：`src/services/pty.ts`（pty_*）、`src/services/ssh.ts`（ssh_*）、`src/services/secrets.ts`（key_*/cred_*）、`src/services/sftp.ts`（sftp_*）、`src/services/forward.ts`（forward_*）、`src/services/shells.ts`（list_shells）、`src/services/fonts.ts`（list_fonts）、`src/stores/config.ts`（config_*）、`src/main.ts` 与 `SettingsView.vue`（dev_log / config_dir_path / opener 插件）。
 
 ## invoke 命令
 
@@ -25,6 +25,9 @@
 | `sftp_mkdir` / `sftp_rename` / `sftp_remove_file` / `sftp_remove_dir` | JS→Rust | `id` + 路径参数 | `()` | **async** | 文件管理 |
 | `sftp_download` / `sftp_upload` | JS→Rust | `id`、remotePath/localPath、`progress: Channel<TransferProgress>` | `()`（立即返回） | **async**+spawn | 256KB 分块流式，进度 ≥1MB 节流推送，done/error 收尾；`File` 须显式 `shutdown()` |
 | `sftp_close` | JS→Rust | `id` | `()` | **async** | 关会话（面板关闭/会话退出时调用） |
+| `forward_start` | JS→Rust | `options: ForwardOptions`（camelCase：**sshId**/kind=local\|remote\|dynamic/**listenHost**/**listenPort**（0=自动分配并回填）/targetHost?/targetPort?/ruleId?） | `ForwardState` | **async** | 端口转发：-L 本地 TcpListener→direct-tcpip；-R `tcpip_forward` 请求 server 监听（入站 channel 经 `ScxHandler::server_channel_open_forwarded_tcpip` 按端口路由）；-D fast-socks5 no-auth CONNECT→direct-tcpip；监听失败/连接不存在同步报错 |
+| `forward_stop` | JS→Rust | `id` | `()` | **async** | 停止转发（-R 先 `cancel_tcpip_forward`）；监听器与数据泵任务统一 abort |
+| `forward_list` | JS→Rust | `sshId` | `ForwardState[]` | sync | 该连接全部转发状态（面板打开时全量拉取；连接不存在返回空数组） |
 | `pty_spawn` | JS→Rust | `options: SpawnOptions`（camelCase：file/args/env/cwd/cols/rows）、`channel: Channel` | `string`（会话 id，UUID） | **async**（线程池） | 建会话；输出经 channel 二进制流回传 |
 | `pty_write` | JS→Rust | `id: string`、`data: number[]`（字节） | `()` 或错误 | **async** | 写 master；前端吞掉错误（会话可能已退出） |
 | `pty_resize` | JS→Rust | `id`、`cols: u16`、`rows: u16` | `()` | sync | ioctl resize |
@@ -59,6 +62,7 @@
 | `ssh:{id}:exit` | `null` | SSH channel Eof/Close（输出泵末尾发出） |
 | `ssh:{id}:hostkey` | `{fingerprint, keyType, changed}` | KEX 后 TOFU 校验：未知/失配时发出，**前端必须在 invoke 前注册监听**（connect 挂起等应答，事后注册=事件丢失死锁） |
 | `ssh:{id}:close` | （预留，当前不发） | — |
+| `forward:{sshId}:changed` | `ForwardState[]`（该连接完整快照，按 id 排序） | 转发启停/失败/端口回填时发出；SSH 会话断开（exit 路径）级联停止全部转发后发空快照 |
 
 ## 数据通道（非事件、非普通 invoke 返回）
 

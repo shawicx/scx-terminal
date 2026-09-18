@@ -19,6 +19,7 @@ import Slider from '@/components/ui/Slider.vue'
 import Select from '@/components/ui/Select.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ColorSchemePicker from '@/components/settings/ColorSchemePicker.vue'
+import ProfileForwardingsCard from '@/components/settings/ProfileForwardingsCard.vue'
 import { useConfigStore, defaultFirstProfiles, type LocalProfile, type QuickCommand, type SshGroup, type SshProfile, type TerminalProfile } from '@/stores/config'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
@@ -1502,6 +1503,8 @@ async function openConfigDir (): Promise<void> {
                             </div>
                         </div>
 
+                        <ProfileForwardingsCard :profile="selectedSshProfile" />
+
                         <div class="profile-actions">
                             <Button
                                 variant="outline"
@@ -1520,8 +1523,7 @@ async function openConfigDir (): Promise<void> {
                 </div>
             </template>
 
-            <template v-else-if="page === 'quickCommands'">
-                <h2>{{ t('settings.quickCommands') }}</h2>
+            <template v-else-if="page === 'quickCommands'">                <h2>{{ t('settings.quickCommands') }}</h2>
                 <div class="master-detail">
                     <div class="detail-list">
                         <div class="profile-new-group">
@@ -2350,19 +2352,22 @@ async function openConfigDir (): Promise<void> {
     box-shadow: 0 0 0 1px var(--color-ring);
 }
 
+/* 内容三态（名称文本/改名输入框/操作按钮）统一 22px 高：进入/退出编辑不改变行高 */
 .qc-group-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 4px;
-    padding: 8px 6px 2px;
+    padding: 12px 6px 4px;
     border-bottom: 1px solid var(--color-border);
-    margin-bottom: 2px;
+    margin-bottom: 4px;
 }
 
 .qc-group-name {
-    font-size: 11px;
-    color: var(--color-muted-foreground);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 22px;
+    color: var(--color-foreground);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     white-space: nowrap;
@@ -2373,31 +2378,37 @@ async function openConfigDir (): Promise<void> {
 .qc-group-name-input {
     flex: 1;
     min-width: 0;
-    padding: 2px 6px;
+    height: 22px;
+    padding: 0 6px;
     border: 1px solid var(--color-input);
     border-radius: 4px;
     background: transparent;
     color: var(--color-foreground);
-    font-size: 11px;
+    font-size: 12px;
     outline: none;
 }
 
+/* 隐藏但保留占位（visibility 而非 display）避免行高变化；opacity 过渡实现图标淡入淡出 */
 .qc-group-actions {
-    display: none;
+    display: inline-flex;
     gap: 2px;
     flex-shrink: 0;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
 }
 
 .qc-group-header:hover .qc-group-actions {
-    display: inline-flex;
+    visibility: visible;
+    opacity: 1;
 }
 
 .qc-group-action {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     border: none;
     border-radius: 4px;
     background: transparent;
