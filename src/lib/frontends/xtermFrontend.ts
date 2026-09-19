@@ -233,8 +233,16 @@ export class XTermFrontend extends Frontend {
                 return false
             }
 
-            // xterm 对 keydown 与 keyup 都会回调本 handler；必须透传真实事件类型，
-            // 否则 keyup 被当作 keydown 二次喂入热键机会重复匹配（如 ⌘T 开出两个标签）
+            // xterm 对 keydown、keyup、keypress 都会回调本 handler。keypress 不得进热键
+            // 状态机：部分 WKWebView 环境（如 CI 构建的发布包）会对 ⌘ 组合键在 keydown
+            // 之外补发 keypress，若被当作 keydown 二次喂入，会与刚被 macOS 合成 keyup
+            // 清空的状态机再次匹配出同一热键（⌘T 一次按键开出两个标签）。xterm 对带
+            // meta 的 keypress 本就不产生输入，直接放行即可
+            if (event.type === 'keypress') {
+                return true
+            }
+
+            // 必须透传真实事件类型，否则 keyup 被当作 keydown 二次喂入热键机会重复匹配
             const handled = keyboardEventHandler(event.type === 'keyup' ? 'keyup' : 'keydown', event)
             if (!handled) {
                 return false
