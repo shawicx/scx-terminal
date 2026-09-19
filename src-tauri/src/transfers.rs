@@ -848,7 +848,9 @@ mod tests {
     fn remote_and_local_path_join_semantics () {
         assert_eq!(join_remote("/home", "a"), "/home/a");
         assert_eq!(join_remote("/", "a"), "/a");
-        assert_eq!(join_local("/Users/scx", "a"), "/Users/scx/a");
+        // 本地 join 走平台分隔符（Windows 下为反斜杠），远端恒为 '/'
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(join_local("/Users/scx", "a"), format!("/Users/scx{sep}a"));
         assert_eq!(join_local("/", "a"), "/a");
         assert_eq!(base_name("/srv/app.tar.gz"), "app.tar.gz");
         assert_eq!(base_name("/srv/dir/"), "dir");

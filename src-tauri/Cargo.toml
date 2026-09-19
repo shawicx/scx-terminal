@@ -1,6 +1,6 @@
 [package]
 name = "scx-terminal"
-version = "0.1.0"
+version = "0.1.1"
 description = "scx-terminal — a terminal built with Tauri V2"
 edition = "2021"
 
@@ -31,6 +31,8 @@ russh-sftp = "3.0.0"
 fast-socks5 = "1.0"
 tauri-plugin-dialog = "2.7.3"
 tauri-plugin-notification = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [profile.release]
 codegen-units = 1

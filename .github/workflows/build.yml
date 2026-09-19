@@ -26,6 +26,8 @@ jobs:
           args: --latest --strip header
 
       # 先建 draft release，各平台构建用 releaseId 直传产物，避免多 job 并发创建同一 release 撞 already_exists
+      # release_id 必须直接取自创建响应（列表接口存在读后延迟，2026-09-19 v0.1.1 run 曾因此回读 null，
+      # tauri-action 拿到空 releaseId 退回按 tag 查找→draft 查不到→"releaseName not set" 报错）
       - name: Create draft release
         id: create_release
         env:
@@ -33,13 +35,21 @@ jobs:
           NOTES: ${{ steps.git-cliff.outputs.content }}
         run: |
           printf '%s' "$NOTES" > /tmp/release-notes.md
-          gh release create '${{ github.ref_name }}' --draft \
-            --title 'SCX Terminal ${{ github.ref_name }}' \
-            --notes-file /tmp/release-notes.md
-          # draft release 在发布前不关联真实 tag，GET /releases/tags/{tag} 返回 404，需从 release 列表按 tag_name 匹配
-          # jq 字符串字面量必须用双引号（外层 shell 已用双引号包裹，内部转义 \"）
-          release_id=$(gh api 'repos/${{ github.repository }}/releases' \
-            --jq "[.[] | select(.tag_name == \"${{ github.ref_name }}\")][0].id")
+          release_id=$(gh api --method POST "repos/${{ github.repository }}/releases" \
+            -f "tag_name=${{ github.ref_name }}" \
+            -f "name=SCX Terminal ${{ github.ref_name }}" \
+            -f "notes=@/tmp/release-notes.md" \
+            -F draft=true \
+            --jq '.id') || release_id=''
+          # re-run 场景：同名 release 已存在（already_exists）→ 回退列表按 tag_name 匹配
+          if [ -z "$release_id" ] || [ "$release_id" = "null" ]; then
+            release_id=$(gh api "repos/${{ github.repository }}/releases" \
+              --jq "[.[] | select(.tag_name == \"${{ github.ref_name }}\")][0].id")
+          fi
+          if [ -z "$release_id" ] || [ "$release_id" = "null" ]; then
+            echo "::error::release_id not resolvable for tag ${{ github.ref_name }}"
+            exit 1
+          fi
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
   build:
@@ -91,6 +101,10 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # minisign 签名密钥就位后 tauri-action 自动产出 updater 产物（.app.tar.gz/.nsis.zip + .sig）
+          # 并生成/合并多平台 latest.json 上传到 release；draft 转正式发布前客户端不可见（endpoint 404）
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.changelog.outputs.release_id }}
           tagName: ${{ github.ref_name }}

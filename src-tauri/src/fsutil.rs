@@ -151,11 +151,49 @@ pub fn fs_home_dir () -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+    use std::sync::{Mutex, OnceLock};
+
+    /// HOME 是进程级环境变量，改写它的测试必须持此锁串行（Rust 测试默认并行）
+    fn home_lock () -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    /// 临时 HOME 夹具（跨平台）：`.dotfile` + `a.txt` + 空子目录 `dir`
+    fn temp_home () -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("scx-fsutil-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("dir")).unwrap();
+        std::fs::write(dir.join(".dotfile"), "x").unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        dir
+    }
+
+    /// 持锁把 HOME 切到夹具执行闭包，结束后还原原值
+    fn with_fixture_home<T> (f: impl FnOnce(&Path) -> T) -> T {
+        let _guard = home_lock().lock().unwrap();
+        let original = std::env::var("HOME").ok();
+        let home = temp_home();
+        std::env::set_var("HOME", &home);
+        let result = f(&home);
+        if let Some(value) = original {
+            std::env::set_var("HOME", value);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        result
+    }
 
     #[test]
     fn list_dir_returns_entries_and_tilde_expands () {
-        let entries = fs_list_dir_inner("~/Library".into()).unwrap();
-        assert!(entries.iter().any(|e| e.name == "Fonts"));
+        with_fixture_home(|_| {
+            let entries = fs_list_dir_inner("~".into()).unwrap();
+            assert!(entries.iter().any(|e| e.name == "a.txt" && !e.is_dir));
+            assert!(entries.iter().any(|e| e.name == "dir" && e.is_dir));
+            // `~/dir` 经 ~ 展开后可列（夹具中为空目录）
+            assert!(fs_list_dir_inner("~/dir".into()).unwrap().is_empty());
+        });
     }
 
     #[test]
@@ -166,31 +204,41 @@ mod tests {
 
     #[test]
     fn list_dir_includes_hidden_entries () {
-        // $HOME 下普遍存在点文件：Rust 侧全量返回，可见性由前端补全引擎按前缀决定
-        let entries = fs_list_dir_inner("~".into()).unwrap();
-        assert!(entries.iter().any(|e| e.name.starts_with('.')));
+        // Rust 侧全量返回，可见性由前端补全引擎按前缀决定
+        with_fixture_home(|_| {
+            let entries = fs_list_dir_inner("~".into()).unwrap();
+            assert!(entries.iter().any(|e| e.name == ".dotfile"));
+        });
     }
 
     #[test]
     fn read_text_file_returns_none_for_missing () {
-        assert!(fs_read_text_file_inner("~/no-such-file-scx.txt".into()).unwrap().is_none());
+        with_fixture_home(|_| {
+            assert!(fs_read_text_file_inner("~/no-such-file-scx.txt".into()).unwrap().is_none());
+        });
     }
 
     #[test]
     fn browse_dir_lists_entries_with_metadata () {
-        let entries = fs_browse_dir_inner("~/Library".into(), false).unwrap();
-        let fonts = entries.iter().find(|e| e.name == "Fonts").expect("Fonts entry");
-        assert!(fonts.is_dir);
-        assert_eq!(fonts.path, format!("{}/Library/Fonts", std::env::var("HOME").unwrap()));
+        with_fixture_home(|home| {
+            let entries = fs_browse_dir_inner("~".into(), false).unwrap();
+            let txt = entries.iter().find(|e| e.name == "a.txt").expect("a.txt entry");
+            assert!(!txt.is_dir);
+            assert_eq!(txt.path, home.join("a.txt").to_string_lossy().to_string());
+            assert_eq!(txt.size, 1);
+        });
     }
 
     #[test]
     fn browse_dir_hidden_toggle () {
-        // $HOME 下普遍存在点文件（.zshrc 等）：开关控制其可见性
-        let visible = fs_browse_dir_inner("~".into(), false).unwrap();
-        let all = fs_browse_dir_inner("~".into(), true).unwrap();
-        assert!(visible.iter().all(|e| !e.name.starts_with('.')));
-        assert!(all.len() >= visible.len());
+        // 开关控制点文件可见性；显隐集只差夹具里的那一个点文件
+        with_fixture_home(|_| {
+            let visible = fs_browse_dir_inner("~".into(), false).unwrap();
+            let all = fs_browse_dir_inner("~".into(), true).unwrap();
+            assert!(visible.iter().all(|e| !e.name.starts_with('.')));
+            assert!(all.iter().any(|e| e.name == ".dotfile"));
+            assert_eq!(all.len(), visible.len() + 1);
+        });
     }
 
     #[test]
