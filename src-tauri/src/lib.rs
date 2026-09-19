@@ -27,6 +27,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(pty::PtyManager::new())
         .manage(ssh::SshManager::new())
         .manage(sftp::SftpManager::new())

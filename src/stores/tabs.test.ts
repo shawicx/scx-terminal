@@ -121,6 +121,61 @@ describe('tabs store', () => {
         expect(t1.id).not.toBe(t3.id)
     })
 
+    it('marks and clears alerts without touching tabs', () => {
+        const store = useTabsStore()
+        const t1 = store.openTerminalTab()
+        store.markAlert(t1.id)
+        expect(store.alerts[t1.id]).toBe(true)
+        store.clearAlert(t1.id)
+        expect(store.alerts[t1.id]).toBeUndefined()
+    })
+
+    it('activating a tab clears its alert only', () => {
+        const store = useTabsStore()
+        const t1 = store.openTerminalTab()
+        const t2 = store.openTerminalTab()
+        store.markAlert(t1.id)
+        store.markAlert(t2.id)
+        store.activate(t1.id)
+        expect(store.alerts[t1.id]).toBeUndefined()
+        expect(store.alerts[t2.id]).toBe(true)
+    })
+
+    it('closing a tab drops its alert and clears the newly activated neighbor', () => {
+        const store = useTabsStore()
+        const t1 = store.openTerminalTab()
+        const t2 = store.openTerminalTab()
+        const t3 = store.openTerminalTab()
+        store.activate(t2.id)
+        store.markAlert(t1.id)
+        store.markAlert(t2.id)
+        store.markAlert(t3.id)
+        store.closeTab(t2.id)
+        // t2 已删除；接替激活的 t3 正在显示，告警清除；后台 t1 保留
+        expect(store.alerts[t2.id]).toBeUndefined()
+        expect(store.alerts[t3.id]).toBeUndefined()
+        expect(store.alerts[t1.id]).toBe(true)
+    })
+
+    it('closing the last tab leaves no stale alert entries', () => {
+        const store = useTabsStore()
+        const t1 = store.openTerminalTab()
+        store.markAlert(t1.id)
+        store.closeTab(t1.id)
+        expect(Object.keys(store.alerts)).toHaveLength(0)
+    })
+
+    it('closeOtherTabs clears the kept tab alert since it becomes active', () => {
+        const store = useTabsStore()
+        const t1 = store.openTerminalTab()
+        const t2 = store.openTerminalTab()
+        store.activate(t1.id)
+        store.markAlert(t1.id)
+        store.markAlert(t2.id)
+        store.closeOtherTabs(t2.id)
+        expect(store.alerts[t2.id]).toBeUndefined()
+    })
+
     it('opens tabs bound to a profile and falls back to the default profile', () => {
         const config = useConfigStore()
         const bash = localProfile({ id: 'local-bash', name: 'bash', command: '/bin/bash', isDefault: true })

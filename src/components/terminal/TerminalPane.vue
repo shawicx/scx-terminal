@@ -42,6 +42,7 @@ const emit = defineEmits<{
     (e: 'title', title: string): void
     (e: 'closed'): void
     (e: 'requestSplit', direction: 'right' | 'down'): void
+    (e: 'bell'): void
 }>()
 
 const { t } = useI18n()
@@ -523,7 +524,11 @@ async function start (): Promise<void> {
             }
         })
         frontend.title$.subscribe(title => emit('title', title))
-        frontend.bell$.subscribe(() => frontend!.visualBell())
+        frontend.bell$.subscribe(() => {
+            frontend!.visualBell()
+            // 冒泡给所属标签（后台标签据此打未读标记 + 发系统通知）
+            emit('bell')
+        })
         session.destroyed$.subscribe(() => {
             // 注销注册表中的窗格连接（SFTP 标签等消费者据此感知并转后台连接）
             if (registeredSshId) {

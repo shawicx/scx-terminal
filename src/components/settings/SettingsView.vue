@@ -1894,6 +1894,15 @@ async function openConfigDir (): Promise<void> {
                         </div>
                     </div>
                 </div>
+                <div class="settings-section">
+                    <h3 class="settings-section-title">{{ t('settings.notifications') }}</h3>
+                    <div class="settings-card">
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.bellNotifications') }}</Label>
+                            <Switch v-model="store.appearance.bellNotifications" />
+                        </div>
+                    </div>
+                </div>
             </template>
 
             <template v-else-if="page === 'colorSchemes'">

@@ -30,6 +30,7 @@ getrandom = "0.3"
 russh-sftp = "3.0.0"
 fast-socks5 = "1.0"
 tauri-plugin-dialog = "2.7.3"
+tauri-plugin-notification = "2"
 
 [profile.release]
 codegen-units = 1

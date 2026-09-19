@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import SplitContainer from '@/components/split/SplitContainer.vue'
 import {
     listLeaves,
@@ -12,6 +13,7 @@ import {
 import { useTabsStore } from '@/stores/tabs'
 import { fallbackProfile, useConfigStore, type TerminalProfile } from '@/stores/config'
 import { terminalTabApi } from '@/services/terminalTabsApi'
+import { sendBellNotification } from '@/services/notifications'
 
 const props = defineProps<{
     tabId: string
@@ -21,6 +23,7 @@ const props = defineProps<{
 
 const tabs = useTabsStore()
 const config = useConfigStore()
+const { t } = useI18n()
 // 初始叶子继承标签创建时的 cwd（新标签来自上一个活动标签的活动窗格，见 commands.ts）
 const tree = ref<SplitNode>(makeLeaf(tabs.tabs.find(t => t.id === props.tabId)?.cwd ?? undefined))
 const activeLeafId = ref(tree.value.id)
@@ -97,6 +100,24 @@ function navigatePane (delta: 1 | -1) {
     }
 }
 
+/**
+ * @description 后台标签响铃：打未读标记并发送系统通知（前台标签仅窗格内
+ *              visualBell 闪烁，不在此处理）
+ * @returns void
+ *
+ * @example handleLeafBell()
+ *
+ */
+function handleLeafBell () {
+    if (props.tabActive) {
+        return
+    }
+    tabs.markAlert(props.tabId)
+    const tab = tabs.tabs.find(item => item.id === props.tabId)
+    const title = tab?.manualTitle || tab?.title || 'Terminal'
+    void sendBellNotification(props.tabId, title, t('tab.bellBody'))
+}
+
 // expose the active tab's actions to app-level commands (palette / hotkeys)
 const tabApi = {
     split,
@@ -143,6 +164,7 @@ onBeforeUnmount(() => {
             @leaf-title="setPaneTitle"
             @pane-closed="closePane"
             @leaf-split="(id, direction) => split(direction, id)"
+            @leaf-bell="handleLeafBell"
             @tree-updated="updated => (tree = updated)"
         />
     </div>

@@ -173,6 +173,8 @@ const zhCN = {
         fitTile: '平铺',
         backgroundImageChoose: '选择图片',
         backgroundImageClear: '清除',
+        notifications: '通知',
+        bellNotifications: '后台标签响铃时发送系统通知',
         searchPlaceholder: '搜索…',
         customSchemes: '自定义配色',
         customSchemeNew: '新建配色',
@@ -366,6 +368,7 @@ const zhCN = {
         rename: '重命名',
         close: '关闭标签页',
         closeOthers: '关闭其他标签页',
+        bellBody: '终端响铃',
         defaultProfile: '默认',
         colorNames: {
             red: '红',
@@ -552,6 +555,8 @@ const en = {
         fitTile: 'Tile',
         backgroundImageChoose: 'Choose image…',
         backgroundImageClear: 'Clear',
+        notifications: 'Notifications',
+        bellNotifications: 'Send a system notification when a background tab rings the bell',
         searchPlaceholder: 'Search…',
         customSchemes: 'Custom color schemes',
         customSchemeNew: 'New scheme',
@@ -745,6 +750,7 @@ const en = {
         rename: 'Rename',
         close: 'Close tab',
         closeOthers: 'Close other tabs',
+        bellBody: 'Terminal bell',
         defaultProfile: 'Default',
         colorNames: {
             red: 'Red',

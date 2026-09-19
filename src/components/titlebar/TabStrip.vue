@@ -320,6 +320,8 @@ function onDragEnd () {
                     @keydown.space.self.prevent="store.activate(tab.id)"
                 >
                     <span v-if="tab.color" class="tab-color-dot" :style="{ background: tab.color }"></span>
+                    <!-- 后台标签响铃未读标记：激活标签在 store 层已同步清除，无需此处再判 -->
+                    <span v-if="store.alerts[tab.id]" class="tab-alert-dot"></span>
                     <input
                         v-if="renamingId === tab.id"
                         :ref="setRenameInput"
@@ -457,6 +459,18 @@ function onDragEnd () {
     height: 8px;
     border-radius: 50%;
     flex-shrink: 0;
+}
+
+/* 响铃未读标记：右上角小圆点，绝对定位不占 flex 布局宽度（标签 140px 定宽硬约束） */
+.tab-alert-dot {
+    position: absolute;
+    top: 3px;
+    right: 4px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-primary);
+    pointer-events: none;
 }
 
 .tab-rename {

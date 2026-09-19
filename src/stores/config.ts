@@ -115,6 +115,8 @@ export interface AppearanceConfig {
     backgroundOpacity: number
     /** 背景图片填充方式 */
     backgroundFit: 'cover' | 'contain' | 'tile'
+    /** 后台标签响铃时发送系统通知 */
+    bellNotifications: boolean
 }
 
 /** hotkey id -> list of sequences, each sequence a list of keystrokes */
@@ -183,6 +185,7 @@ export function defaultConfig (): ConfigStore {
             backgroundImage: null,
             backgroundOpacity: 0.6,
             backgroundFit: 'cover',
+            bellNotifications: true,
         },
         profiles: [],
         sshGroups: [],

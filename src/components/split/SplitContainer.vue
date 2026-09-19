@@ -17,6 +17,7 @@ const emit = defineEmits<{
     (e: 'leafTitle', id: string, title: string): void
     (e: 'paneClosed', id: string): void
     (e: 'leafSplit', id: string, direction: 'right' | 'down'): void
+    (e: 'leafBell', id: string): void
     (e: 'treeUpdated', tree: SplitNode): void
 }>()
 
@@ -130,6 +131,7 @@ function onSpannerResize (index: number, delta: number) {
             @title="title => emit('leafTitle', node.id, title)"
             @closed="emit('paneClosed', node.id)"
             @request-split="direction => emit('leafSplit', node.id, direction)"
+            @bell="emit('leafBell', node.id)"
         />
     </div>
     <div
@@ -151,6 +153,7 @@ function onSpannerResize (index: number, delta: number) {
                 @leaf-title="(id, title) => emit('leafTitle', id, title)"
                 @pane-closed="id => emit('paneClosed', id)"
                 @leaf-split="(id, direction) => emit('leafSplit', id, direction)"
+                @leaf-bell="id => emit('leafBell', id)"
                 @tree-updated="tree => emit('treeUpdated', tree)"
             />
             <SplitSpanner

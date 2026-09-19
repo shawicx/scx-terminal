@@ -26,6 +26,8 @@ export const useTabsStore = defineStore('tabs', {
     state: () => ({
         tabs: [] as Tab[],
         activeId: null as string | null,
+        /** 后台标签的响铃未读标记（tabId → true；非持久化，切换/关闭标签时清除） */
+        alerts: {} as Record<string, true>,
     }),
     getters: {
         activeTab (state): Tab | null {
@@ -126,9 +128,14 @@ export const useTabsStore = defineStore('tabs', {
                 return
             }
             this.tabs.splice(index, 1)
+            delete this.alerts[id]
             if (this.activeId === id) {
                 const neighbor = this.tabs[Math.min(index, this.tabs.length - 1)]
                 this.activeId = neighbor?.id ?? null
+                // 接替激活的邻居已进入视野，其未读标记一并清除
+                if (neighbor) {
+                    delete this.alerts[neighbor.id]
+                }
             }
             if (this.tabs.length === 0) {
                 this.openTerminalTab()
@@ -137,6 +144,7 @@ export const useTabsStore = defineStore('tabs', {
         activate (id: string) {
             if (this.tabs.some(t => t.id === id)) {
                 this.activeId = id
+                delete this.alerts[id]
             }
         },
         moveTab (from: number, to: number) {
@@ -174,6 +182,26 @@ export const useTabsStore = defineStore('tabs', {
             tab.color = color && tab.color !== color ? color : undefined
         },
         /**
+         * @description 标记后台标签有未读响铃（调用方仅对非激活标签触发；非持久化状态）
+         * @param id 标签 id
+         *
+         * @example markAlert('tab-1')
+         *
+         */
+        markAlert (id: string) {
+            this.alerts[id] = true
+        },
+        /**
+         * @description 清除标签的响铃未读标记
+         * @param id 标签 id
+         *
+         * @example clearAlert('tab-1')
+         *
+         */
+        clearAlert (id: string) {
+            delete this.alerts[id]
+        },
+        /**
          * 关闭除指定标签外的全部标签
          */
         closeOtherTabs (id: string) {
@@ -182,6 +210,8 @@ export const useTabsStore = defineStore('tabs', {
                 return
             }
             this.tabs = [keep]
+            // 被关标签的未读标记随标签消亡；保留标签随即激活，标记同步清除
+            this.alerts = {}
             this.activeId = id
         },
     },
