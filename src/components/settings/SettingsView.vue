@@ -21,6 +21,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ColorSchemePicker from '@/components/settings/ColorSchemePicker.vue'
 import ProfileForwardingsCard from '@/components/settings/ProfileForwardingsCard.vue'
 import { useConfigStore, defaultFirstProfiles, type LocalProfile, type QuickCommand, type SshGroup, type SshProfile, type TerminalProfile } from '@/stores/config'
+import { backgroundPreviewUrl } from '@/services/backgroundImage'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { formatKeystrokeForDisplay } from '@/lib/hotkeys/hotkeys'
@@ -52,6 +53,45 @@ const tabBarPositionOptions = computed(() => [
     { value: 'top', label: t('settings.tabBarTop') },
     { value: 'bottom', label: t('settings.tabBarBottom') },
 ])
+
+const backgroundFitOptions = computed(() => [
+    { value: 'cover', label: t('settings.fitCover') },
+    { value: 'contain', label: t('settings.fitContain') },
+    { value: 'tile', label: t('settings.fitTile') },
+])
+
+/**
+ * @description 选择本地图片为终端背景：dialog 原生选图 → Rust 校验并复制进
+ *              app-data/backgrounds/ → 文件名写配置（App 层 watch 触发应用）
+ * @returns Promise<void>
+ *
+ */
+async function chooseBackgroundImage (): Promise<void> {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const picked = await open({
+        multiple: false,
+        filters: [{ name: t('settings.backgroundImage'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }],
+    })
+    if (typeof picked !== 'string') {
+        return
+    }
+    try {
+        const name = await invoke<string | null>('background_image_set', { path: picked })
+        store.appearance.backgroundImage = name ?? null
+    } catch (error) {
+        console.warn('failed to set background image', error)
+    }
+}
+
+/**
+ * @description 清除终端背景：删 app-data 内图片文件并置空配置
+ * @returns Promise<void>
+ *
+ */
+async function clearBackgroundImage (): Promise<void> {
+    await invoke('background_image_set', { path: null })
+    store.appearance.backgroundImage = null
+}
 
 function bindingFor (hotkeyId: string): string {
     return (store.hotkeys[hotkeyId] ?? [])
@@ -1818,6 +1858,42 @@ async function openConfigDir (): Promise<void> {
                         </div>
                     </div>
                 </div>
+                <div class="settings-section">
+                    <div class="settings-card">
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.backgroundImage') }}</Label>
+                            <div class="background-image-row">
+                                <div
+                                    v-if="backgroundPreviewUrl"
+                                    class="background-image-preview"
+                                    :style="{ backgroundImage: `url(${backgroundPreviewUrl})` }"
+                                ></div>
+                                <Button variant="outline" size="sm" @click="chooseBackgroundImage">
+                                    {{ t('settings.backgroundImageChoose') }}
+                                </Button>
+                                <Button
+                                    v-if="store.appearance.backgroundImage"
+                                    variant="outline"
+                                    size="sm"
+                                    @click="clearBackgroundImage"
+                                >
+                                    {{ t('settings.backgroundImageClear') }}
+                                </Button>
+                            </div>
+                        </div>
+                        <div class="settings-card-row stacked">
+                            <div class="settings-row-head">
+                                <Label>{{ t('settings.backgroundImageOpacity') }}</Label>
+                                <span class="value-hint">{{ Math.round(store.appearance.backgroundOpacity * 100) }}%</span>
+                            </div>
+                            <Slider v-model="store.appearance.backgroundOpacity" :min="0.05" :max="1" :step="0.05" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.backgroundImageFit') }}</Label>
+                            <Select v-model="store.appearance.backgroundFit" :options="backgroundFitOptions" class="w-44" />
+                        </div>
+                    </div>
+                </div>
             </template>
 
             <template v-else-if="page === 'colorSchemes'">
@@ -2111,6 +2187,24 @@ async function openConfigDir (): Promise<void> {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+}
+
+/* 背景图片行：缩略预览 + 选择/清除按钮 */
+.background-image-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.background-image-preview {
+    width: 40px;
+    height: 26px;
+    border-radius: 4px;
+    border: 1px solid var(--color-border);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    flex-shrink: 0;
 }
 
 .settings-section-head {

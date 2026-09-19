@@ -4,7 +4,7 @@
  *              top 模式内嵌 TitleBar（display:contents 不引入额外盒子），bottom 模式
  *              独立成条（圆角/描边/激活下探方向全部翻转），由 App.vue 挂在内容区下方。
  */
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Plus, X } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useTabsStore, type Tab } from '@/stores/tabs'
@@ -13,6 +13,10 @@ import { terminalTabApi } from '@/services/terminalTabsApi'
 import { groupQuickCommandSections } from '@/lib/quickCommands'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
 import DropdownMenu from '@/components/ui/DropdownMenu.vue'
+import { getTabStripWheelDelta, resolveActiveTabScrollLeft } from './tabStripLayout'
+
+/** 「+」按钮占用的横向空间（宽 26 + 左右边距各 2 + flex 间隙 2），滚动活动标签到可见区时右侧需让开 */
+const NEW_TAB_BUTTON_RESERVE = 32
 
 withDefaults(defineProps<{
     /** 标签条位置：top = 内嵌标题栏（默认），bottom = 独立成条置于内容区下方 */
@@ -25,6 +29,77 @@ const config = useConfigStore()
 
 const dragOverIndex = ref<number | null>(null)
 const dragFromIndex = ref<number | null>(null)
+const tabsRegionEl = ref<HTMLElement>()
+
+/**
+ * @description 把纵向/横向滚轮转换成标签栏横向滚动，便于标签溢出后回到被裁切的标签
+ * @param event 标签栏滚轮事件
+ * @returns void
+ *
+ */
+function onTabsWheel (event: WheelEvent): void {
+    const region = tabsRegionEl.value
+    if (!region || region.scrollWidth <= region.clientWidth) {
+        return
+    }
+
+    const delta = getTabStripWheelDelta({
+        deltaX: event.deltaX,
+        deltaY: event.deltaY,
+        deltaMode: event.deltaMode,
+        viewportWidth: region.clientWidth,
+    })
+    if (!delta) {
+        return
+    }
+
+    event.preventDefault()
+    region.scrollLeft += delta
+}
+
+/**
+ * @description 将活动标签滚动到标签栏可视区内；已可见时保持当前位置不变
+ * @returns void
+ *
+ */
+function scrollActiveTabIntoView (): void {
+    const region = tabsRegionEl.value
+    const activeId = store.activeId
+    if (!region || !activeId) {
+        return
+    }
+
+    const tab = region.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(activeId)}"]`)
+    if (!tab) {
+        return
+    }
+
+    const regionRect = region.getBoundingClientRect()
+    const tabRect = tab.getBoundingClientRect()
+    region.scrollLeft = resolveActiveTabScrollLeft({
+        scrollLeft: region.scrollLeft,
+        viewportWidth: region.clientWidth,
+        tabStart: tabRect.left - regionRect.left + region.scrollLeft,
+        tabEnd: tabRect.right - regionRect.left + region.scrollLeft,
+        padding: 4,
+        rightReserve: region.scrollWidth > region.clientWidth ? NEW_TAB_BUTTON_RESERVE : 0,
+    })
+}
+
+watch(() => [store.activeId, store.tabs.length] as const, () => {
+    void nextTick(scrollActiveTabIntoView)
+})
+
+onMounted(() => {
+    scrollActiveTabIntoView()
+    window.addEventListener('resize', scrollActiveTabIntoView)
+    tabsRegionEl.value?.addEventListener('wheel', onTabsWheel, { passive: false })
+})
+
+onBeforeUnmount(() => {
+    window.removeEventListener('resize', scrollActiveTabIntoView)
+    tabsRegionEl.value?.removeEventListener('wheel', onTabsWheel)
+})
 
 /** 标签颜色标记的预设色板 */
 const TAB_COLORS = [
@@ -195,6 +270,7 @@ function onDrop (index: number, event: DragEvent) {
     }
     dragFromIndex.value = null
     dragOverIndex.value = null
+    void nextTick(scrollActiveTabIntoView)
 }
 
 function onAuxClick (id: string, event: MouseEvent) {
@@ -211,7 +287,11 @@ function onDragEnd () {
 
 <template>
     <div class="tab-strip" :class="position === 'bottom' ? 'tab-strip--bottom' : 'tab-strip--inline'">
-        <div class="tabs-region" data-tauri-drag-region>
+        <div
+            ref="tabsRegionEl"
+            class="tabs-region"
+            data-tauri-drag-region
+        >
             <ContextMenu
                 v-for="(tab, index) in store.tabs"
                 :key="tab.id"
@@ -220,6 +300,7 @@ function onDragEnd () {
             >
                 <div
                     class="tab-header"
+                    :data-tab-id="tab.id"
                     :class="{
                         active: tab.id === store.activeId,
                         'drag-over': dragOverIndex === index && dragFromIndex !== null && dragFromIndex !== index,
@@ -261,14 +342,16 @@ function onDragEnd () {
                 </div>
             </ContextMenu>
 
+            <!-- 「+」随标签排布：未溢出时紧跟最后一个标签，溢出后 sticky 吸附标签区右缘 -->
             <DropdownMenu :items="newTabMenuItems" @select="onNewTabMenuSelect">
                 <button class="new-tab-button" :title="t('commands.newTab')">
                     <Plus :size="14" />
                 </button>
             </DropdownMenu>
         </div>
-        <!-- bottom 独立成条时的余白拖拽区（双击缩放同样交给 Tauri 原生 drag-region） -->
-        <div v-if="position === 'bottom'" class="drag-area" data-tauri-drag-region></div>
+
+        <!-- 条尾余白拖拽区（双击缩放交给 Tauri 原生 drag-region） -->
+        <div class="drag-area" data-tauri-drag-region></div>
     </div>
 </template>
 
@@ -295,7 +378,15 @@ function onDragEnd () {
     gap: 2px;
     padding: 0 4px;
     max-width: 70%;
-    overflow: hidden;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+}
+
+.tabs-region::-webkit-scrollbar {
+    display: none;
 }
 
 .tab-strip--bottom .tabs-region {
@@ -414,9 +505,16 @@ function onDragEnd () {
     width: 26px;
     height: 26px;
     align-self: center;
+    flex-shrink: 0;
+    margin-left: 2px;
+    margin-right: 2px;
     border: none;
     border-radius: 6px;
-    background: transparent;
+    /* 未溢出时随流排布（紧跟最后一个标签）；标签溢出后吸附标签区右缘，
+       实底背景盖住从下方滚过的标签 */
+    position: sticky;
+    right: 0;
+    background: var(--color-card);
     color: var(--color-muted-foreground);
     cursor: default;
     transition: background-color 0.25s ease, color 0.25s ease;

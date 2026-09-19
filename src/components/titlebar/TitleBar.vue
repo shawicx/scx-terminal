@@ -40,7 +40,9 @@ const tabsInline = computed(() => config.store.appearance.tabBarPosition !== 'bo
 
         <TabStrip v-if="tabsInline" />
 
-        <div class="drag-area" data-tauri-drag-region></div>
+        <!-- top 模式由 TabStrip 提供"标签（含「+」）→ 拖拽区"的顺序；
+             bottom 模式标签条在内容区下方，标题栏仍需要自己的拖拽区 -->
+        <div v-if="!tabsInline" class="drag-area" data-tauri-drag-region></div>
 
         <!-- 传输中心指示器：运行数徽标 + 失败红点，点击唤起传输面板 -->
         <button

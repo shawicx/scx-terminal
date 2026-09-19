@@ -37,6 +37,8 @@
 | `fs_list_dir` | JS→Rust | `path`（~ 展开） | `FsDirEntry[]`（name/isDir） | sync | 路径补全列目录（错误静默空数组；**点文件全量返回**，可见性由前端引擎按补全前缀决定） |
 | `fs_read_text_file` | JS→Rust | `path` | `string \| null` | sync | 读文本文件（shell 历史导入源；不存在返回 null） |
 | `fs_browse_dir` / `fs_home_dir` | JS→Rust | `path`、`showHidden` / 无 | `FsBrowseEntry[]` / `string` | sync | SFTP 本地栏目录浏览（含 size/mtime，错误显式传播）/ 本地家目录 |
+| `background_image_set` | JS→Rust | `path: Option<String>`（None = 清除） | `Option<String>`（文件名）或错误 | sync | 终端背景图设置：扩展白名单 png/jpg/jpeg/webp/gif/bmp、≤20MB，覆盖式复制进 `app_data_dir/backgrounds/` |
+| `background_image_load` | JS→Rust | 无 | `Option<Vec<u8>>` | sync | 读当前背景图 bytes（未设置/缺失 None，前端降级无图） |
 | `pty_spawn` | JS→Rust | `options: SpawnOptions`（camelCase：file/args/env/cwd/cols/rows）、`channel: Channel` | `string`（会话 id，UUID） | **async**（线程池） | 建会话；输出经 channel 二进制流回传 |
 | `pty_write` | JS→Rust | `id: string`、`data: number[]`（字节） | `()` 或错误 | **async** | 写 master；前端吞掉错误（会话可能已退出） |
 | `pty_resize` | JS→Rust | `id`、`cols: u16`、`rows: u16` | `()` | sync | ioctl resize |

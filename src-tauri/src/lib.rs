@@ -1,3 +1,4 @@
+mod background;
 mod config;
 mod fonts;
 mod forward;
@@ -49,6 +50,8 @@ pub fn run() {
             fsutil::fs_read_text_file,
             fsutil::fs_browse_dir,
             fsutil::fs_home_dir,
+            background::background_image_set,
+            background::background_image_load,
             history::history_record,
             history::history_list,
             history::history_import,

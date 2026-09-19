@@ -658,7 +658,12 @@ export class XTermFrontend extends Frontend {
             foreground: scheme.foreground,
             selectionBackground: scheme.selection ?? '#88888888',
             selectionForeground: scheme.selectionForeground ?? undefined,
-            background: scheme.background,
+            // 背景图激活时 viewport 全透明：半透明洗色由 TerminalPane 背景层的渐变统一
+            // 承担（覆盖整个宿主，含 fit 取整留下的右侧/底部亚网格条带），此处若再着
+            // rgba 会双重叠色且条带漏色；无图时保持不透明方案底色
+            background: this.context.config.appearance.backgroundImage !== null
+                ? '#00000000'
+                : scheme.background,
             cursor: scheme.cursor,
             cursorAccent: scheme.cursorAccent,
         }

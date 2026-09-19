@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronUp, ChevronDown, X } from 'lucide-vue-next'
 import { BaseSession } from '@/lib/sessions/baseSession'
@@ -8,6 +8,7 @@ import { SshSession } from '@/lib/sessions/sshSession'
 import { XTermWebGLFrontend } from '@/lib/frontends/xtermFrontend'
 import { createFrontendContext, readClipboardText, writeClipboardText } from '@/lib/frontendContext'
 import { resolveColorScheme } from '@/lib/colorSchemes'
+import { composeTerminalBackground } from '@/lib/backgroundImage'
 import type { TerminalProfile, SshProfile } from '@/stores/config'
 import { encodeUTF8 } from '@/lib/utils/bytes'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
@@ -23,6 +24,7 @@ import { useTabsStore } from '@/stores/tabs'
 import { useConfigStore } from '@/stores/config'
 import { useThemeStore } from '@/stores/theme'
 import SuggestionMenu from '@/components/terminal/SuggestionMenu.vue'
+import { scheduleSearchFocus } from '@/components/terminal/searchFocus'
 import { SuggestionsController, type SuggestionsUiState } from '@/lib/suggestions/controller'
 import type { QuickCommandSource } from '@/lib/suggestions/suggestionEngine'
 import { importShellHistoryForProfile } from '@/services/history'
@@ -131,7 +133,9 @@ const searchInputEl = ref<HTMLInputElement>()
 
 function openSearch (): void {
     searchOpen.value = true
-    setTimeout(() => searchInputEl.value?.focus())
+    // 右键菜单路径中，reka-ui 会在卸载菜单后的 setTimeout 里恢复触发器焦点；
+    // 等待两轮宏任务再聚焦，确保搜索输入不会被终端抢回焦点。
+    void nextTick(() => scheduleSearchFocus(searchInputEl.value))
 }
 
 function closeSearch (): void {
@@ -158,6 +162,31 @@ function onSearchKeydown (event: KeyboardEvent): void {
         event.preventDefault()
         runSearch(!event.shiftKey)
     }
+}
+
+/**
+ * @description 搜索条打开但焦点意外落回终端时的兜底处理：阻止按键进入 shell，
+ *              并把后续输入上下文交还给搜索框
+ * @param event 窗格内捕获到的键盘事件
+ * @returns void
+ *
+ */
+function onSearchKeydownCapture (event: KeyboardEvent): void {
+    if (!searchOpen.value || event.target === searchInputEl.value) {
+        return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.key === 'Escape') {
+        closeSearch()
+        return
+    }
+    if (event.key === 'Enter') {
+        runSearch(!event.shiftKey)
+        return
+    }
+    searchInputEl.value?.focus({ preventScroll: true })
 }
 
 // ---- 输入建议（自动补全）：controller 每窗格一个，随会话销毁 ----
@@ -406,6 +435,23 @@ const paneColorScheme = computed(() => props.profile.colorScheme
     )
     : null)
 
+// 背景图洗色：铺满整个宿主的半透明方案底色（含 fit 取整的右侧/底部条带——viewport
+// 在背景图激活时全透明，着色统一由背景层渐变承担）；无图时全透明（不参与合成）。
+// 洗色跟档案配色走（窗格级内联变量），非全局
+const terminalBgWash = computed(() => {
+    const appearance = configStore.store.appearance
+    if (appearance.backgroundImage === null) {
+        return 'rgba(0, 0, 0, 0)'
+    }
+    const scheme = paneColorScheme.value
+        ?? resolveColorScheme(
+            appearance.colorScheme,
+            window.matchMedia('(prefers-color-scheme: light)').matches,
+            configStore.store.colorSchemes,
+        )
+    return composeTerminalBackground(scheme.background, appearance.backgroundOpacity)
+})
+
 watch(() => configStore.store, () => {
     frontend?.configure({ terminalColorScheme: paneColorScheme.value })
 }, { deep: true })
@@ -579,6 +625,10 @@ onMounted(() => {
 watch(() => props.active, active => {
     if (!active) {
         suggestions?.close(false)
+        if (searchOpen.value) {
+            searchOpen.value = false
+            frontend?.cancelSearch()
+        }
     }
     if (active && frontend) {
         frontend.reactivate()
@@ -602,9 +652,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div ref="paneRoot" class="terminal-pane">
+    <div ref="paneRoot" class="terminal-pane" @keydown.capture="onSearchKeydownCapture">
         <ContextMenu :items="menuItems" @open="onMenuOpen" @select="onMenuSelect">
-            <div class="terminal-host" :class="{ 'with-forward': forwardOpen }"></div>
+            <div class="terminal-host" :class="{ 'with-forward': forwardOpen }">
+                <!-- 终端背景图层：图片 + 铺满宿主的半透明洗色（渐变层），消费全局
+                     --term-bg-image/size/repeat/position 与窗格级 --term-bg-wash，
+                     置于 xterm 之下（DOM 序即层序） -->
+                <div class="terminal-bg" aria-hidden="true" :style="{ '--term-bg-wash': terminalBgWash }"></div>
+            </div>
         </ContextMenu>
         <ForwardPanel
             v-if="forwardOpen && props.profile.type === 'ssh' && sshSessionId"
@@ -634,6 +689,7 @@ onBeforeUnmount(() => {
                 v-model="searchQuery"
                 class="search-input"
                 :placeholder="t('search.placeholder')"
+                :aria-label="t('search.placeholder')"
                 @input="runSearch(true)"
                 @keydown="onSearchKeydown"
             />
@@ -664,6 +720,21 @@ onBeforeUnmount(() => {
 .terminal-host {
     position: absolute;
     inset: 0;
+}
+
+/* 终端背景图层：双层背景——洗色渐变（100% 拉伸铺满宿主，覆盖 fit 取整的右侧/底部
+   条带）叠在图片层上；xterm 挂载追加在其后（DOM 序即层序），viewport 在背景图激活
+   时全透明，着色统一由洗色层承担 */
+.terminal-bg {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+        linear-gradient(var(--term-bg-wash, rgba(0, 0, 0, 0)), var(--term-bg-wash, rgba(0, 0, 0, 0))),
+        var(--term-bg-image, none);
+    background-size: 100% 100%, var(--term-bg-size, cover);
+    background-repeat: no-repeat, var(--term-bg-repeat, no-repeat);
+    background-position: center, var(--term-bg-position, center);
 }
 
 /* 端口转发面板开启时收缩终端区域（xterm 的 ResizeObserver 自动 refit）；

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConfigStore, type QuickCommand } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
@@ -184,9 +184,6 @@ watch(quickCommandPaletteOpen, value => {
         hotkeys.enable()
     }
 })
-
-onMounted(() => window.addEventListener('resize', close))
-onBeforeUnmount(() => window.removeEventListener('resize', close))
 </script>
 
 <template>

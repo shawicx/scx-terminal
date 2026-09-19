@@ -20,6 +20,7 @@ import { useForwardingStore } from '@/stores/forwarding'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { pendingHostKey, resolvePendingHostKey, pendingKbdChallenge, resolvePendingKbd } from '@/services/sshConnections'
+import { setBackgroundFit, setBackgroundImageFile } from '@/services/backgroundImage'
 
 const store = useTabsStore()
 const config = useConfigStore()
@@ -62,6 +63,10 @@ onMounted(() => {
 
     document.addEventListener('keydown', onKeydown)
     document.addEventListener('keyup', onKeyup)
+
+    // 终端背景图：config 已在 main.ts bootstrap 先行加载，此处直接应用
+    void setBackgroundImageFile(config.store.appearance.backgroundImage)
+    setBackgroundFit(config.store.appearance.backgroundFit)
 })
 
 onBeforeUnmount(() => {
@@ -90,6 +95,15 @@ watch(() => config.store.appearance.language, language => {
         locale.value = navigator.language.startsWith('zh') ? 'zh-CN' : 'en'
     }
 }, { immediate: true })
+
+// 终端背景图：文件变更重载（读 app-data bytes 转 blob URL）；填充方式纯 CSS 变量写入
+watch(() => config.store.appearance.backgroundImage, fileName => {
+    void setBackgroundImageFile(fileName)
+})
+
+watch(() => config.store.appearance.backgroundFit, fit => {
+    setBackgroundFit(fit)
+})
 </script>
 
 <template>

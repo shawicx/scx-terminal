@@ -109,6 +109,12 @@ export interface AppearanceConfig {
     tabBarPosition: 'top' | 'bottom'
     theme: 'default-dark' | 'default-light' | 'auto'
     language: 'auto' | 'zh-CN' | 'en'
+    /** 终端背景图片（app-data/backgrounds/ 内文件名）；null = 未设置 */
+    backgroundImage: string | null
+    /** 终端背景色不透明度（0.05–1，越低背景图越显） */
+    backgroundOpacity: number
+    /** 背景图片填充方式 */
+    backgroundFit: 'cover' | 'contain' | 'tile'
 }
 
 /** hotkey id -> list of sequences, each sequence a list of keystrokes */
@@ -174,6 +180,9 @@ export function defaultConfig (): ConfigStore {
             tabBarPosition: 'top',
             theme: 'auto',
             language: 'auto',
+            backgroundImage: null,
+            backgroundOpacity: 0.6,
+            backgroundFit: 'cover',
         },
         profiles: [],
         sshGroups: [],
