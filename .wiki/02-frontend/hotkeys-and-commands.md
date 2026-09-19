@@ -53,6 +53,7 @@
 ## 已知坑（历史）
 
 - 早期默认序列写作 `'⌘-⌥-ArrowRight'` / `'⌘-Alt-W'`，与 `getKeyName` 的实际产出（macOS 方向键剥 `Arrow` 前缀、Alt 映射为 `⌥`）不一致，窗格导航/关窗格热键永不匹配。已修复：默认值改为解析器产出，且 `config.ts` 加载配置时经 `normalizeHotkeysConfig`（`src/lib/hotkeys/hotkeys.ts`）对旧值做归一化兼容；回归测试锁定默认值与 `getKeyName` 产出一致（`config.test.ts`）。
+- **CI 构建包 ⌘T 双开标签（2026-09-19）**：xterm 5.5 会把 keydown/keyup/**keypress** 都回调进 `attachCustomKeyEventHandler`；CI 构建的 WKWebView 会对 ⌘ 组合键在 keydown 之外**补发 keypress**（本地构建不会，导致本地无法复现）。旧代码把一切非 keyup 事件当 keydown 喂入热键状态机，keypress 与刚被 macOS 合成 keyup 清空的状态机再次匹配出同一热键 → 一次 ⌘T 开出两个标签（⌘W 双关被「空标签自动重开」掩盖）。修复：custom handler 对 `keypress` 直接放行不进状态机（`xtermFrontend.ts`；xterm 对带 meta 的 keypress 本就不产生输入）。调试手法：插桩分支（微任务延迟 dev_log，零扰动按键路径）+ dispatch `build.yml` 出 CI 包实测。
 
 ## Related
 
