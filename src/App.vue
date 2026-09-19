@@ -19,6 +19,7 @@ import { useTransfersStore } from '@/stores/transfers'
 import { useForwardingStore } from '@/stores/forwarding'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
+import { hkLog } from '@/services/hkDebug'
 import { pendingHostKey, resolvePendingHostKey, pendingKbdChallenge, resolvePendingKbd } from '@/services/sshConnections'
 import { setBackgroundFit, setBackgroundImageFile } from '@/services/backgroundImage'
 
@@ -38,12 +39,14 @@ function isEditableTarget (target: EventTarget | null): boolean {
 }
 
 function onKeydown (event: KeyboardEvent): void {
+    hkLog(`doc keydown key=${event.key} code=${event.code} repeat=${event.repeat} target=${event.target instanceof HTMLElement ? `${event.target.tagName}.${event.target.className}` : String(event.target)} active=${document.activeElement instanceof HTMLElement ? `${document.activeElement.tagName}.${document.activeElement.className}` : String(document.activeElement)} skipped=${isEditableTarget(event.target)} ts=${event.timeStamp}`)
     if (!isEditableTarget(event.target)) {
         hotkeys.pushKeyEvent('keydown', event)
     }
 }
 
 function onKeyup (event: KeyboardEvent): void {
+    hkLog(`doc keyup key=${event.key} code=${event.code} target=${event.target instanceof HTMLElement ? `${event.target.tagName}.${event.target.className}` : String(event.target)} skipped=${isEditableTarget(event.target)} ts=${event.timeStamp}`)
     if (!isEditableTarget(event.target)) {
         hotkeys.pushKeyEvent('keyup', event)
     }

@@ -1,0 +1,39 @@
+name: Debug Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.1
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Build macOS arm64 app
+        run: bun tauri build --bundles app --target aarch64-apple-darwin
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ''
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scx-terminal-debug-macos-arm64
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/macos/scx-terminal.app

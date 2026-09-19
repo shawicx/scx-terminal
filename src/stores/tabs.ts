@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { nanoid } from 'nanoid'
+import { hkLog } from '@/services/hkDebug'
 import { useConfigStore } from '@/stores/config'
 
 export type TabType = 'terminal' | 'settings' | 'sftp' | 'forwarding'
@@ -46,6 +47,7 @@ export const useTabsStore = defineStore('tabs', {
          *
          */
         openTerminalTab (profileId?: string, cwd?: string | null): Tab {
+            hkLog(`OPEN-TAB stack=${new Error().stack?.split('\n').slice(1, 4).join(' <- ')}`)
             const config = useConfigStore()
             const profile = profileId
                 ? config.store.profiles.find(p => p.id === profileId)

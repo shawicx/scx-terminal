@@ -5,6 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon, type ISearchOptions } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { openUrl } from '@tauri-apps/plugin-opener'
+import { hkLog } from '@/services/hkDebug'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
@@ -221,6 +222,7 @@ export class XTermFrontend extends Frontend {
         }
 
         this.xterm.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+            hkLog(`xterm-cb type=${event.type} key=${event.key} code=${event.code} repeat=${event.repeat} meta=${event.metaKey} ts=${event.timeStamp}`)
             // let the app-level paste handling own Cmd/Ctrl+V
             if (
                 event.getModifierState('Meta') && event.key.toLowerCase() === 'v' ||

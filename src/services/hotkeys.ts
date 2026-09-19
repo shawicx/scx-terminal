@@ -1,5 +1,6 @@
 import { Subject } from 'rxjs'
 import { platform } from '@/lib/platform'
+import { hkLog } from '@/services/hkDebug'
 import { getKeyName, getKeystrokeName, metaKeyName, altKeyName, type KeyEventData, type Keystroke } from '@/lib/hotkeys/hotkeys'
 
 /**
@@ -43,6 +44,7 @@ export class HotkeysService {
 
     /** Feed a DOM event into the machine ('keydown' | 'keyup' | 'wheel' | 'mouseup' | 'auxclick'). */
     pushKeyEvent (eventName: string, nativeEvent: KeyboardEvent | WheelEvent | MouseEvent): void {
+        hkLog(`machine ${eventName} key=${'key' in nativeEvent ? nativeEvent.key : '?'} ts=${nativeEvent.timeStamp}`)
         const eventData: KeyEventData = {
             ctrlKey: nativeEvent.ctrlKey,
             metaKey: nativeEvent.metaKey,
@@ -204,6 +206,7 @@ export class HotkeysService {
     }
 
     private emitHotkeyOn (id: string): void {
+        hkLog(`EMIT ${id}`)
         this.pressedHotkey = id
         this.hotkey$.next(id)
     }

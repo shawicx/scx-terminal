@@ -5,6 +5,7 @@ import { useConfigStore, type QuickCommand, type TerminalProfile } from '@/store
 import { terminalTabApi } from './terminalTabsApi'
 import { openQuickCommandPalette } from './quickCommandPalette'
 import { hotkeys } from './hotkeysSingleton'
+import { hkLog } from '@/services/hkDebug'
 import { defaultDarkColorScheme, defaultLightColorScheme } from '@/lib/colorSchemes'
 import { writeClipboardText } from '@/lib/frontendContext'
 import { parseQuickCommandParams, previewQuickCommand } from '@/lib/quickCommands'
@@ -266,6 +267,7 @@ export function useCommands () {
     }
 
     function dispatchHotkey (hotkeyId: string): void {
+        hkLog(`DISPATCH ${hotkeyId}`)
         const command = commands.value.find(c => c.hotkeyId === hotkeyId)
         if (command && (!command.enabled || command.enabled())) {
             command.handler()
