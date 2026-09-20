@@ -7,7 +7,7 @@ import { openPath } from '@tauri-apps/plugin-opener'
 import type { Update } from '@tauri-apps/plugin-updater'
 import { nanoid } from 'nanoid'
 import { writeClipboardText } from '@/lib/frontendContext'
-import { Terminal, Palette, Keyboard, Info, FolderOpen, KeyRound, Copy, Plus, Trash2, Upload, Zap, Pencil, X, Globe, Server, SquareTerminal } from 'lucide-vue-next'
+import { Terminal, Palette, Keyboard, Info, FolderOpen, KeyRound, Copy, Plus, Trash2, Upload, Zap, Pencil, X, Globe, Server, SquareTerminal, Layers } from 'lucide-vue-next'
 import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
 import type { Event as TauriEvent, UnlistenFn } from '@tauri-apps/api/event'
 import type { SshKeyMeta, SshKeyInspection } from '@/services/secrets'
@@ -22,7 +22,9 @@ import Select from '@/components/ui/Select.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ColorSchemePicker from '@/components/settings/ColorSchemePicker.vue'
 import ProfileForwardingsCard from '@/components/settings/ProfileForwardingsCard.vue'
-import { useConfigStore, defaultFirstProfiles, type LocalProfile, type QuickCommand, type SshGroup, type SshProfile, type TerminalProfile } from '@/stores/config'
+import { useConfigStore, defaultFirstProfiles, type LocalProfile, type QuickCommand, type SshGroup, type SshProfile, type TabGroup, type TerminalProfile } from '@/stores/config'
+import { useTabsStore } from '@/stores/tabs'
+import { TAB_COLORS } from '@/lib/tabColors'
 import { backgroundPreviewUrl } from '@/services/backgroundImage'
 import { checkForUpdate, installUpdate, type UpdateProgress } from '@/services/updater'
 import { useCommands } from '@/services/commands'
@@ -39,8 +41,9 @@ import type { NewlineMode } from '@/lib/middleware/streamProcessing'
 const { t } = useI18n()
 const config = useConfigStore()
 const store = config.store
+const tabsStore = useTabsStore()
 
-const page = ref<'terminal' | 'profiles' | 'ssh' | 'quickCommands' | 'keys' | 'appearance' | 'colorSchemes' | 'hotkeys' | 'about'>('profiles')
+const page = ref<'terminal' | 'profiles' | 'ssh' | 'quickCommands' | 'keys' | 'appearance' | 'colorSchemes' | 'hotkeys' | 'tabGroups' | 'about'>('profiles')
 
 const { sortedCommands } = useCommands()
 const hotkeyCommands = computed(() => sortedCommands.value.filter(command => command.hotkeyId))
@@ -204,6 +207,7 @@ const pages = computed(() => [
     { id: 'appearance' as const, label: t('settings.appearance'), icon: Globe },
     { id: 'colorSchemes' as const, label: t('settings.colorSchemesPage'), icon: Palette },
     { id: 'hotkeys' as const, label: t('settings.hotkeys'), icon: Keyboard },
+    { id: 'tabGroups' as const, label: t('settings.tabGroupsPage'), icon: Layers },
     { id: 'about' as const, label: t('settings.about'), icon: Info },
 ])
 
@@ -385,6 +389,104 @@ function commitSshGroupRename (): void {
         }
     }
     editingSshGroupId.value = null
+}
+
+// ---- 标签分组页（分组定义管理；运行时归属在 tabs store，TabStrip 渲染 chip） ----
+
+/** 左列表组标题的行内改名状态；null = 无进行中的改名 */
+const editingTabGroupId = ref<string | null>(null)
+const tabGroupNameDraft = ref('')
+/** 两步删除确认：首次点击记录待确认 id，再点同 id 才真删（点其他组即重置） */
+const confirmDeleteTabGroupId = ref<string | null>(null)
+
+/** 各分组当前标签数（只读运行时信息，来自 tabs store） */
+const tabGroupMemberCounts = computed<Record<string, number>>(() => {
+    const counts: Record<string, number> = {}
+    for (const tab of tabsStore.tabs) {
+        if (tab.groupId) {
+            counts[tab.groupId] = (counts[tab.groupId] ?? 0) + 1
+        }
+    }
+    return counts
+})
+
+/**
+ * @description 新建标签分组并直接进入行内改名
+ * @returns void
+ *
+ * @example createTabGroup()
+ *
+ */
+function createTabGroup (): void {
+    const group: TabGroup = {
+        id: `tabgroup-${nanoid(6)}`,
+        name: t('settings.tabGroupsNewGroupName'),
+        persistTabs: false,
+    }
+    store.tabGroups.push(group)
+    startTabGroupRename(group.id)
+}
+
+/**
+ * @description 开始标签分组行内改名（组名写入草稿）
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example startTabGroupRename('tabgroup-a1b2')
+ *
+ */
+function startTabGroupRename (id: string): void {
+    const group = store.tabGroups.find(g => g.id === id)
+    if (!group) {
+        return
+    }
+    editingTabGroupId.value = id
+    tabGroupNameDraft.value = group.name
+}
+
+/**
+ * @description 提交标签分组改名（空名放弃修改）
+ * @returns void
+ *
+ * @example commitTabGroupRename()
+ *
+ */
+function commitTabGroupRename (): void {
+    const id = editingTabGroupId.value
+    const group = store.tabGroups.find(g => g.id === id)
+    if (group) {
+        const name = tabGroupNameDraft.value.trim()
+        if (name) {
+            group.name = name
+        }
+    }
+    editingTabGroupId.value = null
+}
+
+/**
+ * @description 删除标签分组（两步确认）：组定义移除后成员标签回落未分组，
+ *              该组的持久化快照条目随下次 tab_session 写盘自然消失
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example deleteTabGroup('tabgroup-a1b2')
+ *
+ */
+function deleteTabGroup (id: string): void {
+    if (confirmDeleteTabGroupId.value !== id) {
+        confirmDeleteTabGroupId.value = id
+        return
+    }
+    confirmDeleteTabGroupId.value = null
+    const index = store.tabGroups.findIndex(group => group.id === id)
+    if (index === -1) {
+        return
+    }
+    store.tabGroups.splice(index, 1)
+    tabsStore.clearGroupMembership(id)
+    if (editingTabGroupId.value === id) {
+        editingTabGroupId.value = null
+    }
 }
 
 // ---- SSH 密钥链（元数据存加密 SQLite，私钥明文不出库） ----
@@ -2122,6 +2224,61 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                 </div>
             </template>
 
+            <template v-else-if="page === 'tabGroups'">
+                <h2>{{ t('settings.tabGroupsPage') }}</h2>
+                <p class="hint">{{ t('settings.tabGroupsPersistHint') }}</p>
+                <div class="settings-section">
+                    <div class="profile-new-group">
+                        <button class="profile-new-button" @click="createTabGroup">
+                            <Plus :size="14" />
+                            <span>{{ t('settings.tabGroupsNewGroup') }}</span>
+                        </button>
+                    </div>
+                    <p v-if="store.tabGroups.length === 0" class="hint">{{ t('settings.tabGroupsEmptyHint') }}</p>
+                    <div v-for="group in store.tabGroups" :key="group.id" class="settings-card tab-group-row">
+                        <template v-if="editingTabGroupId === group.id">
+                            <input
+                                v-model="tabGroupNameDraft"
+                                class="qc-group-name-input"
+                                @keydown.enter.prevent="commitTabGroupRename"
+                                @keydown.esc.prevent="editingTabGroupId = null"
+                                @blur="commitTabGroupRename"
+                            />
+                        </template>
+                        <template v-else>
+                            <span class="tab-group-name" @dblclick="startTabGroupRename(group.id)">
+                                <span v-if="group.color" class="tab-color-dot" :style="{ background: group.color }"></span>
+                                {{ group.name }}
+                            </span>
+                        </template>
+                        <span class="tab-group-actions">
+                            <button
+                                v-for="item in TAB_COLORS"
+                                :key="item.color"
+                                class="tab-color-dot tab-color-option"
+                                :class="{ selected: group.color === item.color }"
+                                :style="{ background: item.color }"
+                                :title="t(`tab.colorNames.${item.name}`)"
+                                @click="group.color = group.color === item.color ? undefined : item.color"
+                            ></button>
+                        </span>
+                        <label class="tab-group-persist">
+                            <Switch v-model="group.persistTabs" />
+                            <span>{{ t('settings.tabGroupsPersist') }}</span>
+                        </label>
+                        <span class="tab-group-meta">{{ t('settings.tabGroupsMemberCount', { n: tabGroupMemberCounts[group.id] ?? 0 }) }}</span>
+                        <button
+                            class="qc-group-action"
+                            :class="{ danger: confirmDeleteTabGroupId === group.id }"
+                            :title="t('settings.tabGroupsDeleteGroup')"
+                            @click="deleteTabGroup(group.id)"
+                        >
+                            <X :size="12" />
+                        </button>
+                    </div>
+                </div>
+            </template>
+
             <template v-else>
                 <h2>{{ t('settings.about') }}</h2>
                 <div class="about-hero">
@@ -2904,5 +3061,79 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     to {
         opacity: 1;
     }
+}
+
+/* ---- 标签分组页 ---- */
+
+.tab-group-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+}
+
+.tab-group-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 120px;
+    font-size: 13px;
+    color: var(--color-foreground);
+    cursor: default;
+}
+
+.tab-color-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.tab-group-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tab-color-option {
+    width: 14px;
+    height: 14px;
+    padding: 0;
+    border: none;
+    cursor: default;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.tab-color-option:hover {
+    transform: scale(1.15);
+}
+
+.tab-color-option.selected {
+    box-shadow: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-foreground);
+}
+
+.tab-group-persist {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--color-muted-foreground);
+    cursor: default;
+}
+
+.tab-group-meta {
+    font-size: 12px;
+    color: var(--color-muted-foreground);
+    font-variant-numeric: tabular-nums;
+}
+
+.qc-group-action.danger {
+    color: var(--color-destructive);
+}
+
+.qc-group-action.danger:hover {
+    background: color-mix(in oklch, var(--color-destructive) 20%, transparent);
+    color: var(--color-destructive);
 }
 </style>

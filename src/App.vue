@@ -21,6 +21,7 @@ import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { pendingHostKey, resolvePendingHostKey, pendingKbdChallenge, resolvePendingKbd } from '@/services/sshConnections'
 import { setBackgroundFit, setBackgroundImageFile } from '@/services/backgroundImage'
+import { initTabSessionSync, loadTabSession } from '@/services/tabSession'
 
 const store = useTabsStore()
 const config = useConfigStore()
@@ -28,6 +29,9 @@ const transfersStore = useTransfersStore()
 const forwardingStore = useForwardingStore()
 const { registerDefaults, registerProfileCommands, registerQuickCommandCommands, bindHotkeys } = useCommands()
 const { locale } = useI18n()
+
+// 快照同步 watch 必须在 setup 同步流创建（WKWebView 下异步创建不触发，见 config store 注释先例）
+initTabSessionSync(store, config)
 
 function isEditableTarget (target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) {
@@ -50,9 +54,13 @@ function onKeyup (event: KeyboardEvent): void {
 }
 
 onMounted(() => {
-    if (store.tabs.length === 0) {
-        store.openTerminalTab()
-    }
+    // 恢复持久化分组的标签；无恢复内容时保持现状（开首个终端标签）
+    void (async () => {
+        const snapshot = await loadTabSession()
+        if (!store.restoreSession(snapshot) && store.tabs.length === 0) {
+            store.openTerminalTab()
+        }
+    })()
 
     registerDefaults()
     registerProfileCommands(config.store.profiles)

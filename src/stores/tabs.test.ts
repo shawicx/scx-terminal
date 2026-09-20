@@ -65,17 +65,6 @@ describe('tabs store', () => {
         expect(store.activeId).toBe(store.tabs[0]!.id)
     })
 
-    it('moves tabs', () => {
-        const store = useTabsStore()
-        const t1 = store.openTerminalTab()
-        const t2 = store.openTerminalTab()
-        const t3 = store.openTerminalTab()
-        store.moveTab(2, 0)
-        expect(store.tabs.map(t => t.id)).toEqual([t3.id, t1.id, t2.id])
-        store.moveTab(0, 5) // out of range — no-op
-        expect(store.tabs.map(t => t.id)).toEqual([t3.id, t1.id, t2.id])
-    })
-
     it('sets titles', () => {
         const store = useTabsStore()
         const t1 = store.openTerminalTab()
@@ -193,5 +182,96 @@ describe('tabs store', () => {
         // 未知档案 id：不绑定，仍可打开（窗格侧回退默认档案）
         const t3 = store.openTerminalTab('local-missing')
         expect(t3.profileId).toBeUndefined()
+    })
+
+    it('assigns tabs to existing groups only', () => {
+        const config = useConfigStore()
+        const store = useTabsStore()
+        config.store.tabGroups.push({ id: 'g1', name: 'work', persistTabs: false })
+        const t1 = store.openTerminalTab()
+        store.assignTabToGroup(t1.id, 'g1')
+        expect(t1.groupId).toBe('g1')
+        store.assignTabToGroup(t1.id, 'ghost')
+        expect(t1.groupId).toBe('g1')
+        store.assignTabToGroup(t1.id, null)
+        expect(t1.groupId).toBeUndefined()
+    })
+
+    it('moves tabs within a group and appends on chip drop', () => {
+        const config = useConfigStore()
+        const store = useTabsStore()
+        config.store.tabGroups.push({ id: 'g1', name: 'work', persistTabs: false })
+        const a = store.openTerminalTab(undefined, null, 'g1')
+        const b = store.openTerminalTab(undefined, null, 'g1')
+        const c = store.openTerminalTab(undefined, null, 'g1')
+        store.moveTabToGroup(a.id, 'g1', c.id) // a 插到 c 前
+        expect(store.tabs.map(t => t.id)).toEqual([b.id, a.id, c.id])
+        store.moveTabToGroup(a.id, 'g1', null) // 组尾
+        expect(store.tabs.map(t => t.id)).toEqual([b.id, c.id, a.id])
+    })
+
+    it('ungroups tabs dropped on the blank area', () => {
+        const config = useConfigStore()
+        const store = useTabsStore()
+        config.store.tabGroups.push({ id: 'g1', name: 'work', persistTabs: false })
+        const a = store.openTerminalTab(undefined, null, 'g1')
+        const b = store.openTerminalTab()
+        store.moveTabToGroup(a.id, null, null)
+        expect(a.groupId).toBeUndefined()
+        expect(store.tabs.map(t => t.id)).toEqual([b.id, a.id])
+    })
+
+    it('clears group membership without closing tabs', () => {
+        const config = useConfigStore()
+        const store = useTabsStore()
+        config.store.tabGroups.push({ id: 'g1', name: 'work', persistTabs: false })
+        const a = store.openTerminalTab(undefined, null, 'g1')
+        const b = store.openTerminalTab()
+        store.clearGroupMembership('g1')
+        expect(a.groupId).toBeUndefined()
+        expect(store.tabs).toHaveLength(2)
+        expect(store.tabs.map(t => t.id)).toEqual([a.id, b.id])
+    })
+
+    it('closeTab activates the nearest visible neighbor across groups', () => {
+        const config = useConfigStore()
+        const store = useTabsStore()
+        config.store.tabGroups.push({ id: 'g1', name: 'work', persistTabs: false, collapsed: true })
+        const t1 = store.openTerminalTab()
+        store.openTerminalTab(undefined, null, 'g1') // 折叠组成员：closeTab 接替时不可见
+        const t2 = store.openTerminalTab()
+        store.activate(t1.id)
+        store.closeTab(t1.id)
+        expect(store.activeId).toBe(t2.id) // 右邻可见优先，跳过折叠组内的 hidden
+    })
+
+    it('restores persisted groups from a session snapshot', () => {
+        const config = useConfigStore()
+        const store = useTabsStore()
+        config.store.profiles = [localProfile({ id: 'p1' })]
+        config.store.tabGroups.push({ id: 'g1', name: 'work', persistTabs: true })
+        const restored = store.restoreSession({
+            version: 1,
+            entries: [
+                // 悬空组（config 中未定义，如已删除的组）→ 整组跳过
+                { groupId: 'gone', tabs: [{ profileId: 'p1' }] },
+                { groupId: 'g1', tabs: [{ profileId: 'p1', manualTitle: 'build', color: '#e06c75' }, {}] },
+            ],
+        })
+        expect(restored).toBe(true)
+        expect(store.tabs).toHaveLength(2)
+        expect(store.tabs.every(t => t.groupId === 'g1')).toBe(true)
+        expect(store.tabs[0]!.manualTitle).toBe('build')
+        expect(store.tabs[0]!.color).toBe('#e06c75')
+        expect(store.tabs[1]!.profileId).toBe('p1')
+        expect(store.activeId).toBe(store.tabs[0]!.id)
+    })
+
+    it('returns false for empty/invalid snapshots without touching tabs', () => {
+        const store = useTabsStore()
+        const t1 = store.openTerminalTab()
+        expect(store.restoreSession(null)).toBe(false)
+        expect(store.restoreSession({ version: 99, entries: [] })).toBe(false)
+        expect(store.tabs).toEqual([t1])
     })
 })

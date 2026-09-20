@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { nanoid } from 'nanoid'
 import { useConfigStore } from '@/stores/config'
+import { visibleNeighborId } from '@/components/titlebar/tabGroupLayout'
+import { normalizeTabSession } from '@/services/tabSession'
 
 export type TabType = 'terminal' | 'settings' | 'sftp' | 'forwarding'
 
@@ -16,6 +18,8 @@ export interface Tab {
     profileId?: string
     /** 继承的初始工作目录（开标签时来自上一个活动标签；档案显式 cwd 优先于此值） */
     cwd?: string | null
+    /** 所属标签分组 id（见 config.store.tabGroups）；缺省 = 未分组 */
+    groupId?: string
 }
 
 /**
@@ -40,24 +44,27 @@ export const useTabsStore = defineStore('tabs', {
          *              档案显式配置了 cwd 时该值被忽略——同 Tabby getNewTabParameters 语义）
          * @param profileId 配置档案 id（缺省 = 默认档案）
          * @param cwd 继承的初始工作目录（可选）
+         * @param groupId 目标分组 id（可选；组不存在时不归属）
          * @returns Tab 新标签
          *
-         * @example openTerminalTab(undefined, '/tmp')
+         * @example openTerminalTab(undefined, '/tmp', 'g1')
          *
          */
-        openTerminalTab (profileId?: string, cwd?: string | null): Tab {
+        openTerminalTab (profileId?: string, cwd?: string | null, groupId?: string): Tab {
             const config = useConfigStore()
             const profile = profileId
                 ? config.store.profiles.find(p => p.id === profileId)
                 : (config.defaultProfile() ?? undefined)
             // cwd 继承仅对 local 档案有意义（SSH 档案的 cwd 是远端路径概念，忽略）
             const inheritsCwd = cwd && profile?.type === 'local' && !profile.cwd ? cwd : null
+            const group = groupId ? config.store.tabGroups.find(g => g.id === groupId) : undefined
             const tab: Tab = {
                 id: nanoid(),
                 type: 'terminal',
                 title: profile?.name ?? '',
                 profileId: profile?.id,
                 cwd: inheritsCwd,
+                ...(group ? { groupId: group.id } : {}),
             }
             this.tabs.push(tab)
             this.activeId = tab.id
@@ -122,19 +129,31 @@ export const useTabsStore = defineStore('tabs', {
             this.activeId = tab.id
             return tab
         },
+        /**
+         * @description 关闭标签；活动标签被关时接替激活展示序最近的可见邻居（折叠组成员
+         *              不可见，直接跳过——见 visibleNeighborId），全部关空时开新终端标签
+         * @param id 标签 id
+         *
+         * @example closeTab('tab-1')
+         *
+         */
         closeTab (id: string) {
             const index = this.tabs.findIndex(t => t.id === id)
             if (index === -1) {
                 return
             }
+            // 邻居须在 splice 之前算：删除后折叠组归属等展示序信息仍在，但索引语义已变
+            let neighborId: string | null = null
+            if (this.activeId === id) {
+                neighborId = visibleNeighborId(this.tabs, useConfigStore().store.tabGroups, id)
+            }
             this.tabs.splice(index, 1)
             delete this.alerts[id]
             if (this.activeId === id) {
-                const neighbor = this.tabs[Math.min(index, this.tabs.length - 1)]
-                this.activeId = neighbor?.id ?? null
+                this.activeId = neighborId
                 // 接替激活的邻居已进入视野，其未读标记一并清除
-                if (neighbor) {
-                    delete this.alerts[neighbor.id]
+                if (neighborId) {
+                    delete this.alerts[neighborId]
                 }
             }
             if (this.tabs.length === 0) {
@@ -147,12 +166,109 @@ export const useTabsStore = defineStore('tabs', {
                 delete this.alerts[id]
             }
         },
-        moveTab (from: number, to: number) {
-            if (from === to || from < 0 || to < 0 || from >= this.tabs.length || to >= this.tabs.length) {
+        /**
+         * @description 设置标签归属分组；groupId 为 null 清除归属，组不存在时忽略（防悬空）
+         * @param tabId 标签 id
+         * @param groupId 目标组 id 或 null
+         *
+         * @example assignTabToGroup('tab-1', 'g1')
+         *
+         */
+        assignTabToGroup (tabId: string, groupId: string | null) {
+            const tab = this.tabs.find(t => t.id === tabId)
+            if (!tab) {
+                return
+            }
+            if (!groupId) {
+                delete tab.groupId
+                return
+            }
+            if (useConfigStore().store.tabGroups.some(group => group.id === groupId)) {
+                tab.groupId = groupId
+            }
+        },
+        /**
+         * @description 拖拽落点统一入口：把标签移入目标组并落到 beforeTabId 之前；
+         *              beforeTabId 为 null 时组目标追加到数组末尾（组内相对序：末尾即组尾），
+         *              未分组目标同样落到数组末尾
+         * @param tabId 被拖标签 id
+         * @param groupId 目标组 id（null = 未分组）
+         * @param beforeTabId 插入锚点标签 id（null = 该区域末尾）
+         *
+         * @example moveTabToGroup('tab-1', 'g1', 'tab-2') // tab-1 入 g1 组并插到 tab-2 前
+         *
+         */
+        moveTabToGroup (tabId: string, groupId: string | null, beforeTabId: string | null) {
+            const from = this.tabs.findIndex(t => t.id === tabId)
+            if (from === -1) {
                 return
             }
             const [tab] = this.tabs.splice(from, 1)
-            this.tabs.splice(to, 0, tab!)
+            if (!tab) {
+                return
+            }
+            if (groupId) {
+                this.assignTabToGroup(tab.id, groupId)
+            } else {
+                delete tab.groupId
+            }
+            // 锚点缺失（-1，如目标同组重排时自身已被移出）统一直落数组末尾；
+            // 组内相对序是展示序的唯一消费点，末尾即组尾/未分组区尾
+            const anchor = beforeTabId ? this.tabs.findIndex(t => t.id === beforeTabId) : -1
+            this.tabs.splice(anchor === -1 ? this.tabs.length : anchor, 0, tab)
+        },
+        /**
+         * @description 清除某组全部成员的归属（chip「全部移出本组」与设置页删组共用）；
+         *              标签本身保留
+         * @param groupId 组 id
+         *
+         * @example clearGroupMembership('g1')
+         *
+         */
+        clearGroupMembership (groupId: string) {
+            for (const tab of this.tabs) {
+                if (tab.groupId === groupId) {
+                    delete tab.groupId
+                }
+            }
+        },
+        /**
+         * @description 按快照恢复持久化组的终端标签：按 config.store.tabGroups 定义序遍历
+         *              （且仅 persistTabs 组），逐条 openTerminalTab（档案缺失时现语义自动落
+         *              默认档案）后回填 manualTitle/color；恢复了至少一个标签才改 activeId
+         * @param snapshot tab_session_get 返回的任意值
+         * @returns boolean 是否恢复了至少一个标签
+         *
+         * @example restoreSession(await loadTabSession())
+         *
+         */
+        restoreSession (snapshot: unknown): boolean {
+            const entries = normalizeTabSession(snapshot)
+            if (!entries || entries.length === 0) {
+                return false
+            }
+            const config = useConfigStore()
+            let first: Tab | null = null
+            for (const entry of entries) {
+                const group = config.store.tabGroups.find(g => g.id === entry.groupId && g.persistTabs)
+                if (!group) {
+                    continue
+                }
+                for (const item of entry.tabs) {
+                    const tab = this.openTerminalTab(item.profileId, null, group.id)
+                    if (item.manualTitle) {
+                        tab.manualTitle = item.manualTitle
+                    }
+                    if (item.color) {
+                        tab.color = item.color
+                    }
+                    first ??= tab
+                }
+            }
+            if (first) {
+                this.activeId = first.id
+            }
+            return first !== null
         },
         setTitle (id: string, title: string) {
             const tab = this.tabs.find(t => t.id === id)

@@ -56,6 +56,17 @@ export interface SshGroup {
     name: string
 }
 
+/** 标签分组（管理用实体，标签页以 groupId 引用；persistTabs 控制会话恢复是否还原组内标签） */
+export interface TabGroup {
+    id: string
+    name: string
+    /** 组色（7 色预设色板色值，与 Rust TabGroupRecord.color 对应）；缺省 = 无色 */
+    color?: string
+    persistTabs: boolean
+    /** UI 折叠态 */
+    collapsed?: boolean
+}
+
 /** 快捷命令分组（管理用实体，命令以 groupId 单选引用） */
 export interface QuickCommandGroup {
     id: string
@@ -129,6 +140,8 @@ export interface ConfigStore {
     profiles: TerminalProfile[]
     /** SSH 档案分组（SSH 档案以 groupId 引用） */
     sshGroups: SshGroup[]
+    /** 标签分组（标签页以 groupId 引用） */
+    tabGroups: TabGroup[]
     /** 用户自定义配色方案（名称与内置重复时优先于内置生效） */
     colorSchemes: TerminalColorScheme[]
     quickCommands: QuickCommand[]
@@ -142,6 +155,7 @@ export interface ConfigSnapshot {
     hotkeys?: HotkeysConfig
     profiles?: TerminalProfile[]
     sshGroups?: SshGroup[]
+    tabGroups?: TabGroup[]
     colorSchemes?: TerminalColorScheme[]
     quickCommands?: QuickCommand[]
     quickCommandGroups?: QuickCommandGroup[]
@@ -189,6 +203,7 @@ export function defaultConfig (): ConfigStore {
         },
         profiles: [],
         sshGroups: [],
+        tabGroups: [],
         colorSchemes: [],
         quickCommands: [],
         quickCommandGroups: [],
@@ -350,6 +365,7 @@ export interface SavedBaseline {
     quickCommands: Record<string, string>
     quickCommandGroups: Record<string, string>
     sshGroups: Record<string, string>
+    tabGroups: Record<string, string>
     colorSchemes: Record<string, string>
 }
 
@@ -369,6 +385,9 @@ export type FlushOp =
     | { kind: 'sshGroupCreate'; group: SshGroup; saved: string }
     | { kind: 'sshGroupUpdate'; group: SshGroup; saved: string }
     | { kind: 'sshGroupDelete'; id: string }
+    | { kind: 'tabGroupCreate'; group: TabGroup; saved: string }
+    | { kind: 'tabGroupUpdate'; group: TabGroup; saved: string }
+    | { kind: 'tabGroupDelete'; id: string }
     | { kind: 'colorSchemeSave'; name: string; data: TerminalColorScheme; saved: string }
     | { kind: 'colorSchemeDelete'; name: string }
 
@@ -491,6 +510,17 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
         ops.push({ kind: 'sshGroupUpdate', group, saved: stableStringify(group) })
     }
 
+    const tabGroupDiff = diffById(store.tabGroups, saved.tabGroups)
+    for (const id of tabGroupDiff.deletes) {
+        ops.push({ kind: 'tabGroupDelete', id })
+    }
+    for (const group of tabGroupDiff.creates) {
+        ops.push({ kind: 'tabGroupCreate', group, saved: stableStringify(group) })
+    }
+    for (const group of tabGroupDiff.updates) {
+        ops.push({ kind: 'tabGroupUpdate', group, saved: stableStringify(group) })
+    }
+
     // 配色以 name 为身份键（重命名 = 删旧建新，净效果等价）
     for (const name of new Set([...store.colorSchemes.map(scheme => scheme.name), ...Object.keys(saved.colorSchemes)])) {
         const scheme = store.colorSchemes.find(item => item.name === name)
@@ -509,7 +539,7 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
 
 /** 空基线：任何非空 store 与之 diff 都会产出全量导入操作（legacy 迁移用） */
 export function emptyBaseline (): SavedBaseline {
-    return { terminal: '', appearance: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, sshGroups: {}, colorSchemes: {} }
+    return { terminal: '', appearance: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
 }
 
 /**
@@ -529,6 +559,7 @@ export function captureBaseline (store: ConfigStore): SavedBaseline {
         quickCommands: Object.fromEntries(store.quickCommands.map(command => [command.id, stableStringify(command)])),
         quickCommandGroups: Object.fromEntries(store.quickCommandGroups.map(group => [group.id, stableStringify(group)])),
         sshGroups: Object.fromEntries(store.sshGroups.map(group => [group.id, stableStringify(group)])),
+        tabGroups: Object.fromEntries(store.tabGroups.map(group => [group.id, stableStringify(group)])),
         colorSchemes: Object.fromEntries(store.colorSchemes.map(scheme => [scheme.name, stableStringify(scheme)])),
     }
 }
@@ -583,6 +614,15 @@ async function runFlushOp (op: FlushOp): Promise<void> {
         case 'sshGroupDelete':
             await invoke('ssh_group_delete', { id: op.id })
             break
+        case 'tabGroupCreate':
+            await invoke('tab_group_create', { group: op.group })
+            break
+        case 'tabGroupUpdate':
+            await invoke('tab_group_update', { group: op.group })
+            break
+        case 'tabGroupDelete':
+            await invoke('tab_group_delete', { id: op.id })
+            break
         case 'colorSchemeSave':
             await invoke('color_scheme_save', { name: op.name, data: op.data })
             break
@@ -635,6 +675,13 @@ function commitOp (saved: SavedBaseline, op: FlushOp): void {
         case 'sshGroupDelete':
             delete saved.sshGroups[op.id]
             break
+        case 'tabGroupCreate':
+        case 'tabGroupUpdate':
+            saved.tabGroups[op.group.id] = op.saved
+            break
+        case 'tabGroupDelete':
+            delete saved.tabGroups[op.id]
+            break
         case 'colorSchemeSave':
             saved.colorSchemes[op.name] = op.saved
             break
@@ -660,7 +707,7 @@ export const useConfigStore = defineStore('config', () => {
 
     // 持久化 watch 必须在 setup 同步流创建（load() 的 await 之后创建在 WKWebView 实测不触发）；
     // getter 数组 + deep 逐分片建依赖（theme store 同款模式）。loaded 门控在 scheduleSave 内。
-    watch(() => [store.terminal, store.appearance, store.hotkeys, store.profiles, store.sshGroups, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
+    watch(() => [store.terminal, store.appearance, store.hotkeys, store.profiles, store.sshGroups, store.tabGroups, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
 
     async function load (): Promise<void> {
         let userConfig: Record<string, unknown> | null = null

@@ -150,6 +150,21 @@ describe('computeOps (entity-level diff flush)', () => {
         expect(computeOps(config, baseline).map(op => op.kind).sort()).toEqual(['profileUpdate', 'quickCommandDelete', 'sshGroupDelete'])
     })
 
+    it('diffs tabGroups as entity ops', () => {
+        const config = defaultConfig()
+        config.tabGroups.push({ id: 'tg1', name: 'work', persistTabs: true })
+        // 实体为空的基线：diff 产出 tabGroupCreate
+        const emptyEntities = { ...captureBaseline(config), tabGroups: {} }
+        expect(computeOps(config, emptyEntities).map(op => op.kind)).toEqual(['tabGroupCreate'])
+
+        const baseline = captureBaseline(config)
+        config.tabGroups[0]!.name = '工作'
+        config.tabGroups[0]!.collapsed = true
+        expect(computeOps(config, baseline).map(op => op.kind)).toEqual(['tabGroupUpdate'])
+        config.tabGroups.splice(0, 1)
+        expect(computeOps(config, baseline).map(op => op.kind)).toEqual(['tabGroupDelete'])
+    })
+
     it('treats a renamed color scheme as delete-old + save-new', () => {
         const config = defaultConfig()
         config.colorSchemes.push(scheme('solar'))

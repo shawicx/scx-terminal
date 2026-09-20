@@ -29,6 +29,7 @@ const db = {
     quickCommands: new Map<string, Record<string, unknown>>(),
     groups: new Map<string, Record<string, unknown>>(),
     sshGroups: new Map<string, Record<string, unknown>>(),
+    tabGroups: new Map<string, Record<string, unknown>>(),
     colorSchemes: new Map<string, Record<string, unknown>>(),
 }
 
@@ -40,6 +41,7 @@ function resetDb (): void {
     db.quickCommands.clear()
     db.groups.clear()
     db.sshGroups.clear()
+    db.tabGroups.clear()
     db.colorSchemes.clear()
 }
 
@@ -65,6 +67,7 @@ function mockImplementationBody (): void {
                         quickCommands: [...db.quickCommands.values()],
                         quickCommandGroups: [...db.groups.values()],
                         sshGroups: [...db.sshGroups.values()],
+                        tabGroups: [...db.tabGroups.values()],
                     }
                     : null
             case 'config_load_legacy_yaml':
@@ -127,6 +130,14 @@ function mockImplementationBody (): void {
                 }
                 return null
             }
+            case 'tab_group_create':
+            case 'tab_group_update':
+                db.tabGroups.set((a.group as Record<string, unknown>).id as string, a.group as Record<string, unknown>)
+                db.initialized = true
+                return null
+            case 'tab_group_delete':
+                db.tabGroups.delete(a.id as string)
+                return null
             case 'color_scheme_save':
                 db.colorSchemes.set(a.name as string, a.data as Record<string, unknown>)
                 db.initialized = true
@@ -222,6 +233,32 @@ describe('config store diff-flush integration', () => {
         expect(mockInvoke).toHaveBeenCalledWith('ssh_group_delete', { id: 'sg1' })
         expect(db.sshGroups.has('sg1')).toBe(false)
         expect(db.profiles.get('s1')).not.toHaveProperty('groupId')
+    })
+
+    it('flushes tab group CRUD (create/update/delete)', async () => {
+        db.initialized = true
+        setActivePinia(createPinia())
+        const config = useConfigStore()
+        await config.load()
+
+        // 建组 → tab_group_create 落库
+        config.store.tabGroups.push({ id: 'tg1', name: 'work', persistTabs: true })
+        await new Promise(resolve => setTimeout(resolve, 700))
+        expect(mockInvoke).toHaveBeenCalledWith('tab_group_create', { group: { id: 'tg1', name: 'work', persistTabs: true } })
+        expect(db.tabGroups.has('tg1')).toBe(true)
+
+        // 改名 + 折叠 → tab_group_update 落库
+        config.store.tabGroups[0]!.name = '工作'
+        config.store.tabGroups[0]!.collapsed = true
+        await new Promise(resolve => setTimeout(resolve, 700))
+        expect(mockInvoke).toHaveBeenCalledWith('tab_group_update', { group: expect.objectContaining({ id: 'tg1', name: '工作', collapsed: true }) })
+        expect(db.tabGroups.get('tg1')).toMatchObject({ id: 'tg1', name: '工作', collapsed: true })
+
+        // 删组 → tab_group_delete 删库
+        config.store.tabGroups.splice(0, 1)
+        await new Promise(resolve => setTimeout(resolve, 700))
+        expect(mockInvoke).toHaveBeenCalledWith('tab_group_delete', { id: 'tg1' })
+        expect(db.tabGroups.has('tg1')).toBe(false)
     })
 
     it('drops dangling ssh profile groupId on load (sanitize)', async () => {

@@ -48,7 +48,7 @@
 | `pty_get_cwd` | JS→Rust | `id` | `Option<string>` | sync | 进程探测读 shell 子进程当前工作目录（`proc_cwd.rs` FFI `PROC_PIDVNODEPATHINFO`；pid 在 spawn 时拆出存 `Pty.pid`——child 锁被清理线程 wait() 持有，事后不可取） |
 | `list_shells` | JS→Rust | 无 | `ShellInfo[]`（path/name/default/args） | sync | 解析 `/etc/shells` |
 | `list_fonts` | JS→Rust | 无 | `Vec<String>`（字体族名，去重排序） | sync | `font-loader` 枚举系统字体（macOS CoreText）；失败前端回退自由文本输入 |
-| `config_load` | JS→Rust | 无 | `ConfigSnapshot \| null`（terminal/appearance/hotkeys/profiles/colorSchemes/quickCommands/quickCommandGroups；null = 全新库未写过） | sync | 聚合读全量配置（config.db） |
+| `config_load` | JS→Rust | 无 | `ConfigSnapshot \| null`（terminal/appearance/hotkeys/profiles/colorSchemes/quickCommands/quickCommandGroups/sshGroups/tabGroups；null = 全新库未写过） | sync | 聚合读全量配置（config.db） |
 | `config_load_legacy_yaml` | JS→Rust | 无 | `string \| null` | sync | 读旧版 `config.yaml` 原文（一次性迁移源，不存在返回 null） |
 | `config_archive_legacy_yaml` | JS→Rust | 无 | `bool`（是否执行了改名） | sync | 旧 config.yaml → `config.yaml.migrated` |
 | `config_dir_path` | JS→Rust | 无 | `string` | sync | `app_data_dir` 绝对路径（config.db/secrets.db 所在） |
@@ -58,6 +58,8 @@
 | `quick_command_create` / `quick_command_update` / `quick_command_delete` | JS→Rust | `command`（id/name/command/groupId?/autoRun）/ `id` | `()` | sync | 快捷命令增改删；update 保留 sort_order；delete 幂等 |
 | `quick_command_group_create` / `quick_command_group_update` / `quick_command_group_delete` | JS→Rust | `group`（id/name）/ `id` | `()` | sync | 分组增改删；delete 同事务把组内命令降级未分组 |
 | `ssh_group_create` / `ssh_group_update` / `ssh_group_delete` | JS→Rust | `group`（id/name）/ `id` | `()` | sync | SSH 分组增改删；delete 同事务把组内档案的 data JSON 移除 groupId |
+| `tab_group_create` / `tab_group_update` / `tab_group_delete` | JS→Rust | `group`（id/name/color?/persistTabs/collapsed?）/ `id` | `()` | sync | 标签分组增改删（sort_order 服务端取号；delete 幂等，成员归属由前端清理） |
+| `tab_session_get` / `tab_session_set` | JS→Rust | 无 / `value`（快照 JSON） | `Value \| null` / `()` | sync | 标签恢复快照整存整取（settings 表 tabSession 键）；set **不置 initialized 位**（全新库不得抑制 legacy 迁移） |
 | `color_scheme_save` / `color_scheme_delete` | JS→Rust | `name`、`data` / `name` | `()` | sync | 自定义配色按 name upsert / 删（delete 幂等） |
 | `dev_log` | JS→Rust | `message: string` | `()` | sync | 前端日志转发到 stdout |
 

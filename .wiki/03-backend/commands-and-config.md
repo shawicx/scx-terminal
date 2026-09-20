@@ -12,9 +12,9 @@ setup 阶段：`app.remove_menu()`（快捷键归 webview，且防止 ⌘W 直�
 
 ## 配置持久化（`src-tauri/src/config.rs`）
 
-- 数据库：`app_data_dir/config.db`（`~/Library/Application Support/com.scx.terminal/`，与 secrets.db 同目录），rusqlite bundled + WAL，`ConfigState { conn: Mutex<Connection> }` 单连接同步命令（与 secrets.rs 同模式）。表结构经 `PRAGMA user_version` 迁移（v1 = 初始 schema）。
-- 表：`settings`（terminal/appearance 分片 JSON）、`hotkeys`（action → bindings JSON）、`profiles`（id/type/name/is_default/sort_order 身份排序列 + `data` JSON 权威数据）、`color_schemes`（name + data JSON）、`quick_command_groups`、`quick_commands`（真实列）。无外键——级联由命令层事务控制（删组即把组内命令 `group_id` 置 NULL）。
-- 命令面：`config_load`（聚合读全量快照，`meta.initialized` 无标记时返回 `None` = 全新库）+ 实体级 CRUD（`settings_set_section`/`hotkey_set`/`profile_create|update|delete`/`quick_command_*`/`quick_command_group_*`/`color_scheme_save|delete`）。删除幂等（diff flush 重试安全），create/update 对不存在的 id 报错。任何写事务同时维护 `meta.initialized`。
+- 数据库：`app_data_dir/config.db`（`~/Library/Application Support/com.scx.terminal/`，与 secrets.db 同目录），rusqlite bundled + WAL，`ConfigState { conn: Mutex<Connection> }` 单连接同步命令（与 secrets.rs 同模式）。表结构经 `PRAGMA user_version` 迁移（v1 = 初始 schema，v2 = ssh_groups，v3 = tab_groups）。
+- 表：`settings`（terminal/appearance 分片 JSON；`tabSession` 键存标签恢复快照，不入 `SETTINGS_KEYS` 白名单）、`hotkeys`（action → bindings JSON）、`profiles`（id/type/name/is_default/sort_order 身份排序列 + `data` JSON 权威数据）、`color_schemes`（name + data JSON）、`quick_command_groups`、`quick_commands`、`ssh_groups`、`tab_groups`（id/name/color/sort_order/persist_tabs/collapsed 真实列）。无外键——级联由命令层事务控制（删组即把组内命令 `group_id` 置 NULL；删标签分组不动表，成员归属由前端运行时清理）。
+- 命令面：`config_load`（聚合读全量快照，`meta.initialized` 无标记时返回 `None` = 全新库）+ 实体级 CRUD（`settings_set_section`/`hotkey_set`/`profile_create|update|delete`/`quick_command_*`/`quick_command_group_*`/`ssh_group_*`/`tab_group_*`/`color_scheme_save|delete`）+ 标签快照 `tab_session_get|set`（settings 表 `tabSession` 键整存整取）。删除幂等（diff flush 重试安全），create/update 对不存在的 id 报错。除 `tab_session_set` 外任何写事务同时维护 `meta.initialized`——**tab_session_set 特意不置位**：全新库写快照不得抑制 legacy config.yaml 迁移（`config_load` 返回 None 才触发导入）。
 - 旧版一次性迁移：`config_load_legacy_yaml` 读旧手写目录的 `config.yaml` 原文（前端解析合并后全量落库），`config_archive_legacy_yaml` 把它改名 `config.yaml.migrated`（迁移标记 + 天然备份）。
 - `config_dir_path` 返回 `app_data_dir`（设置页"打开配置目录"，opener 作用域已放行该目录）。
 - Rust 侧不理解配置内容——**前端是配置 schema 的唯一所有者**；前端经深度 watch + 500ms 防抖做差异 flush，把本地 mutation 翻译成上述实体级命令（见 [02-frontend/config-and-theming](../02-frontend/config-and-theming.md)）。

@@ -45,6 +45,22 @@ pub struct SshGroupRecord {
     pub name: String,
 }
 
+/// 标签分组记录（collapsed 为 TabStrip 折叠态，随定义持久化）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TabGroupRecord {
+    pub id: String,
+    pub name: String,
+    /// 组色（7 色预设色板色值）；None = 无色
+    pub color: Option<String>,
+    #[serde(default)]
+    pub persist_tabs: bool,
+    #[serde(default)]
+    pub collapsed: bool,
+    #[serde(default)]
+    pub sort_order: i64,
+}
+
 /// 启动聚合读取的全量快照（档案/配色从 data JSON 重建，快捷命令/分组从列重建）
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,6 +73,7 @@ pub struct ConfigSnapshot {
     pub quick_commands: Vec<QuickCommandRecord>,
     pub quick_command_groups: Vec<QuickCommandGroupRecord>,
     pub ssh_groups: Vec<SshGroupRecord>,
+    pub tab_groups: Vec<TabGroupRecord>,
 }
 
 /// 配置库状态：app_data_dir/config.db 的单连接（WAL）
@@ -137,6 +154,20 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             PRAGMA user_version = 2;",
         )
         .map_err(|e| format!("failed to create ssh_groups schema: {e}"))?;
+    }
+    if version < 3 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS tab_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                color TEXT,
+                sort_order INTEGER NOT NULL,
+                persist_tabs INTEGER NOT NULL DEFAULT 0,
+                collapsed INTEGER NOT NULL DEFAULT 0
+            );
+            PRAGMA user_version = 3;",
+        )
+        .map_err(|e| format!("failed to create tab_groups schema: {e}"))?;
     }
     Ok(())
 }
@@ -270,6 +301,27 @@ fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot>, String> 
             .map_err(|e| format!("failed to read ssh groups: {e}"))?;
         for row in rows {
             snapshot.ssh_groups.push(row.map_err(|e| e.to_string())?);
+        }
+    }
+
+    {
+        let mut stmt = conn
+            .prepare("SELECT id, name, color, persist_tabs, collapsed, sort_order FROM tab_groups ORDER BY sort_order")
+            .map_err(|e| format!("failed to read tab groups: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(TabGroupRecord {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                    persist_tabs: row.get::<_, i64>(3)? != 0,
+                    collapsed: row.get::<_, i64>(4)? != 0,
+                    sort_order: row.get(5)?,
+                })
+            })
+            .map_err(|e| format!("failed to read tab groups: {e}"))?;
+        for row in rows {
+            snapshot.tab_groups.push(row.map_err(|e| e.to_string())?);
         }
     }
 
@@ -543,6 +595,79 @@ fn ssh_group_delete_internal(state: &ConfigState, id: &str) -> Result<(), String
     tx.commit().map_err(|e| format!("failed to commit ssh group delete: {e}"))
 }
 
+// ---- 写入：标签分组 ----
+
+/// 新增标签分组
+fn tab_group_create_internal(state: &ConfigState, group: &TabGroupRecord) -> Result<(), String> {
+    let mut conn = state.conn.lock().unwrap();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let sort_order = next_sort_order(&tx, "tab_groups").map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO tab_groups (id, name, color, sort_order, persist_tabs, collapsed) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![group.id, group.name, group.color, sort_order, group.persist_tabs as i64, group.collapsed as i64],
+    )
+    .map_err(|e| format!("failed to create tab group {}: {e}", group.id))?;
+    mark_initialized(&tx).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| format!("failed to commit tab group create: {e}"))
+}
+
+/// 更新标签分组（按 id）
+fn tab_group_update_internal(state: &ConfigState, group: &TabGroupRecord) -> Result<(), String> {
+    let mut conn = state.conn.lock().unwrap();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let changed = tx
+        .execute(
+            "UPDATE tab_groups SET name = ?1, color = ?2, persist_tabs = ?3, collapsed = ?4 WHERE id = ?5",
+            rusqlite::params![group.name, group.color, group.persist_tabs as i64, group.collapsed as i64, group.id],
+        )
+        .map_err(|e| format!("failed to update tab group {}: {e}", group.id))?;
+    if changed == 0 {
+        return Err(format!("tab group not found: {}", group.id));
+    }
+    mark_initialized(&tx).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| format!("failed to commit tab group update: {e}"))
+}
+
+/// 删除标签分组（幂等；成员归属由前端运行时清理）
+fn tab_group_delete_internal(state: &ConfigState, id: &str) -> Result<(), String> {
+    let mut conn = state.conn.lock().unwrap();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM tab_groups WHERE id = ?1", [id])
+        .map_err(|e| format!("failed to delete tab group {id}: {e}"))?;
+    mark_initialized(&tx).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| format!("failed to commit tab group delete: {e}"))
+}
+
+// ---- 写入：标签恢复快照 ----
+
+/// 读取标签恢复快照（settings 表 tabSession 键）
+fn tab_session_get_internal(state: &ConfigState) -> Result<Option<Value>, String> {
+    let conn = state.conn.lock().unwrap();
+    let raw: Option<String> = conn
+        .query_row("SELECT value FROM settings WHERE key = 'tabSession'", [], |row| row.get(0))
+        .optional()
+        .map_err(|e| format!("failed to read tab session: {e}"))?;
+    match raw {
+        Some(raw) => serde_json::from_str(&raw)
+            .map(Some)
+            .map_err(|e| format!("tabSession is corrupted: {e}")),
+        None => Ok(None),
+    }
+}
+
+/// 写标签恢复快照。不置 initialized 位：全新库写快照不得抑制 legacy config.yaml 迁移
+fn tab_session_set_internal(state: &ConfigState, value: &Value) -> Result<(), String> {
+    let mut conn = state.conn.lock().unwrap();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO settings (key, value) VALUES ('tabSession', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [value.to_string()],
+    )
+    .map_err(|e| format!("failed to save tab session: {e}"))?;
+    tx.commit().map_err(|e| format!("failed to commit tab session: {e}"))
+}
+
 // ---- 写入：自定义配色 ----
 
 /// upsert 自定义配色（按 name；重命名由前端按「删旧建新」处理，净效果等价）
@@ -752,6 +877,36 @@ pub fn ssh_group_delete(state: State<'_, ConfigState>, id: String) -> Result<(),
     ssh_group_delete_internal(&state, &id)
 }
 
+/// 新增标签分组
+#[tauri::command]
+pub fn tab_group_create(state: State<'_, ConfigState>, group: TabGroupRecord) -> Result<(), String> {
+    tab_group_create_internal(&state, &group)
+}
+
+/// 更新标签分组
+#[tauri::command]
+pub fn tab_group_update(state: State<'_, ConfigState>, group: TabGroupRecord) -> Result<(), String> {
+    tab_group_update_internal(&state, &group)
+}
+
+/// 删除标签分组
+#[tauri::command]
+pub fn tab_group_delete(state: State<'_, ConfigState>, id: String) -> Result<(), String> {
+    tab_group_delete_internal(&state, &id)
+}
+
+/// 读取标签恢复快照
+#[tauri::command]
+pub fn tab_session_get(state: State<'_, ConfigState>) -> Result<Option<Value>, String> {
+    tab_session_get_internal(&state)
+}
+
+/// 写标签恢复快照
+#[tauri::command]
+pub fn tab_session_set(state: State<'_, ConfigState>, value: Value) -> Result<(), String> {
+    tab_session_set_internal(&state, &value)
+}
+
 /// upsert 自定义配色
 #[tauri::command]
 pub fn color_scheme_save(state: State<'_, ConfigState>, name: String, data: Value) -> Result<(), String> {
@@ -807,7 +962,68 @@ mod tests {
         let state = temp_state("version");
         let conn = state.conn.lock().unwrap();
         let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
+    }
+
+    #[test]
+    fn tab_groups_roundtrip_through_snapshot() {
+        let state = temp_state("tabgroups-read");
+        {
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO tab_groups (id, name, color, sort_order, persist_tabs, collapsed) VALUES ('tg1', 'work', '#61afef', 0, 1, 0)",
+                [],
+            )
+            .unwrap();
+            // load_internal 对未写过配置的库返回 None，需先打初始化标记（等价真实写入路径）
+            mark_initialized(&conn).unwrap();
+        }
+        let snapshot = load_internal(&state).unwrap().unwrap();
+        assert_eq!(snapshot.tab_groups.len(), 1);
+        assert_eq!(snapshot.tab_groups[0].name, "work");
+        assert_eq!(snapshot.tab_groups[0].color.as_deref(), Some("#61afef"));
+        assert!(snapshot.tab_groups[0].persist_tabs);
+        assert!(!snapshot.tab_groups[0].collapsed);
+    }
+
+    #[test]
+    fn tab_group_crud_roundtrip() {
+        let state = temp_state("tabgroups-crud");
+        tab_group_create_internal(&state, &TabGroupRecord {
+            id: "tg1".into(), name: "work".into(), color: Some("#61afef".into()),
+            sort_order: 0, persist_tabs: true, collapsed: false,
+        })
+        .unwrap();
+        tab_group_update_internal(&state, &TabGroupRecord {
+            id: "tg1".into(), name: "ops".into(), color: None,
+            sort_order: 0, persist_tabs: false, collapsed: true,
+        })
+        .unwrap();
+        let snapshot = load_internal(&state).unwrap().unwrap();
+        assert_eq!(snapshot.tab_groups.len(), 1);
+        assert_eq!(snapshot.tab_groups[0].name, "ops");
+        assert!(snapshot.tab_groups[0].color.is_none());
+        assert!(!snapshot.tab_groups[0].persist_tabs);
+        assert!(snapshot.tab_groups[0].collapsed);
+        assert!(tab_group_update_internal(&state, &TabGroupRecord {
+            id: "missing".into(), name: "x".into(), color: None, sort_order: 0, persist_tabs: false, collapsed: false,
+        })
+        .is_err());
+        tab_group_delete_internal(&state, "tg1").unwrap();
+        tab_group_delete_internal(&state, "tg1").unwrap(); // 幂等
+        let snapshot = load_internal(&state).unwrap().unwrap();
+        assert!(snapshot.tab_groups.is_empty());
+    }
+
+    #[test]
+    fn tab_session_roundtrip_without_initialized() {
+        let state = temp_state("tabsession");
+        assert!(tab_session_get_internal(&state).unwrap().is_none());
+        tab_session_set_internal(&state, &serde_json::json!({ "version": 1, "entries": [] })).unwrap();
+        let value = tab_session_get_internal(&state).unwrap().unwrap();
+        assert_eq!(value["version"], 1);
+        // 关键不变量：写快照不得置 initialized 位，否则全新库会跳过 legacy config.yaml 迁移
+        assert!(load_internal(&state).unwrap().is_none());
     }
 
     #[test]
