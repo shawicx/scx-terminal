@@ -22,9 +22,6 @@ use uuid::Uuid;
 
 const MAX_CHUNK: usize = 100 * 1024;
 const MAX_DELTA: usize = MAX_CHUNK * 5;
-/// Partial UTF-8 sequences held back from the stream are flushed once no
-/// new output arrived for this long (mirrors the 500ms debounce in Tabby).
-const SPLITTER_FLUSH_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,10 +86,6 @@ impl Utf8Splitter {
     fn flush(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.internal)
     }
-
-    fn has_partial(&self) -> bool {
-        !self.internal.is_empty()
-    }
 }
 
 struct QueueState {
@@ -154,11 +147,24 @@ impl PtyDataQueue {
         maybe_emit(&mut state, &self.channel);
     }
 
-    /// Flushes a stuck partial UTF-8 sequence once output has settled.
-    /// Returns true if anything was sent.
-    pub(crate) fn flush_stale_partial(&self) -> bool {
+    /// Releases a partial UTF-8 sequence held by the splitter. Called ONLY at
+    /// EOF (the child will never write more, so an incomplete tail renders as
+    /// a replacement character instead of being dropped). Never flush while
+    /// the stream is alive: a backpressure pause can park a partial for
+    /// seconds while output continues later, and emitting it early splits the
+    /// character — the frontend decodes each chunk independently, so both the
+    /// orphaned lead bytes and the delayed continuation turn into U+FFFD tofu.
+    ///
+    /// # Returns
+    ///
+    /// true if anything was sent
+    ///
+    /// # Examples
+    ///
+    /// reader 线程读到 EOF 后调用：`queue.flush_partial(); queue.close();`
+    pub(crate) fn flush_partial(&self) -> bool {
         let mut state = self.state.lock().unwrap();
-        if state.closed || !state.splitter.has_partial() || state.last_emit.elapsed() < SPLITTER_FLUSH_DELAY {
+        if state.closed {
             return false;
         }
         let remainder = state.splitter.flush();
@@ -166,6 +172,7 @@ impl PtyDataQueue {
             return false;
         }
         state.last_emit = Instant::now();
+        state.delta += remainder.len();
         let _ = self.channel.send(InvokeResponseBody::Raw(remainder));
         true
     }
@@ -381,21 +388,10 @@ pub async fn pty_spawn(
                 }
             }
             reader_done.store(true, Ordering::Release);
+            // EOF：最后一段残缺序列在这里放行（存活期间绝不中途冲刷，见 flush_partial）
+            queue.flush_partial();
             queue.close();
             let _ = app.emit(&format!("pty:{id}:close"), ());
-        });
-    }
-
-    // Splitter flush thread: releases a partial UTF-8 sequence stuck at a
-    // chunk boundary once output has been quiet for a while.
-    {
-        let queue = queue.clone();
-        let reader_done = pty.reader_done.clone();
-        std::thread::spawn(move || {
-            while !reader_done.load(Ordering::Acquire) {
-                std::thread::sleep(Duration::from_millis(250));
-                queue.flush_stale_partial();
-            }
         });
     }
 

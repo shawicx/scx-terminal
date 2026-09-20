@@ -409,16 +409,18 @@ function onDragEnd () {
     color: var(--color-muted-foreground);
     cursor: default;
     position: relative;
-    /* 定宽（默认即最小宽度），标题超长省略：标题随 shell/目录上报变化时不引起标签宽度抖动 */
-    width: 140px;
-    min-width: 140px;
-    transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+    /* 定宽（默认即最小宽度），标题超长省略：标题随 shell/目录上报变化时不引起标签宽度抖动；激活态 200px 见 .tab-header.active */
+    width: 160px;
+    min-width: 160px;
+    transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease, width 0.25s ease;
 }
 
-/* 激活标签与内容区连通：背景取内容区底色，侧/顶描边 + 下探 1px 盖住标题栏底边线 */
+/* 激活标签与内容区连通：背景取内容区底色，侧/顶描边 + 下探 1px 盖住标题栏底边线；加宽至 200px 突出当前标签 */
 .tab-header.active {
     height: 31px;
     margin-bottom: -1px;
+    width: 200px;
+    min-width: 200px;
     background: var(--color-background);
     color: var(--color-foreground);
     border-color: var(--color-border);
@@ -461,7 +463,7 @@ function onDragEnd () {
     flex-shrink: 0;
 }
 
-/* 响铃未读标记：右上角小圆点，绝对定位不占 flex 布局宽度（标签 140px 定宽硬约束） */
+/* 响铃未读标记：右上角小圆点，绝对定位不占 flex 布局宽度（标签定宽硬约束） */
 .tab-alert-dot {
     position: absolute;
     top: 3px;

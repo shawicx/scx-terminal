@@ -744,7 +744,6 @@ pub async fn ssh_connect(
     }
 
     // 输出泵：channel 消息 → 背压队列 → 前端；EOF/Close 后发 exit 事件并自清理
-    let exited_flag = session.exited.clone();
     {
         let app = app.clone();
         let id_for_event = id.clone();
@@ -763,22 +762,14 @@ pub async fn ssh_connect(
                     Some(_) => {}
                 }
             }
+            // EOF：最后一段残缺序列在这里放行（存活期间绝不中途冲刷，见 pty.rs flush_partial）
+            session.queue.flush_partial();
             session.exited.store(true, Ordering::Release);
             let _ = app.emit(&format!("ssh:{id_for_event}:exit"), serde_json::Value::Null);
             sessions.lock().unwrap().remove(&id_for_event);
             // 会话断开：级联停止该连接全部转发（-R 路由注销、监听/数据泵 abort、端口释放）
             app.state::<ForwardManager>()
                 .stop_all_for_ssh(&app, &id_for_event);
-        });
-    }
-
-    // 跨块 UTF-8 残尾的定期冲刷（会话退出后线程结束）
-    {
-        let queue = queue.clone();
-        let exited = exited_flag;
-        std::thread::spawn(move || while !exited.load(Ordering::Acquire) {
-            std::thread::sleep(Duration::from_millis(250));
-            queue.flush_stale_partial();
         });
     }
 
