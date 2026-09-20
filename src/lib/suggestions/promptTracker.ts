@@ -5,11 +5,15 @@
  */
 
 export interface BufferLineAccess {
+    /** 行文本（trimRight 时去行尾空白）；y 为 buffer 绝对行号（非视口相对） */
     getLineText (y: number, trimRight: boolean): string | null
     /** 行 [0, endX) 列区间的字符文本（不 trim）：cursorX 是列数而偏移按字符计，宽字符须经此换算 */
     getLineTextRange (y: number, endX: number): string | null
+    /** 该行是否为上一行的 soft-wrap 延续；y 为 buffer 绝对行号 */
     isWrapped (y: number): boolean
+    /** 光标所在列 */
     readonly cursorX: number
+    /** 光标所在 buffer 绝对行号（xterm 的 buffer.cursorY 是视口相对行，须加 baseY 换算） */
     readonly cursorY: number
 }
 

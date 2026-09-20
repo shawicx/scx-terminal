@@ -12,6 +12,7 @@ import { encodeUTF8 } from '@/lib/utils/bytes'
 import { generatePalette } from '@/lib/generatePalette'
 import type { TerminalColorScheme } from '@/lib/colorSchemes'
 import { readLogicalLine, type BufferLineAccess, type LogicalLine } from '@/lib/suggestions/promptTracker'
+import { absoluteCursorRow, cursorViewportRow } from './bufferRows'
 import { BaseTerminalProfile, Frontend, FrontendContext, SearchOptions, SearchState } from './frontend'
 import './xterm.css'
 import '@xterm/xterm/css/xterm.css'
@@ -535,7 +536,7 @@ export class XTermFrontend extends Frontend {
             getLineTextRange: (y, endX) => buffer.getLine(y)?.translateToString(false, 0, endX) ?? null,
             isWrapped: y => buffer.getLine(y)?.isWrapped ?? false,
             get cursorX () { return buffer.cursorX },
-            get cursorY () { return buffer.cursorY },
+            get cursorY () { return absoluteCursorRow(buffer) },
         }
     }
 
@@ -557,7 +558,7 @@ export class XTermFrontend extends Frontend {
      */
     readLogicalLineAbove (up: number): LogicalLine | null {
         const buffer = this.xterm.buffer.active
-        let y = buffer.cursorY
+        let y = absoluteCursorRow(buffer)
         const lineStart = (start: number): number => {
             let at = start
             while (at > 0 && buffer.getLine(at)?.isWrapped) {
@@ -596,7 +597,7 @@ export class XTermFrontend extends Frontend {
      */
     readCursorPrefix (): string | null {
         const buffer = this.xterm.buffer.active
-        const line = buffer.getLine(buffer.cursorY)
+        const line = buffer.getLine(absoluteCursorRow(buffer))
         return line ? line.translateToString(true, 0, buffer.cursorX) : null
     }
 
@@ -613,7 +614,7 @@ export class XTermFrontend extends Frontend {
         const buffer = this.xterm.buffer.active
         const cellWidth = host.clientWidth / Math.max(this.xterm.cols, 1)
         const cellHeight = host.clientHeight / Math.max(this.xterm.rows, 1)
-        const viewportRow = Math.min(Math.max(buffer.cursorY - buffer.viewportY, 0), Math.max(this.xterm.rows - 1, 0))
+        const viewportRow = cursorViewportRow(buffer, this.xterm.rows)
         return {
             left: buffer.cursorX * cellWidth,
             top: (viewportRow + 1) * cellHeight,
