@@ -22,9 +22,9 @@ import Select from '@/components/ui/Select.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ColorSchemePicker from '@/components/settings/ColorSchemePicker.vue'
 import ProfileForwardingsCard from '@/components/settings/ProfileForwardingsCard.vue'
-import { useConfigStore, defaultFirstProfiles, type LocalProfile, type QuickCommand, type SshGroup, type SshProfile, type TabGroup, type TerminalProfile } from '@/stores/config'
+import TabGroupFormDialog from '@/components/settings/TabGroupFormDialog.vue'
+import { useConfigStore, defaultFirstProfiles, type LocalProfile, type QuickCommand, type SshProfile, type TabGroup, type TerminalProfile } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
-import { TAB_COLORS } from '@/lib/tabColors'
 import { backgroundPreviewUrl } from '@/services/backgroundImage'
 import { checkForUpdate, installUpdate, type UpdateProgress } from '@/services/updater'
 import { useCommands } from '@/services/commands'
@@ -311,24 +311,111 @@ const sshGroupModel = computed({
     },
 })
 
-/** 左列表组标题的行内改名状态；null = 无进行中的改名 */
-const editingSshGroupId = ref<string | null>(null)
-const sshGroupNameDraft = ref('')
+// ---- 分组名称弹窗（SSH 分组与快捷命令分组共用：两者均仅名称字段；确认才落库，新建不再先插默认名） ----
+type GroupNameDialogKind = 'ssh-create' | 'ssh-rename' | 'qc-create' | 'qc-rename'
+
+/** null = 弹窗关闭；打开时携带来源、目标组与名称草稿 */
+const groupNameDialog = ref<{ kind: GroupNameDialogKind, groupId: string | null, draft: string } | null>(null)
+
+/** 弹窗标题随来源切换（新建/重命名 × SSH/快捷命令） */
+const groupNameDialogTitle = computed(() => {
+    const dialog = groupNameDialog.value
+    if (!dialog) {
+        return ''
+    }
+    if (dialog.kind === 'ssh-create') {
+        return t('settings.sshNewGroup')
+    }
+    if (dialog.kind === 'ssh-rename') {
+        return t('settings.sshRenameGroup')
+    }
+    return dialog.kind === 'qc-create' ? t('settings.quickCommandNewGroup') : t('settings.quickCommandRenameGroup')
+})
 
 /**
- * @description 新建 SSH 分组并直接进入行内改名
+ * @description 提交分组名称弹窗：按来源创建新组或写回组名（空名由确认按钮禁用兜底）
  * @returns void
  *
- * @example createSshGroup()
+ * @example commitGroupNameDialog()
  *
  */
-function createSshGroup (): void {
-    const group: SshGroup = {
-        id: `sshgroup-${nanoid(6)}`,
-        name: t('settings.sshNewGroupName'),
+function commitGroupNameDialog (): void {
+    const dialog = groupNameDialog.value
+    if (!dialog) {
+        return
     }
-    store.sshGroups.push(group)
-    startSshGroupRename(group.id)
+    const name = dialog.draft.trim()
+    if (!name) {
+        return
+    }
+    groupNameDialog.value = null
+    if (dialog.kind === 'ssh-create') {
+        store.sshGroups.push({ id: `sshgroup-${nanoid(6)}`, name })
+    } else if (dialog.kind === 'qc-create') {
+        store.quickCommandGroups.push({ id: `qcgroup-${nanoid(6)}`, name })
+    } else if (dialog.kind === 'ssh-rename') {
+        const group = store.sshGroups.find(g => g.id === dialog.groupId)
+        if (group) {
+            group.name = name
+        }
+    } else {
+        const group = store.quickCommandGroups.find(g => g.id === dialog.groupId)
+        if (group) {
+            group.name = name
+        }
+    }
+}
+
+/**
+ * @description 打开 SSH 分组新建弹窗
+ * @returns void
+ *
+ * @example openCreateSshGroup()
+ *
+ */
+function openCreateSshGroup (): void {
+    groupNameDialog.value = { kind: 'ssh-create', groupId: null, draft: '' }
+}
+
+/**
+ * @description 打开 SSH 分组重命名弹窗（预填当前组名）
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example openRenameSshGroup('sshgroup-a1b2')
+ *
+ */
+function openRenameSshGroup (id: string): void {
+    const group = store.sshGroups.find(g => g.id === id)
+    if (group) {
+        groupNameDialog.value = { kind: 'ssh-rename', groupId: id, draft: group.name }
+    }
+}
+
+/**
+ * @description 打开快捷命令分组新建弹窗
+ * @returns void
+ *
+ * @example openCreateQuickCommandGroup()
+ *
+ */
+function openCreateQuickCommandGroup (): void {
+    groupNameDialog.value = { kind: 'qc-create', groupId: null, draft: '' }
+}
+
+/**
+ * @description 打开快捷命令分组重命名弹窗（预填当前组名）
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example openRenameQuickCommandGroup('qcgroup-a1b2')
+ *
+ */
+function openRenameQuickCommandGroup (id: string): void {
+    const group = store.quickCommandGroups.find(g => g.id === id)
+    if (group) {
+        groupNameDialog.value = { kind: 'qc-rename', groupId: id, draft: group.name }
+    }
 }
 
 /**
@@ -350,54 +437,29 @@ function deleteSshGroup (id: string): void {
             delete profile.groupId
         }
     }
-    if (editingSshGroupId.value === id) {
-        editingSshGroupId.value = null
-    }
 }
 
 /**
- * @description 开始 SSH 分组行内改名（组名写入草稿）
+ * @description 删除 SSH 分组（经确认弹窗；组内档案降级默认分组）
  * @param id 分组 id
  * @returns void
  *
- * @example startSshGroupRename('sshgroup-a1b2')
+ * @example confirmDeleteSshGroup('sshgroup-a1b2')
  *
  */
-function startSshGroupRename (id: string): void {
-    const group = store.sshGroups.find(g => g.id === id)
-    if (!group) {
-        return
-    }
-    editingSshGroupId.value = id
-    sshGroupNameDraft.value = group.name
-}
-
-/**
- * @description 提交 SSH 分组改名（空名放弃修改）
- * @returns void
- *
- * @example commitSshGroupRename()
- *
- */
-function commitSshGroupRename (): void {
-    const id = editingSshGroupId.value
+function confirmDeleteSshGroup (id: string): void {
     const group = store.sshGroups.find(g => g.id === id)
     if (group) {
-        const name = sshGroupNameDraft.value.trim()
-        if (name) {
-            group.name = name
-        }
+        confirmAction(t('settings.deleteConfirmBody', { name: group.name }), () => deleteSshGroup(id))
     }
-    editingSshGroupId.value = null
 }
 
 // ---- 标签分组页（分组定义管理；运行时归属在 tabs store，TabStrip 渲染 chip） ----
 
-/** 左列表组标题的行内改名状态；null = 无进行中的改名 */
-const editingTabGroupId = ref<string | null>(null)
-const tabGroupNameDraft = ref('')
-/** 两步删除确认：首次点击记录待确认 id，再点同 id 才真删（点其他组即重置） */
-const confirmDeleteTabGroupId = ref<string | null>(null)
+/** 分组表单弹窗开合 */
+const tabGroupDialogOpen = ref(false)
+/** 表单编辑中的分组；null = 新建 */
+const editingTabGroup = ref<TabGroup | null>(null)
 
 /** 各分组当前标签数（只读运行时信息，来自 tabs store） */
 const tabGroupMemberCounts = computed<Record<string, number>>(() => {
@@ -411,60 +473,76 @@ const tabGroupMemberCounts = computed<Record<string, number>>(() => {
 })
 
 /**
- * @description 新建标签分组并直接进入行内改名
+ * @description 打开分组新建弹窗（空表单）
  * @returns void
  *
- * @example createTabGroup()
+ * @example openCreateTabGroup()
  *
  */
-function createTabGroup (): void {
-    const group: TabGroup = {
-        id: `tabgroup-${nanoid(6)}`,
-        name: t('settings.tabGroupsNewGroupName'),
-        persistTabs: false,
-    }
-    store.tabGroups.push(group)
-    startTabGroupRename(group.id)
+function openCreateTabGroup (): void {
+    editingTabGroup.value = null
+    tabGroupDialogOpen.value = true
 }
 
 /**
- * @description 开始标签分组行内改名（组名写入草稿）
- * @param id 分组 id
+ * @description 打开分组编辑弹窗（预填当前组）
+ * @param group 目标分组
  * @returns void
  *
- * @example startTabGroupRename('tabgroup-a1b2')
+ * @example openEditTabGroup(group)
  *
  */
-function startTabGroupRename (id: string): void {
-    const group = store.tabGroups.find(g => g.id === id)
-    if (!group) {
-        return
-    }
-    editingTabGroupId.value = id
-    tabGroupNameDraft.value = group.name
+function openEditTabGroup (group: TabGroup): void {
+    editingTabGroup.value = group
+    tabGroupDialogOpen.value = true
 }
 
 /**
- * @description 提交标签分组改名（空名放弃修改）
+ * @description 提交分组表单弹窗：编辑模式写回当前组，新建模式落库新组
+ * @param value 表单值（名称、组色、持久化）
  * @returns void
  *
- * @example commitTabGroupRename()
+ * @example commitTabGroupDialog({ name: 'work', color: undefined, persistTabs: true })
  *
  */
-function commitTabGroupRename (): void {
-    const id = editingTabGroupId.value
-    const group = store.tabGroups.find(g => g.id === id)
-    if (group) {
-        const name = tabGroupNameDraft.value.trim()
-        if (name) {
-            group.name = name
+function commitTabGroupDialog (value: { name: string, color: string | undefined, persistTabs: boolean }): void {
+    if (editingTabGroup.value) {
+        const group = editingTabGroup.value
+        group.name = value.name
+        if (value.color) {
+            group.color = value.color
+        } else {
+            delete group.color
         }
+        group.persistTabs = value.persistTabs
+    } else {
+        const group: TabGroup = {
+            id: `tabgroup-${nanoid(6)}`,
+            name: value.name,
+            persistTabs: value.persistTabs,
+        }
+        if (value.color) {
+            group.color = value.color
+        }
+        store.tabGroups.push(group)
     }
-    editingTabGroupId.value = null
+    tabGroupDialogOpen.value = false
 }
 
 /**
- * @description 删除标签分组（两步确认）：组定义移除后成员标签回落未分组，
+ * @description 删除标签分组（经确认弹窗）
+ * @param group 目标分组
+ * @returns void
+ *
+ * @example confirmDeleteTabGroup(group)
+ *
+ */
+function confirmDeleteTabGroup (group: TabGroup): void {
+    confirmAction(t('settings.deleteConfirmBody', { name: group.name }), () => deleteTabGroup(group.id))
+}
+
+/**
+ * @description 执行标签分组删除：组定义移除后成员标签回落未分组，
  *              该组的持久化快照条目随下次 tab_session 写盘自然消失
  * @param id 分组 id
  * @returns void
@@ -473,20 +551,12 @@ function commitTabGroupRename (): void {
  *
  */
 function deleteTabGroup (id: string): void {
-    if (confirmDeleteTabGroupId.value !== id) {
-        confirmDeleteTabGroupId.value = id
-        return
-    }
-    confirmDeleteTabGroupId.value = null
     const index = store.tabGroups.findIndex(group => group.id === id)
     if (index === -1) {
         return
     }
     store.tabGroups.splice(index, 1)
     tabsStore.clearGroupMembership(id)
-    if (editingTabGroupId.value === id) {
-        editingTabGroupId.value = null
-    }
 }
 
 // ---- SSH 密钥链（元数据存加密 SQLite，私钥明文不出库） ----
@@ -946,10 +1016,6 @@ const quickCommandGroupModel = computed({
 const selectedQuickCommandParams = computed(() =>
     selectedQuickCommand.value ? parseQuickCommandParams(selectedQuickCommand.value.command) : [])
 
-/** 左列表组标题的行内改名状态；null = 无进行中的改名 */
-const editingGroupId = ref<string | null>(null)
-const groupNameDraft = ref('')
-
 /**
  * @description 新建快捷命令并选中（名称/命令留空，填好后自动持久化）
  * @returns void
@@ -988,23 +1054,22 @@ function deleteQuickCommand (id: string): void {
 }
 
 /**
- * @description 新建分组并直接进入行内改名
+ * @description 删除快捷命令分组（经确认弹窗）
+ * @param id 分组 id
  * @returns void
  *
- * @example createQuickCommandGroup()
+ * @example confirmDeleteQuickCommandGroup('qcgroup-a1b2')
  *
  */
-function createQuickCommandGroup (): void {
-    const group = {
-        id: `qcgroup-${nanoid(6)}`,
-        name: t('settings.quickCommandNewGroupName'),
+function confirmDeleteQuickCommandGroup (id: string): void {
+    const group = store.quickCommandGroups.find(g => g.id === id)
+    if (group) {
+        confirmAction(t('settings.deleteConfirmBody', { name: group.name }), () => deleteQuickCommandGroup(id))
     }
-    store.quickCommandGroups.push(group)
-    startGroupRename(group.id)
 }
 
 /**
- * @description 删除分组：组内命令降级为未分组（groupId 清空）
+ * @description 执行快捷命令分组删除：组内命令降级为未分组（groupId 清空）
  * @param id 分组 id
  * @returns void
  *
@@ -1022,45 +1087,6 @@ function deleteQuickCommandGroup (id: string): void {
             delete quickCommand.groupId
         }
     }
-    if (editingGroupId.value === id) {
-        editingGroupId.value = null
-    }
-}
-
-/**
- * @description 开始分组行内改名（组名写入草稿）
- * @param id 分组 id
- * @returns void
- *
- * @example startGroupRename('qcgroup-a1b2')
- *
- */
-function startGroupRename (id: string): void {
-    const group = store.quickCommandGroups.find(g => g.id === id)
-    if (!group) {
-        return
-    }
-    editingGroupId.value = id
-    groupNameDraft.value = group.name
-}
-
-/**
- * @description 提交分组改名（空名放弃修改）
- * @returns void
- *
- * @example commitGroupRename()
- *
- */
-function commitGroupRename (): void {
-    const id = editingGroupId.value
-    const group = store.quickCommandGroups.find(g => g.id === id)
-    if (group) {
-        const name = groupNameDraft.value.trim()
-        if (name) {
-            group.name = name
-        }
-    }
-    editingGroupId.value = null
 }
 
 
@@ -1649,33 +1675,22 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                                 <Plus :size="14" />
                                 <span>{{ t('settings.sshNew') }}</span>
                             </button>
-                            <button class="profile-new-button" @click="createSshGroup">
+                            <button class="profile-new-button" @click="openCreateSshGroup">
                                 <Plus :size="14" />
                                 <span>{{ t('settings.sshNewGroup') }}</span>
                             </button>
                         </div>
                         <template v-for="section in sshSections" :key="section.groupId ?? '__default'">
                             <div class="qc-group-header">
-                                <template v-if="section.groupId !== null && editingSshGroupId === section.groupId">
-                                    <input
-                                        v-model="sshGroupNameDraft"
-                                        class="qc-group-name-input"
-                                        @keydown.enter.prevent="commitSshGroupRename"
-                                        @keydown.esc.prevent="editingSshGroupId = null"
-                                        @blur="commitSshGroupRename"
-                                    />
-                                </template>
-                                <template v-else>
-                                    <span class="qc-group-name">{{ section.title }}</span>
-                                    <span v-if="section.groupId !== null" class="qc-group-actions">
-                                        <button class="qc-group-action" :title="t('settings.sshRenameGroup')" @click.stop="startSshGroupRename(section.groupId!)">
-                                            <Pencil :size="12" />
-                                        </button>
-                                        <button class="qc-group-action" :title="t('settings.sshDeleteGroup')" @click.stop="deleteSshGroup(section.groupId!)">
-                                            <X :size="12" />
-                                        </button>
-                                    </span>
-                                </template>
+                                <span class="qc-group-name">{{ section.title }}</span>
+                                <span v-if="section.groupId !== null" class="qc-group-actions">
+                                    <button class="qc-group-action" :title="t('settings.sshRenameGroup')" @click.stop="openRenameSshGroup(section.groupId!)">
+                                        <Pencil :size="12" />
+                                    </button>
+                                    <button class="qc-group-action" :title="t('settings.sshDeleteGroup')" @click.stop="confirmDeleteSshGroup(section.groupId!)">
+                                        <X :size="12" />
+                                    </button>
+                                </span>
                             </div>
                             <button
                                 v-for="p in section.items"
@@ -1792,33 +1807,22 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                                 <Plus :size="14" />
                                 <span>{{ t('settings.quickCommandNew') }}</span>
                             </button>
-                            <button class="profile-new-button" @click="createQuickCommandGroup">
+                            <button class="profile-new-button" @click="openCreateQuickCommandGroup">
                                 <Plus :size="14" />
                                 <span>{{ t('settings.quickCommandNewGroup') }}</span>
                             </button>
                         </div>
                         <template v-for="section in quickCommandSections" :key="section.groupId ?? '__ungrouped'">
                             <div v-if="section.title !== null" class="qc-group-header">
-                                <template v-if="editingGroupId === section.groupId">
-                                    <input
-                                        v-model="groupNameDraft"
-                                        class="qc-group-name-input"
-                                        @keydown.enter.prevent="commitGroupRename"
-                                        @keydown.esc.prevent="editingGroupId = null"
-                                        @blur="commitGroupRename"
-                                    />
-                                </template>
-                                <template v-else>
-                                    <span class="qc-group-name">{{ section.title }}</span>
-                                    <span class="qc-group-actions">
-                                        <button class="qc-group-action" :title="t('settings.quickCommandRenameGroup')" @click.stop="startGroupRename(section.groupId!)">
-                                            <Pencil :size="12" />
-                                        </button>
-                                        <button class="qc-group-action" :title="t('settings.quickCommandDeleteGroup')" @click.stop="deleteQuickCommandGroup(section.groupId!)">
-                                            <X :size="12" />
-                                        </button>
-                                    </span>
-                                </template>
+                                <span class="qc-group-name">{{ section.title }}</span>
+                                <span class="qc-group-actions">
+                                    <button class="qc-group-action" :title="t('settings.quickCommandRenameGroup')" @click.stop="openRenameQuickCommandGroup(section.groupId!)">
+                                        <Pencil :size="12" />
+                                    </button>
+                                    <button class="qc-group-action" :title="t('settings.quickCommandDeleteGroup')" @click.stop="confirmDeleteQuickCommandGroup(section.groupId!)">
+                                        <X :size="12" />
+                                    </button>
+                                </span>
                             </div>
                             <button
                                 v-for="qc in section.items"
@@ -2229,52 +2233,27 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                 <p class="hint">{{ t('settings.tabGroupsPersistHint') }}</p>
                 <div class="settings-section">
                     <div class="profile-new-group">
-                        <button class="profile-new-button" @click="createTabGroup">
+                        <button class="profile-new-button" @click="openCreateTabGroup">
                             <Plus :size="14" />
                             <span>{{ t('settings.tabGroupsNewGroup') }}</span>
                         </button>
                     </div>
                     <p v-if="store.tabGroups.length === 0" class="hint">{{ t('settings.tabGroupsEmptyHint') }}</p>
                     <div v-for="group in store.tabGroups" :key="group.id" class="settings-card tab-group-row">
-                        <template v-if="editingTabGroupId === group.id">
-                            <input
-                                v-model="tabGroupNameDraft"
-                                class="qc-group-name-input"
-                                @keydown.enter.prevent="commitTabGroupRename"
-                                @keydown.esc.prevent="editingTabGroupId = null"
-                                @blur="commitTabGroupRename"
-                            />
-                        </template>
-                        <template v-else>
-                            <span class="tab-group-name" @dblclick="startTabGroupRename(group.id)">
-                                <span v-if="group.color" class="tab-color-dot" :style="{ background: group.color }"></span>
-                                {{ group.name }}
-                            </span>
-                        </template>
-                        <span class="tab-group-actions">
-                            <button
-                                v-for="item in TAB_COLORS"
-                                :key="item.color"
-                                class="tab-color-dot tab-color-option"
-                                :class="{ selected: group.color === item.color }"
-                                :style="{ background: item.color }"
-                                :title="t(`tab.colorNames.${item.name}`)"
-                                @click="group.color = group.color === item.color ? undefined : item.color"
-                            ></button>
+                        <span class="tab-group-name">
+                            <span v-if="group.color" class="tab-color-dot" :style="{ background: group.color }"></span>
+                            {{ group.name }}
                         </span>
-                        <label class="tab-group-persist">
-                            <Switch v-model="group.persistTabs" />
-                            <span>{{ t('settings.tabGroupsPersist') }}</span>
-                        </label>
+                        <span v-if="group.persistTabs" class="tab-group-meta">{{ t('settings.tabGroupsPersistBadge') }}</span>
                         <span class="tab-group-meta">{{ t('settings.tabGroupsMemberCount', { n: tabGroupMemberCounts[group.id] ?? 0 }) }}</span>
-                        <button
-                            class="qc-group-action"
-                            :class="{ danger: confirmDeleteTabGroupId === group.id }"
-                            :title="t('settings.tabGroupsDeleteGroup')"
-                            @click="deleteTabGroup(group.id)"
-                        >
-                            <X :size="12" />
-                        </button>
+                        <span class="tab-group-actions">
+                            <button class="qc-group-action" :title="t('settings.tabGroupsEditGroup')" @click="openEditTabGroup(group)">
+                                <Pencil :size="12" />
+                            </button>
+                            <button class="qc-group-action" :title="t('settings.tabGroupsDeleteGroup')" @click="confirmDeleteTabGroup(group)">
+                                <X :size="12" />
+                            </button>
+                        </span>
                     </div>
                 </div>
             </template>
@@ -2314,6 +2293,24 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
             <template #footer>
                 <Button variant="outline" size="sm" @click="confirmState = null">{{ t('settings.cancel') }}</Button>
                 <Button variant="destructive" size="sm" @click="runConfirmed">{{ t('settings.deleteConfirmButton') }}</Button>
+            </template>
+        </Dialog>
+
+        <TabGroupFormDialog
+            v-model:open="tabGroupDialogOpen"
+            :editing="editingTabGroup"
+            :title="editingTabGroup ? t('settings.tabGroupsEditGroup') : t('settings.tabGroupsNewGroup')"
+            @submit="commitTabGroupDialog"
+        />
+
+        <Dialog v-if="groupNameDialog" :title="groupNameDialogTitle" :width="380" @cancel="groupNameDialog = null">
+            <div class="group-name-form">
+                <Label>{{ t('settings.groupNameLabel') }}</Label>
+                <Input v-model="groupNameDialog.draft" @keydown.enter.prevent="commitGroupNameDialog" />
+            </div>
+            <template #footer>
+                <Button variant="outline" size="sm" @click="groupNameDialog = null">{{ t('settings.cancel') }}</Button>
+                <Button size="sm" :disabled="!groupNameDialog.draft.trim()" @click="commitGroupNameDialog">{{ t('settings.confirm') }}</Button>
             </template>
         </Dialog>
 
@@ -2809,19 +2806,6 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     text-overflow: ellipsis;
 }
 
-.qc-group-name-input {
-    flex: 1;
-    min-width: 0;
-    height: 22px;
-    padding: 0 6px;
-    border: 1px solid var(--color-input);
-    border-radius: 4px;
-    background: transparent;
-    color: var(--color-foreground);
-    font-size: 12px;
-    outline: none;
-}
-
 /* 隐藏但保留占位（visibility 而非 display）避免行高变化；opacity 过渡实现图标淡入淡出 */
 .qc-group-actions {
     display: inline-flex;
@@ -3090,42 +3074,25 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     flex-shrink: 0;
 }
 
+/* 分组行操作按钮列：推到行尾对齐 */
 .tab-group-actions {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-}
-
-.tab-color-option {
-    width: 14px;
-    height: 14px;
-    padding: 0;
-    border: none;
-    cursor: default;
-    transition: box-shadow 0.2s ease, transform 0.2s ease;
-}
-
-.tab-color-option:hover {
-    transform: scale(1.15);
-}
-
-.tab-color-option.selected {
-    box-shadow: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-foreground);
-}
-
-.tab-group-persist {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: var(--color-muted-foreground);
-    cursor: default;
+    margin-left: auto;
 }
 
 .tab-group-meta {
     font-size: 12px;
     color: var(--color-muted-foreground);
     font-variant-numeric: tabular-nums;
+}
+
+/* 分组名称弹窗（SSH/快捷命令共用） */
+.group-name-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .qc-group-action.danger {
