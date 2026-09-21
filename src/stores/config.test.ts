@@ -62,6 +62,15 @@ describe('config deepMerge', () => {
         deepMerge(config, { terminal: { suggestions: { enabled: false } } })
         expect(config.terminal.suggestions).toEqual({ ...defaultConfig().terminal.suggestions, enabled: false })
     })
+
+    it('treats null section values as absent (Rust snapshot serializes unpersisted sections as null)', () => {
+        const config = defaultConfig()
+        // 复现：全新安装第二次启动（terminal/appearance 行不存在）与既有库缺 advanced 行
+        deepMerge(config, { terminal: null, appearance: null, advanced: null })
+        expect(config.terminal).toEqual(defaultConfig().terminal)
+        expect(config.appearance).toEqual(defaultConfig().appearance)
+        expect(config.advanced).toEqual({ debugEnabled: false })
+    })
 })
 
 describe('legacy config.yaml parsing (one-time migration source)', () => {

@@ -352,10 +352,11 @@ function isPlainObject (value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** deep-merges user values over defaults; defaults fill any gap */
+/** deep-merges user values over defaults; defaults fill any gap. null 视为未提供
+ *  （Rust 快照会把未持久化的设置分片序列化为 null，不能用 null 覆盖默认值） */
 export function deepMerge<T> (target: T, source: unknown): T {
     if (!isPlainObject(target) || !isPlainObject(source)) {
-        return (source === undefined ? target : source) as T
+        return (source === undefined || source === null ? target : source) as T
     }
     for (const [key, value] of Object.entries(source)) {
         if (key in target) {
