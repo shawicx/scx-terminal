@@ -327,18 +327,30 @@ export function defaultHotkeys (): HotkeysConfig {
 }
 
 /**
- * @description 档案均不可用时的兜底档案（macOS 保证 /bin/zsh 存在），保证终端窗格永远能启动
- * @returns TerminalProfile 兜底档案
+ * @description 当前平台新建档案的默认 shell 命令（macOS/Linux 兜底 zsh，Windows 兜底 PowerShell——
+ *              /bin/* 路径在 Windows 上不存在，spawn 必败）
+ * @returns string shell 命令
  *
- * @example fallbackProfile().command // '/bin/zsh'
+ * @example defaultShellCommand() // windows: 'powershell.exe'；mac: '/bin/zsh'
+ *
+ */
+export function defaultShellCommand (): string {
+    return platform === 'windows' ? 'powershell.exe' : '/bin/zsh'
+}
+
+/**
+ * @description 档案均不可用时的兜底档案（macOS 保证 /bin/zsh 存在；Windows 用 PowerShell），保证终端窗格永远能启动
+ * @returns LocalProfile 兜底档案
+ *
+ * @example fallbackProfile().command // mac: '/bin/zsh'；windows: 'powershell.exe'
  *
  */
 export function fallbackProfile (): LocalProfile {
     return {
         id: 'local-fallback',
         type: 'local',
-        name: 'zsh',
-        command: '/bin/zsh',
+        name: platform === 'windows' ? 'PowerShell' : 'zsh',
+        command: defaultShellCommand(),
         args: [],
         env: {},
         cwd: null,

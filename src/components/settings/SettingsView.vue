@@ -23,7 +23,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ColorSchemePicker from '@/components/settings/ColorSchemePicker.vue'
 import ProfileForwardingsCard from '@/components/settings/ProfileForwardingsCard.vue'
 import TabGroupFormDialog from '@/components/settings/TabGroupFormDialog.vue'
-import { useConfigStore, defaultFirstProfiles, type LocalProfile, type QuickCommand, type SshProfile, type TabGroup, type TerminalProfile } from '@/stores/config'
+import { useConfigStore, defaultFirstProfiles, defaultShellCommand, type LocalProfile, type QuickCommand, type SshProfile, type TabGroup, type TerminalProfile } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
 import { backgroundPreviewUrl } from '@/services/backgroundImage'
 import { checkForUpdate, installUpdate, type UpdateProgress } from '@/services/updater'
@@ -890,7 +890,7 @@ function createLocalProfile (): void {
         id: `local-${nanoid(8)}`,
         type: 'local',
         name: `${t('settings.localTerminalPage')} ${localProfiles.value.length + 1}`,
-        command: template?.command ?? '/bin/zsh',
+        command: template?.command ?? defaultShellCommand(),
         args: [],
         env: {},
         cwd: null,

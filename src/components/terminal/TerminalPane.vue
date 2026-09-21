@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { platform } from '@/lib/platform'
 import { ChevronUp, ChevronDown, X } from 'lucide-vue-next'
 import { BaseSession } from '@/lib/sessions/baseSession'
 import { createSessionForProfile } from '@/lib/sessions'
@@ -570,7 +571,8 @@ async function start (): Promise<void> {
         } else {
             await session.start({
                 command: props.profile.command,
-                args: props.profile.loginShell ? [...props.profile.args, '-l'] : props.profile.args,
+                // -l 是 POSIX 登录 shell 语义；Windows PowerShell 不识别该参数，直接跳过
+                args: props.profile.loginShell && platform !== 'windows' ? [...props.profile.args, '-l'] : props.profile.args,
                 env: { ...props.profile.env },
                 cwd: props.profile.cwd ?? props.initialCwd ?? null,
                 width: null,

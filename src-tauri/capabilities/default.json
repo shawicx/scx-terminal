@@ -15,10 +15,8 @@
     {
       "identifier": "opener:allow-open-path",
       "allow": [
-        { "path": "$HOME/Library/Application Support/scx-terminal" },
-        { "path": "$HOME/Library/Application Support/scx-terminal/**" },
-        { "path": "$HOME/Library/Application Support/com.scx.terminal" },
-        { "path": "$HOME/Library/Application Support/com.scx.terminal/**" }
+        { "path": "$APPDATA" },
+        { "path": "$APPDATA/**" }
       ]
     },
     "opener:allow-reveal-item-in-dir",
