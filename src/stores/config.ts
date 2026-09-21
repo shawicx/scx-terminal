@@ -130,12 +130,19 @@ export interface AppearanceConfig {
     bellNotifications: boolean
 }
 
+/** 高级配置：调试诊断等非视觉开关 */
+export interface AdvancedConfig {
+    /** 调试日志：开启后前后端诊断行写入 app-data/logs/scx-terminal.log，启动自动打开 DevTools */
+    debugEnabled: boolean
+}
+
 /** hotkey id -> list of sequences, each sequence a list of keystrokes */
 export type HotkeysConfig = Record<string, string[][]>
 
 export interface ConfigStore {
     terminal: TerminalConfig
     appearance: AppearanceConfig
+    advanced: AdvancedConfig
     hotkeys: HotkeysConfig
     profiles: TerminalProfile[]
     /** SSH 档案分组（SSH 档案以 groupId 引用） */
@@ -152,6 +159,7 @@ export interface ConfigStore {
 export interface ConfigSnapshot {
     terminal?: Partial<TerminalConfig>
     appearance?: Partial<AppearanceConfig>
+    advanced?: Partial<AdvancedConfig>
     hotkeys?: HotkeysConfig
     profiles?: TerminalProfile[]
     sshGroups?: SshGroup[]
@@ -200,6 +208,9 @@ export function defaultConfig (): ConfigStore {
             backgroundOpacity: 0.6,
             backgroundFit: 'cover',
             bellNotifications: true,
+        },
+        advanced: {
+            debugEnabled: false,
         },
         profiles: [],
         sshGroups: [],
@@ -360,6 +371,7 @@ export function deepMerge<T> (target: T, source: unknown): T {
 export interface SavedBaseline {
     terminal: string
     appearance: string
+    advanced: string
     hotkeys: Record<string, string>
     profiles: Record<string, string>
     quickCommands: Record<string, string>
@@ -371,7 +383,7 @@ export interface SavedBaseline {
 
 /** 一条待执行的持久化操作；saved 为该实体写入成功后记入基线的快照串 */
 export type FlushOp =
-    | { kind: 'settingsSection'; key: 'terminal' | 'appearance'; value: TerminalConfig | AppearanceConfig; saved: string }
+    | { kind: 'settingsSection'; key: 'terminal' | 'appearance' | 'advanced'; value: TerminalConfig | AppearanceConfig | AdvancedConfig; saved: string }
     | { kind: 'hotkey'; action: string; bindings: string[][]; saved: string }
     | { kind: 'profileCreate'; profile: TerminalProfile; saved: string }
     | { kind: 'profileUpdate'; profile: TerminalProfile; saved: string }
@@ -456,6 +468,10 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
     if (appearance !== saved.appearance) {
         ops.push({ kind: 'settingsSection', key: 'appearance', value: store.appearance, saved: appearance })
     }
+    const advanced = stableStringify(store.advanced)
+    if (advanced !== saved.advanced) {
+        ops.push({ kind: 'settingsSection', key: 'advanced', value: store.advanced, saved: advanced })
+    }
 
     // 热键取两侧 action 并集：saved-only 的 action 视为清空绑定（[]）
     for (const action of new Set([...Object.keys(store.hotkeys), ...Object.keys(saved.hotkeys)])) {
@@ -539,7 +555,7 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
 
 /** 空基线：任何非空 store 与之 diff 都会产出全量导入操作（legacy 迁移用） */
 export function emptyBaseline (): SavedBaseline {
-    return { terminal: '', appearance: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
+    return { terminal: '', appearance: '', advanced: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
 }
 
 /**
@@ -554,6 +570,7 @@ export function captureBaseline (store: ConfigStore): SavedBaseline {
     return {
         terminal: stableStringify(store.terminal),
         appearance: stableStringify(store.appearance),
+        advanced: stableStringify(store.advanced),
         hotkeys: Object.fromEntries(Object.entries(store.hotkeys).map(([action, bindings]) => [action, stableStringify(bindings)])),
         profiles: Object.fromEntries(store.profiles.map(profile => [profile.id, stableStringify(profile)])),
         quickCommands: Object.fromEntries(store.quickCommands.map(command => [command.id, stableStringify(command)])),
@@ -707,7 +724,7 @@ export const useConfigStore = defineStore('config', () => {
 
     // 持久化 watch 必须在 setup 同步流创建（load() 的 await 之后创建在 WKWebView 实测不触发）；
     // getter 数组 + deep 逐分片建依赖（theme store 同款模式）。loaded 门控在 scheduleSave 内。
-    watch(() => [store.terminal, store.appearance, store.hotkeys, store.profiles, store.sshGroups, store.tabGroups, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
+    watch(() => [store.terminal, store.appearance, store.advanced, store.hotkeys, store.profiles, store.sshGroups, store.tabGroups, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
 
     async function load (): Promise<void> {
         let userConfig: Record<string, unknown> | null = null

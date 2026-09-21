@@ -1299,6 +1299,28 @@ const fontOptions = computed(() => [
 const configDir = ref('')
 invoke<string>('config_dir_path').then(path => (configDir.value = path)).catch(() => {})
 
+const logDir = ref('')
+invoke<string>('debug_log_dir').then(path => (logDir.value = path)).catch(() => {})
+
+/**
+ * @description 打开调试日志目录（app-data/logs/，含 scx-terminal.log；opener 插件 open_path）
+ * @returns Promise<void>
+ *
+ * @example await openLogDir() // 打开 ~/Library/Application Support/com.scx.terminal/logs
+ *
+ */
+async function openLogDir (): Promise<void> {
+    if (!logDir.value) {
+        return
+    }
+    try {
+        await openPath(logDir.value)
+    } catch (error) {
+        console.error('[settings] open log dir failed:', error)
+        void invoke('dev_log', { message: `[settings] open log dir failed: ${String(error)}` }).catch(() => {})
+    }
+}
+
 /**
  * @description 在 Finder 中打开配置数据目录（opener 插件 open_path，capabilities 已放行
  *              identifier 数据目录范围，config.db / secrets.db 所在）
@@ -2278,12 +2300,27 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                             </div>
                         </div>
                         <div class="settings-card-row">
+                            <Label>{{ t('settings.debugMode') }}</Label>
+                            <Switch v-model="store.advanced.debugEnabled" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.logDir') }}</Label>
+                            <div class="about-config">
+                                <span class="value-hint mono about-config-path">{{ logDir }}</span>
+                                <Button variant="ghost" size="sm" @click="openLogDir">
+                                    <FolderOpen :size="14" />
+                                    {{ t('settings.openLogDir') }}
+                                </Button>
+                            </div>
+                        </div>
+                        <div class="settings-card-row">
                             <Label>{{ t('settings.appVersion') }}</Label>
                             <Button variant="outline" size="sm" :disabled="updaterBusy" @click="checkUpdates">
                                 {{ updaterButtonLabel }}
                             </Button>
                         </div>
                     </div>
+                    <p class="hint">{{ t('settings.debugModeHint') }}</p>
                 </div>
             </template>
         </div>

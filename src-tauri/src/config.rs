@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{Manager, State};
 
-const SETTINGS_KEYS: [&str; 2] = ["terminal", "appearance"];
+const SETTINGS_KEYS: [&str; 3] = ["terminal", "appearance", "advanced"];
 
 /// 快捷命令记录（真实列存储；groupId 为 NULL 时序列化省略键，保持 optional 语义）
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -67,6 +67,7 @@ pub struct TabGroupRecord {
 pub struct ConfigSnapshot {
     pub terminal: Option<Value>,
     pub appearance: Option<Value>,
+    pub advanced: Option<Value>,
     pub hotkeys: BTreeMap<String, Value>,
     pub profiles: Vec<Value>,
     pub color_schemes: Vec<Value>,
@@ -224,6 +225,7 @@ fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot>, String> 
                 .map_err(|e| format!("settings/{key} is corrupted: {e}"))?;
             match key {
                 "terminal" => snapshot.terminal = Some(value),
+                "advanced" => snapshot.advanced = Some(value),
                 _ => snapshot.appearance = Some(value),
             }
         }
@@ -1035,6 +1037,14 @@ mod tests {
         let snapshot = load_internal(&state).unwrap().unwrap();
         assert_eq!(snapshot.terminal.unwrap()["fontSize"], 16);
         assert!(snapshot.appearance.is_none());
+    }
+
+    #[test]
+    fn advanced_section_round_trips() {
+        let state = temp_state("advanced");
+        settings_set_section_internal(&state, "advanced", &serde_json::json!({"debugEnabled": true})).unwrap();
+        let snapshot = load_internal(&state).unwrap().unwrap();
+        assert_eq!(snapshot.advanced.unwrap()["debugEnabled"], true);
     }
 
     #[test]

@@ -16,11 +16,8 @@ async function bootstrap (): Promise<void> {
     app.use(pinia)
     app.use(i18n)
 
-    // config must be loaded before any terminal frontend is created
-    await useConfigStore(pinia).load()
-    useThemeStore(pinia).init()
-
-    // forward frontend errors to the Rust console (visible in `tauri dev` output)
+    // forward frontend errors to the Rust console (visible in `tauri dev` output);
+    // 注册须早于配置加载：boot 早期异常也要能经 dev_log 进入调试日志
     app.config.errorHandler = (err, _instance, info) => {
         void invoke('dev_log', { message: `VUE-ERR ${info}: ${String(err)}\n${err instanceof Error ? err.stack : ''}` })
     }
@@ -30,6 +27,17 @@ async function bootstrap (): Promise<void> {
     window.addEventListener('unhandledrejection', e => {
         void invoke('dev_log', { message: `REJ ${String(e.reason)}` })
     })
+
+    // config must be loaded before any terminal frontend is created
+    const config = useConfigStore(pinia)
+    await config.load()
+    useThemeStore(pinia).init()
+
+    // 调试模式（advanced.debugEnabled）：开启文件日志并随启动打开 DevTools
+    if (config.store.advanced.debugEnabled) {
+        void invoke('debug_set_enabled', { enabled: true })
+        void invoke('debug_open_devtools')
+    }
 
     app.mount('#app')
 }

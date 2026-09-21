@@ -187,8 +187,24 @@ describe('computeOps (entity-level diff flush)', () => {
     it('emits a full import against the empty baseline (legacy migration)', () => {
         const config = defaultConfig()
         const ops = computeOps(config, emptyBaseline())
-        expect(ops.filter(op => op.kind === 'settingsSection')).toHaveLength(2)
+        expect(ops.filter(op => op.kind === 'settingsSection')).toHaveLength(3)
         expect(ops.filter(op => op.kind === 'hotkey')).toHaveLength(Object.keys(defaultHotkeys()).length)
+    })
+})
+
+describe('advanced settings section', () => {
+    it('defaults debugEnabled to false and keeps persisted values', () => {
+        const config = defaultConfig()
+        expect(config).toMatchObject({ advanced: { debugEnabled: false } })
+        deepMerge(config, { advanced: { debugEnabled: true } })
+        expect(config.advanced.debugEnabled).toBe(true)
+    })
+
+    it('emits a section set for changed advanced settings only', () => {
+        const config = defaultConfig()
+        const baseline = captureBaseline(config)
+        config.advanced.debugEnabled = true
+        expect(computeOps(config, baseline)).toMatchObject([{ kind: 'settingsSection', key: 'advanced' }])
     })
 })
 

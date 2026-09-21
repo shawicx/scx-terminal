@@ -4770,6 +4770,7 @@ name = "scx-terminal"
 version = "0.1.2"
 dependencies = [
  "aes-gcm",
+ "chrono",
  "fast-socks5",
  "font-loader",
  "getrandom 0.3.4",

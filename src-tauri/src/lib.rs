@@ -1,5 +1,6 @@
 mod background;
 mod config;
+mod debug_log;
 mod fonts;
 mod forward;
 mod fsutil;
@@ -12,13 +13,54 @@ mod shells;
 mod ssh;
 mod transfers;
 
-use tauri::Manager;
+use tauri::{AppHandle, Manager, State};
 
-/// Frontend → Rust console logging, used by main.ts error forwarding.
-/// Handy when debugging webview-only issues during `tauri dev`.
+///
+/// @description 前端 → 后端日志通道（main.ts 错误转发与业务 console 转发共用）：
+///              始终 println 到 stdout（tauri dev 可见）；调试模式开启时追加写入日志文件
+/// @param state 调试日志状态
+/// @param message 单行日志内容
+/// @returns void
+///
 #[tauri::command]
-fn dev_log(message: String) {
+fn dev_log(state: State<debug_log::DebugLogState>, message: String) {
     println!("[scx:js] {message}");
+    state.append(&message);
+}
+
+///
+/// @description 开关调试日志（前端配置加载后同步一次；设置页切换时实时调用）
+/// @param state 调试日志状态
+/// @param enabled 是否开启
+/// @returns void
+///
+#[tauri::command]
+fn debug_set_enabled(state: State<debug_log::DebugLogState>, enabled: bool) {
+    state.set_enabled(enabled);
+}
+
+///
+/// @description 打开主窗口 webview DevTools（release 构建依赖 Cargo devtools feature，
+///              用于诊断黑屏等渲染类问题）
+/// @param app 应用句柄
+/// @returns void
+///
+#[tauri::command]
+fn debug_open_devtools(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        window.open_devtools();
+    }
+}
+
+///
+/// @description 返回调试日志目录路径（设置页「打开日志目录」按钮用）
+/// @param state 调试日志状态
+/// @returns String 日志目录绝对路径
+///
+#[tauri::command]
+fn debug_log_dir(state: State<debug_log::DebugLogState>) -> String {
+    let dir = state.log_path().parent().unwrap_or_else(|| std::path::Path::new(""));
+    dir.to_string_lossy().into_owned()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -112,6 +154,9 @@ pub fn run() {
             ssh::ssh_ack_data,
             ssh::ssh_confirm_host_key,
             ssh::ssh_respond_kbd,
+            debug_set_enabled,
+            debug_open_devtools,
+            debug_log_dir,
             dev_log,
         ])
         .setup(|app| {
@@ -123,8 +168,29 @@ pub fn run() {
             app.manage(config::ConfigState::new(&data_dir));
             // 命令历史库（history.db）：初始化失败同样 fast-fail
             app.manage(history::HistoryState::new(&data_dir));
-            // the webview owns keyboard shortcuts (⌘T/⌘W are handled in-app),
-            // and removing the menu keeps ⌘W from closing the window
+            // 调试日志（advanced.debugEnabled 驱动；开关由前端配置加载后同步）
+            app.manage(debug_log::DebugLogState::new(&data_dir));
+            // the webview owns keyboard shortcuts (⌘T/⌘W/⌘C/⌘V are handled in-app),
+            // so the macOS menu deliberately omits every item carrying those
+            // accelerators; it still needs the app submenu for ⌘H/⌘Q to work
+            // (menu-less apps get no ⌘Q quit accelerator from the system)
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{MenuBuilder, PredefinedMenuItem, Submenu};
+                let hide = PredefinedMenuItem::hide(app, None)?;
+                let hide_others = PredefinedMenuItem::hide_others(app, None)?;
+                let separator = PredefinedMenuItem::separator(app)?;
+                let quit = PredefinedMenuItem::quit(app, None)?;
+                let app_submenu = Submenu::with_items(
+                    app,
+                    "scx-terminal",
+                    true,
+                    &[&hide, &hide_others, &separator, &quit],
+                )?;
+                let menu = MenuBuilder::new(app).items(&[&app_submenu]).build()?;
+                app.set_menu(menu)?;
+            }
+            #[cfg(not(target_os = "macos"))]
             app.remove_menu()?;
             #[allow(unused_variables)]
             let window = app
@@ -143,7 +209,8 @@ pub fn run() {
                 )
                 .expect("failed to apply vibrancy");
             }
-            #[cfg(debug_assertions)]
+            // release 构建同样支持 SCX_DEVTOOLS=1（配合 devtools feature），
+            // 用于诊断连设置页都无法进入的启动期问题
             if std::env::var("SCX_DEVTOOLS").is_ok() {
                 window.open_devtools();
             }
