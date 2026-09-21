@@ -8,6 +8,37 @@
 - **前端**：Vue 3 + Vite + Tailwind CSS 4 + shadcn-vue，xterm.js 终端渲染（WebGL 优先）
 - **工具链**：bun（包管理）、oxlint（Lint）
 
+## 下载与安装
+
+从 [GitHub Releases](https://github.com/shawicx/scx-terminal/releases) 下载最新版本：
+
+| 平台 | 文件 | 说明 |
+| --- | --- | --- |
+| Windows | `scx-terminal_<版本>_x64-setup.exe` | NSIS 安装向导，界面跟随系统语言（中文/英文） |
+| macOS (Apple Silicon) | `scx-terminal_<版本>_aarch64.dmg` | 拖入 Applications 即完成安装 |
+| macOS (Intel) | `scx-terminal_<版本>_x64.dmg` | 拖入 Applications 即完成安装 |
+
+### Windows
+
+1. 双击运行 `*-setup.exe`；若 SmartScreen 弹出「Windows 已保护你的电脑」，点「更多信息」→「仍要运行」
+2. 安装模式按需选择：**仅为当前用户**（无需管理员）或**为所有用户安装**（需要管理员权限）
+3. 确认安装目录后完成安装
+
+### macOS
+
+1. 打开 DMG，将 scx-terminal 拖入 Applications
+2. 首次启动若提示无法验证开发者：在 Applications 中对 scx-terminal **右键 → 打开**，再点「打开」确认一次即可；或终端执行
+   `xattr -d com.apple.quarantine /Applications/scx-terminal.app`
+
+### 数据目录
+
+| 平台 | 路径 |
+| --- | --- |
+| Windows | `%APPDATA%\com.scx.terminal\`（config.db 配置 / logs\ 日志） |
+| macOS | `~/Library/Application Support/com.scx.terminal/` |
+
+设置页「关于」提供目录一键打开与调试日志开关。
+
 ## 开发
 
 ```bash
