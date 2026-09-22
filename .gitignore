@@ -9,3 +9,4 @@ src-tauri/gen/schemas/
 *.code-workspace
 .zcode/
 docs/superpowers
+.superpowers

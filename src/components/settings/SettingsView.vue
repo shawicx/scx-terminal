@@ -25,6 +25,7 @@ import ProfileForwardingsCard from '@/components/settings/ProfileForwardingsCard
 import TabGroupFormDialog from '@/components/settings/TabGroupFormDialog.vue'
 import { useConfigStore, defaultFirstProfiles, defaultShellCommand, type LocalProfile, type QuickCommand, type SshProfile, type TabGroup, type TerminalProfile } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
+import type { SettingsPageId } from '@/stores/tabs'
 import { backgroundPreviewUrl } from '@/services/backgroundImage'
 import { checkForUpdate, installUpdate, type UpdateProgress } from '@/services/updater'
 import { useCommands } from '@/services/commands'
@@ -43,7 +44,9 @@ const config = useConfigStore()
 const store = config.store
 const tabsStore = useTabsStore()
 
-const page = ref<'terminal' | 'profiles' | 'ssh' | 'quickCommands' | 'keys' | 'appearance' | 'colorSchemes' | 'hotkeys' | 'tabGroups' | 'about'>('profiles')
+const props = defineProps<{ initialPage?: SettingsPageId }>()
+
+const page = ref<SettingsPageId>(props.initialPage ?? 'profiles')
 
 const { sortedCommands } = useCommands()
 const hotkeyCommands = computed(() => sortedCommands.value.filter(command => command.hotkeyId))

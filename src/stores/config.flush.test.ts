@@ -15,8 +15,8 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 import { createPinia, setActivePinia } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
-import { useConfigStore } from './config'
-import type { SshProfile, TerminalProfile } from './config'
+import { computeOps, defaultConfig, emptyBaseline, upsertRecentEntry, useConfigStore } from './config'
+import type { ConfigStore, SshProfile, TerminalProfile } from './config'
 
 const mockInvoke = vi.mocked(invoke)
 
@@ -61,6 +61,7 @@ function mockImplementationBody (): void {
                     ? {
                         terminal: db.settings.get('terminal'),
                         appearance: db.settings.get('appearance'),
+                        recents: db.settings.get('recents'),
                         hotkeys: Object.fromEntries(db.hotkeys),
                         profiles: [...db.profiles.values()],
                         colorSchemes: [...db.colorSchemes.values()],
@@ -284,5 +285,40 @@ describe('config store diff-flush integration', () => {
         config.store.terminal.fontSize = 21
         await new Promise(resolve => setTimeout(resolve, 700))
         expect(mockInvoke).toHaveBeenCalledWith('settings_set_section', { key: 'terminal', value: expect.objectContaining({ fontSize: 21 }) })
+    })
+})
+
+describe('recents section', () => {
+    it('computeOps 对 recents 变更产出 settingsSection 操作', () => {
+        const store = { ...defaultConfig(), recents: { 'ssh-1': 123 } } as ConfigStore
+        const ops = computeOps(store, emptyBaseline())
+        const op = ops.find(o => o.kind === 'settingsSection' && o.key === 'recents')
+        expect(op).toBeDefined()
+        expect(op && op.kind === 'settingsSection' ? op.saved : '').toBe('{"ssh-1":123}')
+    })
+
+    it('upsertRecentEntry 更新已有条目时间戳且不修改入参', () => {
+        const before = { a: 1, b: 2 }
+        const after = upsertRecentEntry(before, 'a', 9)
+        expect(after).toEqual({ a: 9, b: 2 })
+        expect(before).toEqual({ a: 1, b: 2 })
+    })
+
+    it('upsertRecentEntry 超上限裁剪保留最新', () => {
+        const recents = Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`p${i}`, i]))
+        const after = upsertRecentEntry(recents, 'new', 999)
+        expect(Object.keys(after)).toHaveLength(50)
+        expect(after['new']).toBe(999)
+        expect(after['p49']).toBe(49)
+        expect(after['p0']).toBeUndefined()
+    })
+
+    it('load 恢复已持久化的 recents（键为动态 profileId，deepMerge 无法回填）', async () => {
+        db.initialized = true
+        db.settings.set('recents', { 'ssh-1': 123 })
+        setActivePinia(createPinia())
+        const config = useConfigStore()
+        await config.load()
+        expect(config.store.recents).toEqual({ 'ssh-1': 123 })
     })
 })

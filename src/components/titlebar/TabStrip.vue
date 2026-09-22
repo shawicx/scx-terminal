@@ -21,6 +21,9 @@ import { TAB_COLORS } from '@/lib/tabColors'
 /** 「+」按钮占用的横向空间（宽 26 + 左右边距各 2 + flex 间隙 2），滚动活动标签到可见区时右侧需让开 */
 const NEW_TAB_BUTTON_RESERVE = 32
 
+/** 「+」菜单「连接中心」首项的哨兵 key（与档案 id 区分） */
+const START_TAB_MENU_KEY = '__open_start__'
+
 withDefaults(defineProps<{
     /** 标签条位置：top = 内嵌标题栏（默认），bottom = 独立成条置于内容区下方 */
     position?: 'top' | 'bottom'
@@ -114,8 +117,9 @@ onBeforeUnmount(() => {
 })
 
 /**
- * @description 「+」按钮的档案菜单项：本地档案在前（默认档案置顶、带标记），分隔线后
- *              按分组排列 SSH 档案（默认分组在前，其余按组名排序，组内保持配置顺序）
+ * @description 「+」按钮的档案菜单项：固定首项为连接中心，随后本地档案在前（默认档案
+ *              置顶、带标记），分隔线后按分组排列 SSH 档案（默认分组在前，其余按组名排序，
+ *              组内保持配置顺序）
  * @returns ContextMenuItemSpec[] 菜单项列表
  *
  */
@@ -130,10 +134,10 @@ const newTabMenuItems = computed<ContextMenuItemSpec[]>(() => {
         config.store.profiles.filter((profile): profile is SshProfile => profile.type === 'ssh'),
         config.store.sshGroups,
     ).flatMap(section => section.items.map(profile => ({ key: profile.id, label: profile.name })))
-    return [
-        ...locals,
-        ...sshItems.map((item, index) => index === 0 && locals.length > 0 ? { ...item, separatorBefore: true } : item),
-    ]
+    const startItem: ContextMenuItemSpec = { key: START_TAB_MENU_KEY, label: t('start.tabTitle') }
+    const localItems = locals.map((item, index) => index === 0 ? { ...item, separatorBefore: true } : item)
+    const separatedSshItems = sshItems.map((item, index) => index === 0 ? { ...item, separatorBefore: true } : item)
+    return [startItem, ...localItems, ...separatedSshItems]
 })
 
 /**
@@ -144,6 +148,10 @@ const newTabMenuItems = computed<ContextMenuItemSpec[]>(() => {
  *
  */
 function onNewTabMenuSelect (key: string): void {
+    if (key === START_TAB_MENU_KEY) {
+        store.openStartTab()
+        return
+    }
     void (async () => {
         const cwd = await terminalTabApi.current?.getActivePaneCwd() ?? null
         store.openTerminalTab(key, cwd, store.activeTab?.groupId)

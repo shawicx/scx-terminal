@@ -246,6 +246,11 @@ export function useCommands () {
             handler: () => tabs.openSettingsTab(),
         })
         register({
+            id: 'open-start', group: 'app',
+            label: () => t('commands.openStart'),
+            handler: () => tabs.openStartTab(),
+        })
+        register({
             id: 'open-forwarding', group: 'app',
             label: () => t('commands.openForwarding'),
             handler: () => tabs.openForwardingTab(),

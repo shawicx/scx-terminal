@@ -4,7 +4,10 @@ import { useConfigStore } from '@/stores/config'
 import { visibleNeighborId } from '@/components/titlebar/tabGroupLayout'
 import { normalizeTabSession } from '@/services/tabSession'
 
-export type TabType = 'terminal' | 'settings' | 'sftp' | 'forwarding'
+export type TabType = 'terminal' | 'settings' | 'sftp' | 'forwarding' | 'start'
+
+/** 设置页分页 id（SettingsView 的 page 取值；Tab.initialPage 深链用） */
+export type SettingsPageId = 'terminal' | 'profiles' | 'ssh' | 'quickCommands' | 'keys' | 'appearance' | 'colorSchemes' | 'hotkeys' | 'tabGroups' | 'about'
 
 export interface Tab {
     id: string
@@ -20,6 +23,8 @@ export interface Tab {
     cwd?: string | null
     /** 所属标签分组 id（见 config.store.tabGroups）；缺省 = 未分组 */
     groupId?: string
+    /** 设置页深链分页（仅新建 settings 标签时生效） */
+    initialPage?: SettingsPageId
 }
 
 /**
@@ -57,6 +62,10 @@ export const useTabsStore = defineStore('tabs', {
                 : (config.defaultProfile() ?? undefined)
             // cwd 继承仅对 local 档案有意义（SSH 档案的 cwd 是远端路径概念，忽略）
             const inheritsCwd = cwd && profile?.type === 'local' && !profile.cwd ? cwd : null
+            // SSH 连接记录到最近连接（连接中心起始页消费；本地档案不记）
+            if (profile?.type === 'ssh') {
+                useConfigStore().noteRecentConnection(profile.id)
+            }
             const group = groupId ? config.store.tabGroups.find(g => g.id === groupId) : undefined
             const tab: Tab = {
                 id: nanoid(),
@@ -70,7 +79,16 @@ export const useTabsStore = defineStore('tabs', {
             this.activeId = tab.id
             return tab
         },
-        openSettingsTab (): Tab {
+        /**
+         * @description 打开设置标签（单例：存在则聚焦，否则新建）；initialPage 深链
+         *              分页仅在新建时生效，已存在标签的分页不被覆盖
+         * @param initialPage 设置页深链分页（可选；仅新建时生效）
+         * @returns Tab 设置标签
+         *
+         * @example openSettingsTab('ssh')
+         *
+         */
+        openSettingsTab (initialPage?: SettingsPageId): Tab {
             const existing = this.tabs.find(t => t.type === 'settings')
             if (existing) {
                 this.activeId = existing.id
@@ -80,6 +98,7 @@ export const useTabsStore = defineStore('tabs', {
                 id: `settings-${nanoid()}`,
                 type: 'settings',
                 title: 'Settings',
+                ...(initialPage ? { initialPage } : {}),
             }
             this.tabs.push(tab)
             this.activeId = tab.id
@@ -130,8 +149,31 @@ export const useTabsStore = defineStore('tabs', {
             return tab
         },
         /**
+         * @description 打开连接中心标签（单例：存在则聚焦，否则新建；标题由
+         *              StartPageContent 挂载时按当前语言设置，同 ForwardingTabContent 先例）
+         * @returns Tab 连接中心标签
+         *
+         * @example openStartTab()
+         *
+         */
+        openStartTab (): Tab {
+            const existing = this.tabs.find(t => t.type === 'start')
+            if (existing) {
+                this.activeId = existing.id
+                return existing
+            }
+            const tab: Tab = {
+                id: `start-${nanoid()}`,
+                type: 'start',
+                title: '',
+            }
+            this.tabs.push(tab)
+            this.activeId = tab.id
+            return tab
+        },
+        /**
          * @description 关闭标签；活动标签被关时接替激活展示序最近的可见邻居（折叠组成员
-         *              不可见，直接跳过——见 visibleNeighborId），全部关空时开新终端标签
+         *              不可见，直接跳过——见 visibleNeighborId），全部关空时回到连接中心起始页
          * @param id 标签 id
          *
          * @example closeTab('tab-1')
@@ -157,7 +199,8 @@ export const useTabsStore = defineStore('tabs', {
                 }
             }
             if (this.tabs.length === 0) {
-                this.openTerminalTab()
+                // 全部关空时回到连接中心起始页
+                this.openStartTab()
             }
         },
         activate (id: string) {

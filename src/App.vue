@@ -8,6 +8,7 @@ import TerminalTabContent from '@/components/terminal/TerminalTabContent.vue'
 import SettingsView from '@/components/settings/SettingsView.vue'
 import SftpTabContent from '@/components/sftp/SftpTabContent.vue'
 import ForwardingTabContent from '@/components/forwarding/ForwardingTabContent.vue'
+import StartPageContent from '@/components/start/StartPageContent.vue'
 import HostKeyDialog from '@/components/terminal/HostKeyDialog.vue'
 import CredentialDialog from '@/components/terminal/CredentialDialog.vue'
 import TransferPopover from '@/components/sftp/TransferPopover.vue'
@@ -54,11 +55,11 @@ function onKeyup (event: KeyboardEvent): void {
 }
 
 onMounted(() => {
-    // 恢复持久化分组的标签；无恢复内容时保持现状（开首个终端标签）
+    // 恢复持久化分组的标签；无恢复内容时回到连接中心起始页
     void (async () => {
         const snapshot = await loadTabSession()
         if (!store.restoreSession(snapshot) && store.tabs.length === 0) {
-            store.openTerminalTab()
+            store.openStartTab()
         }
     })()
 
@@ -139,7 +140,8 @@ watch(() => config.store.appearance.backgroundFit, fit => {
                     v-else-if="tab.type === 'forwarding'"
                     :tab-id="tab.id"
                 />
-                <SettingsView v-else />
+                <SettingsView v-else-if="tab.type === 'settings'" :initial-page="tab.initialPage" />
+                <StartPageContent v-else-if="tab.type === 'start'" :tab-id="tab.id" />
             </div>
         </div>
         <TabStrip v-if="tabBarBottom" position="bottom" />

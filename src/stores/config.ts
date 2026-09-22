@@ -136,6 +136,9 @@ export interface AdvancedConfig {
     debugEnabled: boolean
 }
 
+/** 最近 SSH 连接记录（profileId → 最后一次连接的 epoch 毫秒；仅 SSH 档案记录） */
+export type RecentsConfig = Record<string, number>
+
 /** hotkey id -> list of sequences, each sequence a list of keystrokes */
 export type HotkeysConfig = Record<string, string[][]>
 
@@ -143,6 +146,7 @@ export interface ConfigStore {
     terminal: TerminalConfig
     appearance: AppearanceConfig
     advanced: AdvancedConfig
+    recents: RecentsConfig
     hotkeys: HotkeysConfig
     profiles: TerminalProfile[]
     /** SSH 档案分组（SSH 档案以 groupId 引用） */
@@ -160,6 +164,7 @@ export interface ConfigSnapshot {
     terminal?: Partial<TerminalConfig>
     appearance?: Partial<AppearanceConfig>
     advanced?: Partial<AdvancedConfig>
+    recents?: RecentsConfig
     hotkeys?: HotkeysConfig
     profiles?: TerminalProfile[]
     sshGroups?: SshGroup[]
@@ -212,6 +217,7 @@ export function defaultConfig (): ConfigStore {
         advanced: {
             debugEnabled: false,
         },
+        recents: {} as RecentsConfig,
         profiles: [],
         sshGroups: [],
         tabGroups: [],
@@ -360,6 +366,27 @@ export function fallbackProfile (): LocalProfile {
     }
 }
 
+/**
+ * @description upsert 一条最近连接记录并裁剪到上限（保留时间最新的 cap 条）
+ * @param recents 现有记录
+ * @param profileId 档案 id
+ * @param now 当前时间（epoch 毫秒）
+ * @param cap 保留上限
+ * @returns RecentsConfig 新记录对象（不修改入参）
+ *
+ * @example upsertRecentEntry({ a: 1 }, 'b', 2) // { a: 1, b: 2 }
+ *
+ */
+export function upsertRecentEntry (recents: RecentsConfig, profileId: string, now: number, cap = 50): RecentsConfig {
+    const next = { ...recents, [profileId]: now }
+    const ids = Object.keys(next)
+    if (ids.length <= cap) {
+        return next
+    }
+    const keep = new Set(ids.sort((a, b) => next[b]! - next[a]!).slice(0, cap))
+    return Object.fromEntries(ids.filter(id => keep.has(id)).map(id => [id, next[id]!]))
+}
+
 function isPlainObject (value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -385,6 +412,7 @@ export interface SavedBaseline {
     terminal: string
     appearance: string
     advanced: string
+    recents: string
     hotkeys: Record<string, string>
     profiles: Record<string, string>
     quickCommands: Record<string, string>
@@ -396,7 +424,7 @@ export interface SavedBaseline {
 
 /** 一条待执行的持久化操作；saved 为该实体写入成功后记入基线的快照串 */
 export type FlushOp =
-    | { kind: 'settingsSection'; key: 'terminal' | 'appearance' | 'advanced'; value: TerminalConfig | AppearanceConfig | AdvancedConfig; saved: string }
+    | { kind: 'settingsSection'; key: 'terminal' | 'appearance' | 'advanced' | 'recents'; value: TerminalConfig | AppearanceConfig | AdvancedConfig | RecentsConfig; saved: string }
     | { kind: 'hotkey'; action: string; bindings: string[][]; saved: string }
     | { kind: 'profileCreate'; profile: TerminalProfile; saved: string }
     | { kind: 'profileUpdate'; profile: TerminalProfile; saved: string }
@@ -485,6 +513,10 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
     if (advanced !== saved.advanced) {
         ops.push({ kind: 'settingsSection', key: 'advanced', value: store.advanced, saved: advanced })
     }
+    const recents = stableStringify(store.recents)
+    if (recents !== saved.recents) {
+        ops.push({ kind: 'settingsSection', key: 'recents', value: store.recents, saved: recents })
+    }
 
     // 热键取两侧 action 并集：saved-only 的 action 视为清空绑定（[]）
     for (const action of new Set([...Object.keys(store.hotkeys), ...Object.keys(saved.hotkeys)])) {
@@ -568,7 +600,7 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
 
 /** 空基线：任何非空 store 与之 diff 都会产出全量导入操作（legacy 迁移用） */
 export function emptyBaseline (): SavedBaseline {
-    return { terminal: '', appearance: '', advanced: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
+    return { terminal: '', appearance: '', advanced: '', recents: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
 }
 
 /**
@@ -584,6 +616,7 @@ export function captureBaseline (store: ConfigStore): SavedBaseline {
         terminal: stableStringify(store.terminal),
         appearance: stableStringify(store.appearance),
         advanced: stableStringify(store.advanced),
+        recents: stableStringify(store.recents),
         hotkeys: Object.fromEntries(Object.entries(store.hotkeys).map(([action, bindings]) => [action, stableStringify(bindings)])),
         profiles: Object.fromEntries(store.profiles.map(profile => [profile.id, stableStringify(profile)])),
         quickCommands: Object.fromEntries(store.quickCommands.map(command => [command.id, stableStringify(command)])),
@@ -737,7 +770,7 @@ export const useConfigStore = defineStore('config', () => {
 
     // 持久化 watch 必须在 setup 同步流创建（load() 的 await 之后创建在 WKWebView 实测不触发）；
     // getter 数组 + deep 逐分片建依赖（theme store 同款模式）。loaded 门控在 scheduleSave 内。
-    watch(() => [store.terminal, store.appearance, store.advanced, store.hotkeys, store.profiles, store.sshGroups, store.tabGroups, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
+    watch(() => [store.terminal, store.appearance, store.advanced, store.recents, store.hotkeys, store.profiles, store.sshGroups, store.tabGroups, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
 
     async function load (): Promise<void> {
         let userConfig: Record<string, unknown> | null = null
@@ -759,6 +792,10 @@ export const useConfigStore = defineStore('config', () => {
             }
             if (userConfig) {
                 deepMerge(store, userConfig)
+                // recents 的键是动态 profileId，deepMerge 只回填 target 已有键，需整体替换恢复
+                if (isPlainObject(userConfig.recents)) {
+                    store.recents = userConfig.recents as RecentsConfig
+                }
                 store.hotkeys = normalizeHotkeysConfig(store.hotkeys)
                 sanitizeProfiles()
                 sanitizeQuickCommands()
@@ -865,6 +902,18 @@ export const useConfigStore = defineStore('config', () => {
     }
 
     /**
+     * @description 记录一次 SSH 最近连接（upsert 时间戳 + 裁剪）
+     * @param profileId 档案 id
+     * @returns void
+     *
+     * @example noteRecentConnection('ssh-1')
+     *
+     */
+    function noteRecentConnection (profileId: string): void {
+        store.recents = upsertRecentEntry(store.recents, profileId, Date.now())
+    }
+
+    /**
      * @description 调度一次防抖 flush（500ms 内的多次 mutation 合并）；flush 进行中到达的
      *              变更记为 pending，结束后重新调度
      * @returns void
@@ -930,5 +979,5 @@ export const useConfigStore = defineStore('config', () => {
         return `"${font}", monospace`
     }
 
-    return { store, load, reloadFromDisk, getCSSFontFamily, defaultProfile, setDefaultProfile }
+    return { store, load, reloadFromDisk, getCSSFontFamily, defaultProfile, setDefaultProfile, noteRecentConnection }
 })

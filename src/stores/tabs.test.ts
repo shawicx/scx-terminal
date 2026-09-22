@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useTabsStore } from './tabs'
-import { useConfigStore, type LocalProfile } from './config'
+import { useConfigStore, type LocalProfile, type SshProfile } from './config'
 
 function localProfile (overrides: Partial<LocalProfile> = {}): LocalProfile {
     return {
@@ -14,6 +14,22 @@ function localProfile (overrides: Partial<LocalProfile> = {}): LocalProfile {
         cwd: null,
         colorScheme: null,
         loginShell: true,
+        isDefault: false,
+        ...overrides,
+    }
+}
+
+function sshProfile (overrides: Partial<SshProfile> = {}): SshProfile {
+    return {
+        id: 'ssh-test',
+        type: 'ssh',
+        name: 'Test Host',
+        host: '10.0.0.1',
+        port: 22,
+        user: 'root',
+        auth: 'password',
+        keyId: null,
+        colorScheme: null,
         isDefault: false,
         ...overrides,
     }
@@ -55,14 +71,6 @@ describe('tabs store', () => {
         store.closeTab(t2.id)
         expect(store.activeId).toBe(t3.id) // neighbor to the right
         expect(store.tabs.map(t => t.id)).toEqual([t1.id, t3.id])
-    })
-
-    it('closing the last tab opens a fresh one', () => {
-        const store = useTabsStore()
-        const t1 = store.openTerminalTab()
-        store.closeTab(t1.id)
-        expect(store.tabs).toHaveLength(1)
-        expect(store.activeId).toBe(store.tabs[0]!.id)
     })
 
     it('sets titles', () => {
@@ -273,5 +281,65 @@ describe('tabs store', () => {
         expect(store.restoreSession(null)).toBe(false)
         expect(store.restoreSession({ version: 99, entries: [] })).toBe(false)
         expect(store.tabs).toEqual([t1])
+    })
+})
+
+describe('start 标签与设置页深链', () => {
+    beforeEach(() => {
+        setActivePinia(createPinia())
+    })
+
+    it('openStartTab 单例聚焦：二次调用不新建', () => {
+        const store = useTabsStore()
+        const t1 = store.openStartTab()
+        const t2 = store.openStartTab()
+        expect(t2.id).toBe(t1.id)
+        expect(store.tabs.filter(t => t.type === 'start')).toHaveLength(1)
+        expect(store.activeId).toBe(t1.id)
+    })
+
+    it('closing the last tab opens the start tab（改写原 "opens a fresh one" 用例）', () => {
+        const store = useTabsStore()
+        const t1 = store.openTerminalTab()
+        store.closeTab(t1.id)
+        expect(store.tabs).toHaveLength(1)
+        expect(store.tabs[0]!.type).toBe('start')
+        expect(store.activeId).toBe(store.tabs[0]!.id)
+    })
+
+    it('openTerminalTab 对 ssh 档案记录最近连接', () => {
+        const config = useConfigStore()
+        config.store.profiles = [sshProfile({ id: 'ssh-1', name: 'prod' })]
+        const store = useTabsStore()
+        store.openTerminalTab('ssh-1')
+        expect(config.store.recents['ssh-1']).toBeTypeOf('number')
+    })
+
+    it('openTerminalTab 对本地档案不记录最近连接', () => {
+        const config = useConfigStore()
+        config.store.profiles = [localProfile({ id: 'local-1', isDefault: true })]
+        const store = useTabsStore()
+        store.openTerminalTab('local-1')
+        expect(config.store.recents).toEqual({})
+    })
+
+    it('openSettingsTab 可携带 initialPage（仅新建时生效）', () => {
+        const store = useTabsStore()
+        const tab = store.openSettingsTab('ssh')
+        expect(tab.initialPage).toBe('ssh')
+        const again = store.openSettingsTab('about')
+        expect(again.id).toBe(tab.id)
+        expect(again.initialPage).toBe('ssh')
+    })
+
+    it('restoreSession 不恢复 start 标签（快照归一化丢弃 type，恒为 terminal）', () => {
+        const config = useConfigStore()
+        config.store.profiles = [localProfile({ id: 'local-1', isDefault: true })]
+        config.store.tabGroups = [{ id: 'g', name: 'G', persistTabs: true }]
+        const store = useTabsStore()
+        const snapshot = { version: 1, entries: [{ groupId: 'g', tabs: [{ type: 'start' }, { profileId: 'local-1' }] }] }
+        store.restoreSession(snapshot)
+        expect(store.tabs.length).toBeGreaterThan(0)
+        expect(store.tabs.some(t => t.type === 'start')).toBe(false)
     })
 })
