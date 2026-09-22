@@ -2400,7 +2400,7 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     color: var(--color-muted-foreground);
     font-size: 13px;
     text-align: left;
-    cursor: default;
+    cursor: pointer;
     transition: background-color 0.25s ease, color 0.25s ease;
 }
 
@@ -2742,7 +2742,7 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     background: transparent;
     color: var(--color-muted-foreground);
     font-size: 13px;
-    cursor: default;
+    cursor: pointer;
     transition: color 0.25s ease, border-color 0.25s ease;
 }
 
@@ -2760,7 +2760,7 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     border-radius: 6px;
     background: transparent;
     text-align: left;
-    cursor: default;
+    cursor: pointer;
     transition: background-color 0.25s ease;
 }
 
@@ -2871,7 +2871,7 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     border-radius: 4px;
     background: transparent;
     color: var(--color-muted-foreground);
-    cursor: default;
+    cursor: pointer;
 }
 
 .qc-group-action:hover {
@@ -2917,7 +2917,7 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
 
 .import-label {
     display: inline-flex;
-    cursor: default;
+    cursor: pointer;
 }
 
 /* 与 Button outline/sm 同视觉，但保持非交互元素（label 才能激活隐藏的 file input） */
@@ -2961,7 +2961,7 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     background: transparent;
     color: var(--color-muted-foreground);
     font-size: 12px;
-    cursor: default;
+    cursor: pointer;
     transition: color 0.25s ease, border-color 0.25s ease, background-color 0.25s ease;
 }
 
@@ -3029,7 +3029,7 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     border: 1px solid var(--color-border);
     border-radius: 4px;
     background: transparent;
-    cursor: default;
+    cursor: pointer;
 }
 
 .scheme-hex-input {
@@ -3055,7 +3055,7 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     font-family: var(--font-mono);
     font-size: 12px;
     text-align: center;
-    cursor: default;
+    cursor: pointer;
     transition: border-color 0.25s ease;
 }
 

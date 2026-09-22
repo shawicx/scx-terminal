@@ -141,7 +141,7 @@ function commit (): void {
     border: none;
     border-radius: 50%;
     flex-shrink: 0;
-    cursor: default;
+    cursor: pointer;
     transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 

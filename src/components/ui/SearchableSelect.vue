@@ -223,7 +223,7 @@ watch(selectedOption, option => {
     padding: 4px 8px;
     border-radius: 4px;
     font-size: 13px;
-    cursor: default;
+    cursor: pointer;
 }
 
 .searchable-option.highlighted {

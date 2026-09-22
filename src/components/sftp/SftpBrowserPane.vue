@@ -580,6 +580,7 @@ export default { name: 'SftpBrowserPane' }
     border: 1px solid transparent;
     border-radius: 6px;
     overflow: hidden;
+    cursor: pointer;
     cursor: text;
 }
 
@@ -595,7 +596,7 @@ export default { name: 'SftpBrowserPane' }
     font-size: 12px;
     font-family: var(--font-mono);
     white-space: nowrap;
-    cursor: default;
+    cursor: pointer;
     transition: color 0.25s ease;
 }
 
@@ -645,7 +646,7 @@ export default { name: 'SftpBrowserPane' }
     background: transparent;
     color: var(--color-muted-foreground);
     font-size: 11px;
-    cursor: default;
+    cursor: pointer;
     transition: color 0.25s ease;
 }
 
@@ -705,7 +706,7 @@ export default { name: 'SftpBrowserPane' }
     gap: 8px;
     padding: 4px 10px;
     font-size: 12px;
-    cursor: default;
+    cursor: pointer;
     user-select: none;
 }
 

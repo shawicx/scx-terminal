@@ -109,7 +109,7 @@ const tabsInline = computed(() => config.store.appearance.tabBarPosition !== 'bo
     border-radius: 6px;
     background: transparent;
     color: var(--color-muted-foreground);
-    cursor: default;
+    cursor: pointer;
     transition: background-color 0.25s ease, color 0.25s ease;
 }
 
@@ -137,7 +137,7 @@ const tabsInline = computed(() => config.store.appearance.tabBarPosition !== 'bo
     background: transparent;
     color: var(--color-muted-foreground);
     opacity: 0.5;
-    cursor: default;
+    cursor: pointer;
     transition: background-color 0.25s ease, color 0.25s ease, opacity 0.25s ease;
 }
 

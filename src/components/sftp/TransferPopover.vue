@@ -222,7 +222,7 @@ export default { name: 'TransferPopover' }
     border-radius: 6px;
     background: transparent;
     color: var(--color-muted-foreground);
-    cursor: default;
+    cursor: pointer;
     transition: background-color 0.25s ease, color 0.25s ease;
 }
 
@@ -304,7 +304,7 @@ export default { name: 'TransferPopover' }
     border-radius: 4px;
     background: transparent;
     color: var(--color-muted-foreground);
-    cursor: default;
+    cursor: pointer;
     transition: background-color 0.25s ease, color 0.25s ease;
 }
 

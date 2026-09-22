@@ -298,7 +298,7 @@ watch(quickCommandPaletteOpen, value => {
     background: var(--color-accent);
     color: var(--color-accent-foreground);
     font-size: 12px;
-    cursor: default;
+    cursor: pointer;
     transition: border-color 0.15s ease, color 0.15s ease;
 }
 

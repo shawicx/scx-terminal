@@ -174,7 +174,7 @@ function selectScheme (name: string): void {
     border-radius: 6px;
     background: transparent;
     color: var(--color-foreground);
-    cursor: default;
+    cursor: pointer;
     font-size: 12px;
 }
 
@@ -217,7 +217,7 @@ function selectScheme (name: string): void {
     border-radius: 8px;
     background: var(--color-card);
     color: var(--color-foreground);
-    cursor: default;
+    cursor: pointer;
     text-align: left;
     transition: border-color 0.12s ease;
 }

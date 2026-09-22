@@ -93,7 +93,7 @@ function iconFor (kind: Suggestion['kind']) {
     height: 26px;
     padding: 0 8px;
     border-radius: 4px;
-    cursor: default;
+    cursor: pointer;
     white-space: nowrap;
 }
 

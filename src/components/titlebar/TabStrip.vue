@@ -601,7 +601,7 @@ function onAuxClick (id: string, event: MouseEvent) {
     border-radius: 6px 6px 0 0;
     font-size: 12px;
     color: var(--color-muted-foreground);
-    cursor: default;
+    cursor: pointer;
     position: relative;
     /* 定宽（默认即最小宽度），标题超长省略：标题随 shell/目录上报变化时不引起标签宽度抖动；激活态 200px 见 .tab-header.active */
     width: 160px;
@@ -693,7 +693,7 @@ function onAuxClick (id: string, event: MouseEvent) {
     background: transparent;
     color: inherit;
     opacity: 0;
-    cursor: default;
+    cursor: pointer;
     transition: opacity 0.25s ease, background-color 0.25s ease;
     flex-shrink: 0;
 }
@@ -726,7 +726,7 @@ function onAuxClick (id: string, event: MouseEvent) {
     right: 0;
     background: var(--color-card);
     color: var(--color-muted-foreground);
-    cursor: default;
+    cursor: pointer;
     transition: background-color 0.25s ease, color 0.25s ease;
 }
 
@@ -754,7 +754,7 @@ function onAuxClick (id: string, event: MouseEvent) {
     background: var(--color-card);
     font-size: 12px;
     color: var(--color-muted-foreground);
-    cursor: default;
+    cursor: pointer;
     position: relative;
     flex-shrink: 0;
     user-select: none;

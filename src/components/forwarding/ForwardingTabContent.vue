@@ -420,7 +420,7 @@ export default { name: 'ForwardingTabContent' }
     background: transparent;
     color: var(--color-muted-foreground);
     font-size: 12px;
-    cursor: default;
+    cursor: pointer;
 }
 
 .group-name {

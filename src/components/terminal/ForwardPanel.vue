@@ -305,7 +305,7 @@ export default { name: 'ForwardPanel' }
     font-size: 11px;
     white-space: nowrap;
     flex-shrink: 0;
-    cursor: default;
+    cursor: pointer;
     transition: color 0.25s ease;
 }
 

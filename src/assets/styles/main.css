@@ -134,6 +134,14 @@ body,
     outline-offset: 1px;
 }
 
+/* 可点击控件统一手型光标：原生按钮与语义化可点元素（TabStrip 标签/分组 chip 等）
+   兜底为 pointer；disabled 不生效，scoped 样式仍可按需覆盖 */
+button:not(:disabled),
+[role='button']:not(:disabled),
+[role='tab'] {
+    cursor: pointer;
+}
+
 ::-webkit-scrollbar-thumb:hover {
     background: color-mix(in oklch, var(--muted-foreground) 50%, transparent);
 }

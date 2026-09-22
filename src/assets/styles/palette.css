@@ -62,7 +62,7 @@
     color: var(--color-foreground);
     font-size: 13px;
     text-align: left;
-    cursor: default;
+    cursor: pointer;
     transition: background 0.1s ease;
 }
 

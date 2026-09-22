@@ -547,6 +547,6 @@ export default { name: 'SftpTabContent' }
     margin-top: 10px;
     font-size: 12px;
     color: var(--color-muted-foreground);
-    cursor: default;
+    cursor: pointer;
 }
 </style>
