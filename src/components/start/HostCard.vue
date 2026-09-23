@@ -85,12 +85,16 @@ const endpoint = computed(() => props.profile.port === 22
     white-space: nowrap;
 }
 .host-actions {
-    display: none;
+    display: flex;
     gap: 2px;
     margin-top: 8px;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease, visibility 0.15s ease;
 }
 .host-card:hover .host-actions {
-    display: flex;
+    opacity: 1;
+    visibility: visible;
 }
 .status-dot {
     width: 7px;

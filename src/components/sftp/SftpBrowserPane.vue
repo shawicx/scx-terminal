@@ -580,8 +580,8 @@ export default { name: 'SftpBrowserPane' }
     border: 1px solid transparent;
     border-radius: 6px;
     overflow: hidden;
-    cursor: pointer;
     cursor: text;
+    transition: border-color 0.15s ease;
 }
 
 .pane-path:hover {
@@ -708,6 +708,7 @@ export default { name: 'SftpBrowserPane' }
     font-size: 12px;
     cursor: pointer;
     user-select: none;
+    transition: background-color 0.15s ease;
 }
 
 .pane-entry:hover {

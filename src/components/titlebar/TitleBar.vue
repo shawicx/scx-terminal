@@ -51,7 +51,7 @@ const tabsInline = computed(() => config.store.appearance.tabBarPosition !== 'bo
             :title="t('transfer.title')"
             @click="toggleTransferCenter()"
         >
-            <ArrowUpDown :size="14" />
+            <ArrowUpDown :size="18" />
             <span v-if="transfersStore.activeTransfers.length > 0" class="indicator-badge">
                 {{ transfersStore.activeTransfers.length > 99 ? '99+' : transfersStore.activeTransfers.length }}
             </span>
@@ -65,7 +65,7 @@ const tabsInline = computed(() => config.store.appearance.tabBarPosition !== 'bo
             :title="t('forward.tabTitle')"
             @click="store.openForwardingTab()"
         >
-            <ArrowRightLeft :size="14" />
+            <ArrowRightLeft :size="18" />
             <span v-if="forwardingStore.activeStates.length > 0" class="indicator-badge">
                 {{ forwardingStore.activeStates.length > 99 ? '99+' : forwardingStore.activeStates.length }}
             </span>
@@ -73,7 +73,7 @@ const tabsInline = computed(() => config.store.appearance.tabBarPosition !== 'bo
         </button>
 
         <button class="new-tab-button settings-button" :title="t('commands.openSettings')" @click="store.openSettingsTab()">
-            <Settings :size="14" />
+            <Settings :size="18" />
         </button>
     </div>
 </template>
@@ -82,7 +82,9 @@ const tabsInline = computed(() => config.store.appearance.tabBarPosition !== 'bo
 .title-bar {
     display: flex;
     align-items: stretch;
-    height: 38px;
+    /* 42 = 38(标签呼吸空间) + 红绿灯实际中心 20.8 的两倍取整：y=17 时原生按钮
+       中心固定在窗口 20.8pt，CSS 标题栏同步取 42px 让两者几何居中 */
+    height: 42px;
     flex-shrink: 0;
     background: var(--color-card);
     border-bottom: 1px solid var(--color-border);
@@ -90,7 +92,8 @@ const tabsInline = computed(() => config.store.appearance.tabBarPosition !== 'bo
 }
 
 .traffic-light-space {
-    width: 76px;
+    /* 红绿灯实际右缘约 92pt（x=20 + 3 按钮位），留 ~12pt 间距给首标签 */
+    width: 100px;
     flex-shrink: 0;
 }
 
@@ -103,8 +106,8 @@ const tabsInline = computed(() => config.store.appearance.tabBarPosition !== 'bo
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
+    width: 28px;
+    height: 28px;
     border: none;
     border-radius: 6px;
     background: transparent;
@@ -129,8 +132,8 @@ const tabsInline = computed(() => config.store.appearance.tabBarPosition !== 'bo
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
+    width: 28px;
+    height: 28px;
     align-self: center;
     border: none;
     border-radius: 6px;

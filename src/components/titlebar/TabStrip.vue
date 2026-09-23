@@ -532,7 +532,7 @@ function onAuxClick (id: string, event: MouseEvent) {
                             :title="t('commands.closeTab')"
                             @click.stop="store.closeTab(item.tab.id)"
                         >
-                            <X :size="12" />
+                            <X :size="13" />
                         </button>
                     </div>
                 </ContextMenu>
@@ -541,7 +541,7 @@ function onAuxClick (id: string, event: MouseEvent) {
             <!-- 「+」随标签排布：未溢出时紧跟最后一个标签，溢出后 sticky 吸附标签区右缘 -->
             <DropdownMenu :items="newTabMenuItems" @select="onNewTabMenuSelect">
                 <button class="new-tab-button" :title="t('commands.newTab')">
-                    <Plus :size="14" />
+                    <Plus :size="16" />
                 </button>
             </DropdownMenu>
         </div>
@@ -557,11 +557,11 @@ function onAuxClick (id: string, event: MouseEvent) {
     display: contents;
 }
 
-/* bottom 模式：独立标签条（含底色与上描边，方向翻转） */
+/* bottom 模式：独立标签条（含底色与上描边，方向翻转），高度与 top 模式标题栏一致 */
 .tab-strip--bottom {
     display: flex;
     align-items: flex-start;
-    height: 38px;
+    height: 42px;
     flex-shrink: 0;
     background: var(--color-card);
     border-top: 1px solid var(--color-border);
@@ -595,23 +595,25 @@ function onAuxClick (id: string, event: MouseEvent) {
     align-items: center;
     gap: 6px;
     padding: 0 10px;
-    height: 30px;
+    height: 32px;
     border: 1px solid transparent;
     border-bottom: none;
     border-radius: 6px 6px 0 0;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--color-muted-foreground);
     cursor: pointer;
     position: relative;
     /* 定宽（默认即最小宽度），标题超长省略：标题随 shell/目录上报变化时不引起标签宽度抖动；激活态 200px 见 .tab-header.active */
     width: 160px;
     min-width: 160px;
-    transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease, width 0.25s ease;
+    /* min-width 必须与 width 同帧过渡：激活时 min-width 先行跳变会压制 width 动画，
+       造成「变宽瞬跳、变窄平滑」的不对称 */
+    transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease, width 0.25s ease, min-width 0.25s ease;
 }
 
 /* 激活标签与内容区连通：背景取内容区底色，侧/顶描边 + 下探 1px 盖住标题栏底边线；加宽至 200px 突出当前标签 */
 .tab-header.active {
-    height: 31px;
+    height: 33px;
     margin-bottom: -1px;
     width: 200px;
     min-width: 200px;
@@ -677,7 +679,7 @@ function onAuxClick (id: string, event: MouseEvent) {
     border-radius: 4px;
     background: var(--color-background);
     color: var(--color-foreground);
-    font-size: 12px;
+    font-size: 13px;
     outline: none;
 }
 
@@ -685,8 +687,8 @@ function onAuxClick (id: string, event: MouseEvent) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     padding: 0;
     border: none;
     border-radius: 4px;
@@ -712,8 +714,8 @@ function onAuxClick (id: string, event: MouseEvent) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
+    width: 28px;
+    height: 28px;
     align-self: center;
     flex-shrink: 0;
     margin-left: 2px;
@@ -746,13 +748,13 @@ function onAuxClick (id: string, event: MouseEvent) {
     align-items: center;
     gap: 4px;
     padding: 0 8px;
-    height: 26px;
+    height: 28px;
     align-self: center;
     margin-left: 8px;
     border: 1px solid var(--color-border);
     border-radius: 999px;
     background: var(--color-card);
-    font-size: 12px;
+    font-size: 13px;
     color: var(--color-muted-foreground);
     cursor: pointer;
     position: relative;

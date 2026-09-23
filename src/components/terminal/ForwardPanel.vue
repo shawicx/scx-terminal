@@ -352,6 +352,7 @@ export default { name: 'ForwardPanel' }
     gap: 8px;
     padding: 5px 10px;
     font-size: 12px;
+    transition: background-color 0.15s ease;
 }
 
 .forward-row:hover {

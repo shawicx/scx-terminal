@@ -176,6 +176,7 @@ function selectScheme (name: string): void {
     color: var(--color-foreground);
     cursor: pointer;
     font-size: 12px;
+    transition: background-color 0.15s ease;
 }
 
 .scheme-group-header:hover {

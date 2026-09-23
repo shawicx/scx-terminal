@@ -1448,7 +1448,8 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
         </aside>
 
         <div class="settings-content">
-            <template v-if="page === 'terminal'">
+            <Transition name="page-fade" mode="out-in">
+            <div v-if="page === 'terminal'" key="terminal">
                 <h2>{{ t('settings.terminal') }}</h2>
 
                 <div class="settings-section">
@@ -1601,9 +1602,9 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                         </div>
                     </div>
                 </div>
-            </template>
+            </div>
 
-            <template v-else-if="page === 'profiles'">
+            <div v-else-if="page === 'profiles'" key="profiles">
                 <h2>{{ t('settings.localTerminalPage') }}</h2>
                 <div class="master-detail">
                     <div class="detail-list">
@@ -1689,9 +1690,9 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                         </div>
                     </div>
                 </div>
-            </template>
+            </div>
 
-            <template v-else-if="page === 'ssh'">
+            <div v-else-if="page === 'ssh'" key="ssh">
                 <h2>{{ t('settings.sshPage') }}</h2>
                 <div class="master-detail">
                     <div class="detail-list">
@@ -1822,9 +1823,10 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                         </div>
                     </div>
                 </div>
-            </template>
+            </div>
 
-            <template v-else-if="page === 'quickCommands'">                <h2>{{ t('settings.quickCommands') }}</h2>
+            <div v-else-if="page === 'quickCommands'" key="quickCommands">
+                <h2>{{ t('settings.quickCommands') }}</h2>
                 <div class="master-detail">
                     <div class="detail-list">
                         <div class="profile-new-group">
@@ -1911,9 +1913,9 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                         </div>
                     </div>
                 </div>
-            </template>
+            </div>
 
-            <template v-else-if="page === 'keys'">
+            <div v-else-if="page === 'keys'" key="keys">
                 <h2>{{ t('settings.keychainPage') }}</h2>
                 <p class="hint">{{ t('settings.keychainHint') }}</p>
                 <p v-if="keysError" class="import-error">{{ keysError }}</p>
@@ -2063,9 +2065,9 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                         </div>
                     </div>
                 </div>
-            </template>
+            </div>
 
-            <template v-else-if="page === 'appearance'">
+            <div v-else-if="page === 'appearance'" key="appearance">
                 <h2>{{ t('settings.appearance') }}</h2>
                 <div class="settings-section">
                     <div class="settings-card">
@@ -2124,9 +2126,9 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                         </div>
                     </div>
                 </div>
-            </template>
+            </div>
 
-            <template v-else-if="page === 'colorSchemes'">
+            <div v-else-if="page === 'colorSchemes'" key="colorSchemes">
                 <h2>{{ t('settings.colorSchemesPage') }}</h2>
                 <ColorSchemePicker v-model="store.appearance.colorScheme" :custom-schemes="store.colorSchemes" />
                 <div class="settings-section">
@@ -2228,9 +2230,9 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                         </div>
                     </template>
                 </div>
-            </template>
+            </div>
 
-            <template v-else-if="page === 'hotkeys'">
+            <div v-else-if="page === 'hotkeys'" key="hotkeys">
                 <h2>{{ t('settings.hotkeys') }}</h2>
                 <p class="hint">{{ t('settings.hotkeysHint') }}</p>
                 <div class="settings-section">
@@ -2251,9 +2253,9 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                         </div>
                     </div>
                 </div>
-            </template>
+            </div>
 
-            <template v-else-if="page === 'tabGroups'">
+            <div v-else-if="page === 'tabGroups'" key="tabGroups">
                 <h2>{{ t('settings.tabGroupsPage') }}</h2>
                 <p class="hint">{{ t('settings.tabGroupsPersistHint') }}</p>
                 <div class="settings-section">
@@ -2281,9 +2283,9 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                         </span>
                     </div>
                 </div>
-            </template>
+            </div>
 
-            <template v-else>
+            <div v-else key="about">
                 <h2>{{ t('settings.about') }}</h2>
                 <div class="about-hero">
                     <img class="about-icon" :src="appIcon" alt="scx-terminal" />
@@ -2325,7 +2327,8 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                     </div>
                     <p class="hint">{{ t('settings.debugModeHint') }}</p>
                 </div>
-            </template>
+            </div>
+            </Transition>
         </div>
 
         <Dialog v-if="confirmState" :title="t('settings.deleteConfirmTitle')" :width="380" @cancel="confirmState = null">
@@ -2872,6 +2875,7 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     background: transparent;
     color: var(--color-muted-foreground);
     cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .qc-group-action:hover {
