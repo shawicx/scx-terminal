@@ -51,11 +51,12 @@ jobs:
           NOTES: ${{ steps.git-cliff.outputs.content }}
         run: |
           printf '%s' "$NOTES" > /tmp/release-notes.md
+          jq -n --arg tag "${{ github.ref_name }}" \
+                --arg name "SCX Terminal ${{ github.ref_name }}" \
+                --rawfile notes /tmp/release-notes.md \
+                '{tag_name: $tag, name: $name, body: $notes, draft: true}' > /tmp/release-payload.json
           release_id=$(gh api --method POST "repos/${{ github.repository }}/releases" \
-            -f "tag_name=${{ github.ref_name }}" \
-            -f "name=SCX Terminal ${{ github.ref_name }}" \
-            -f "notes=@/tmp/release-notes.md" \
-            -F draft=true \
+            --input /tmp/release-payload.json \
             --jq '.id') || release_id=''
           # re-run 场景：同名 release 已存在（already_exists）→ 回退列表按 tag_name 匹配
           if [ -z "$release_id" ] || [ "$release_id" = "null" ]; then
@@ -66,6 +67,11 @@ jobs:
             echo "::error::release_id not resolvable for tag ${{ github.ref_name }}"
             exit 1
           fi
+          # 已存在的 release（手动建/re-run 复用）不会经过上面的 create 赋值，
+          # 统一补 PATCH 一次 notes，保证 body 与 cliff 输出一致
+          jq -n --rawfile notes /tmp/release-notes.md '{body: $notes}' > /tmp/notes-payload.json
+          gh api --method PATCH "repos/${{ github.repository }}/releases/$release_id" \
+            --input /tmp/notes-payload.json >/dev/null
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
   build:

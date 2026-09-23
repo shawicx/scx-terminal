@@ -9,6 +9,7 @@ pub mod proc_cwd;
 mod pty;
 mod secrets;
 mod sftp;
+mod snapshot;
 mod shells;
 mod ssh;
 mod transfers;
@@ -126,6 +127,8 @@ pub fn run() {
             config::tab_session_set,
             config::color_scheme_save,
             config::color_scheme_delete,
+            snapshot::config_export,
+            snapshot::config_import,
             secrets::key_generate,
             secrets::key_import,
             secrets::key_inspect,

@@ -95,6 +95,11 @@ impl ConfigState {
         migrate(&conn).expect("failed to init config schema");
         Self { conn: Mutex::new(conn) }
     }
+
+    /// 供备份模块（snapshot.rs）做行级读写；锁语义与本模块内部一致
+    pub(crate) fn lock_conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap()
+    }
 }
 
 /// 基于 PRAGMA user_version 的迁移；v1 = 初始表结构
@@ -174,8 +179,8 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-/// 在写入事务中标记「库已初始化」（区分从未写过与写了空配置）
-fn mark_initialized(conn: &Connection) -> rusqlite::Result<usize> {
+/// 在写入事务中标记「库已初始化」（区分从未写过与写了空配置；备份导入复用）
+pub(crate) fn mark_initialized(conn: &Connection) -> rusqlite::Result<usize> {
     conn.execute(
         "INSERT INTO meta (key, value) VALUES ('initialized', '1')
          ON CONFLICT(key) DO UPDATE SET value = '1'",
@@ -204,8 +209,8 @@ fn next_sort_order(conn: &Connection, table: &str) -> rusqlite::Result<i64> {
 
 // ---- 读取 ----
 
-/// 聚合读取全量配置；meta 无 initialized 标记（全新库）时返回 None
-fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot>, String> {
+/// 聚合读取全量配置；meta 无 initialized 标记（全新库）时返回 None（备份模块导入后校验复用）
+pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot>, String> {
     let conn = state.conn.lock().unwrap();
     let initialized: Option<String> = conn
         .query_row("SELECT value FROM meta WHERE key = 'initialized'", [], |row| row.get(0))

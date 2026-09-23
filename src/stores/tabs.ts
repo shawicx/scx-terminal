@@ -7,7 +7,7 @@ import { normalizeTabSession } from '@/services/tabSession'
 export type TabType = 'terminal' | 'settings' | 'sftp' | 'forwarding' | 'start'
 
 /** 设置页分页 id（SettingsView 的 page 取值；Tab.initialPage 深链用） */
-export type SettingsPageId = 'terminal' | 'profiles' | 'ssh' | 'quickCommands' | 'keys' | 'appearance' | 'colorSchemes' | 'hotkeys' | 'tabGroups' | 'about'
+export type SettingsPageId = 'terminal' | 'profiles' | 'ssh' | 'quickCommands' | 'keys' | 'appearance' | 'colorSchemes' | 'hotkeys' | 'tabGroups' | 'backup' | 'about'
 
 export interface Tab {
     id: string
