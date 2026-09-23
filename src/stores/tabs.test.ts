@@ -15,6 +15,7 @@ function localProfile (overrides: Partial<LocalProfile> = {}): LocalProfile {
         colorScheme: null,
         loginShell: true,
         isDefault: false,
+        builtin: false,
         ...overrides,
     }
 }

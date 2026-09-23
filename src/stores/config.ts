@@ -25,6 +25,10 @@ export interface LocalProfile {
     colorScheme: string | null
     loginShell: boolean
     isDefault: boolean
+    /** 系统预置档案（随默认分组生成）：不可删除、cwd 只读（见 LocalGroup） */
+    builtin: boolean
+    /** 所属分组 id（见 LocalGroup）；缺省 = 未分组 */
+    groupId?: string
 }
 
 /** SSH 远程档案 */
@@ -49,6 +53,14 @@ export interface SshProfile {
 
 /** 终端配置档案：type 为判别字段（local 本地 shell / ssh 远程连接） */
 export type TerminalProfile = LocalProfile | SshProfile
+
+/** 本地档案分组（管理用实体，本地档案以 groupId 单选引用；无引用 = 未分组） */
+export interface LocalGroup {
+    id: string
+    name: string
+    /** 系统默认分组（/etc/shells 生成）：不可删除、不可重命名 */
+    builtin: boolean
+}
 
 /** SSH 档案分组（管理用实体，SSH 档案以 groupId 单选引用；无引用 = 默认分组） */
 export interface SshGroup {
@@ -149,6 +161,8 @@ export interface ConfigStore {
     recents: RecentsConfig
     hotkeys: HotkeysConfig
     profiles: TerminalProfile[]
+    /** 本地档案分组（本地档案以 groupId 引用） */
+    localGroups: LocalGroup[]
     /** SSH 档案分组（SSH 档案以 groupId 引用） */
     sshGroups: SshGroup[]
     /** 标签分组（标签页以 groupId 引用） */
@@ -167,6 +181,7 @@ export interface ConfigSnapshot {
     recents?: RecentsConfig
     hotkeys?: HotkeysConfig
     profiles?: TerminalProfile[]
+    localGroups?: LocalGroup[]
     sshGroups?: SshGroup[]
     tabGroups?: TabGroup[]
     colorSchemes?: TerminalColorScheme[]
@@ -219,6 +234,7 @@ export function defaultConfig (): ConfigStore {
         },
         recents: {} as RecentsConfig,
         profiles: [],
+        localGroups: [],
         sshGroups: [],
         tabGroups: [],
         colorSchemes: [],
@@ -229,7 +245,49 @@ export function defaultConfig (): ConfigStore {
 }
 
 /**
- * @description 由系统 shell 列表（/etc/shells）生成默认的 local 配置档案；默认 shell 档案置顶
+ * @description 默认分组 id：按 shell id 确定性生成（首次生成与存量迁移共用，保证幂等）
+ * @param shellId Rust list_shells 返回的 shell id
+ * @returns string 分组 id
+ *
+ * @example localGroupIdFor('zsh') // 'localgroup-zsh'
+ *
+ */
+export function localGroupIdFor (shellId: string): string {
+    return `localgroup-${shellId}`
+}
+
+/**
+ * @description 由系统 shell 列表生成本地档案默认分组：每 shell 一组（builtin），默认
+ *              shell 的组置顶，其余按 /etc/shells 顺序
+ * @param shells Rust list_shells 返回的 shell 列表
+ * @returns LocalGroup[] 默认分组列表（默认 shell 的组在首位）
+ *
+ * @example localGroupsFromShells([{ id: 'bash' }, { id: 'zsh', default: true }])[0].name // 'zsh'
+ *
+ */
+export function localGroupsFromShells (shells: Shell[]): LocalGroup[] {
+    return defaultShellFirst(shells).map(shell => ({
+        id: localGroupIdFor(shell.id),
+        name: shell.name,
+        builtin: true,
+    }))
+}
+
+/** shells 排序副本：默认 shell 置顶，其余保持 /etc/shells 顺序（生成分组/迁移共用） */
+function defaultShellFirst (shells: Shell[]): Shell[] {
+    const index = shells.findIndex(shell => shell.default)
+    if (index <= 0) {
+        return [...shells]
+    }
+    const sorted = [...shells]
+    const [defaultShell] = sorted.splice(index, 1)
+    sorted.unshift(defaultShell!)
+    return sorted
+}
+
+/**
+ * @description 由系统 shell 列表生成默认的 local 配置档案：每 shell 一个预置档案
+ *              （builtin + 归入对应默认分组），默认 shell 档案置顶且标 isDefault
  * @param shells Rust list_shells 返回的 shell 列表
  * @param loginShell 生成的档案是否以登录 shell 启动（取全局 terminal.loginShell 当前值）
  * @returns LocalProfile[] 档案列表（系统默认 shell 标 isDefault 且排首位，仅首个默认生效）
@@ -255,9 +313,50 @@ export function profilesFromShells (shells: Shell[], loginShell: boolean): Local
             colorScheme: null,
             loginShell,
             isDefault,
+            builtin: true,
+            groupId: localGroupIdFor(shell.id),
         }
     })
     return defaultFirstProfiles(profiles)
+}
+
+/**
+ * @description 存量平铺档案迁移进分组模型（localGroups 键不存在时于 load() 触发一次）：
+ *              按 id 前缀 `local-{shellId}-` + command 双条件识别首次自动生成的档案，
+ *              标 builtin 并归入对应默认分组；某 shell 的自动档案已不存在则补建全新
+ *              预置档案；自建档案保持未分组；isDefault 标记原样保留
+ * @param profiles 现有全部档案（取其中 local 类型，入参不被修改）
+ * @param shells Rust list_shells 返回的 shell 列表
+ * @param loginShell 补建档案的登录 shell 开关（取全局 terminal.loginShell 当前值）
+ * @returns { groups: LocalGroup[], profiles: LocalProfile[] } 迁移后的分组与本地档案
+ *
+ * @example migrateLocalGroups([], [{ id: 'zsh', name: 'zsh', command: '/bin/zsh', args: [], default: true }], true).profiles[0].builtin // true
+ *
+ */
+export function migrateLocalGroups (profiles: TerminalProfile[], shells: Shell[], loginShell: boolean): { groups: LocalGroup[], profiles: TerminalProfile[] } {
+    const groups = localGroupsFromShells(shells)
+    const nextProfiles: TerminalProfile[] = []
+    for (const profile of profiles) {
+        if (profile.type !== 'local') {
+            nextProfiles.push(profile)
+            continue
+        }
+        const shell = shells.find(candidate =>
+            profile.id.startsWith(`local-${candidate.id}-`) && profile.command === candidate.command)
+        if (shell) {
+            nextProfiles.push({ ...profile, builtin: true, groupId: localGroupIdFor(shell.id) })
+        } else {
+            nextProfiles.push(profile)
+        }
+    }
+    const missing = defaultShellFirst(shells).filter(shell =>
+        !nextProfiles.some(profile => profile.type === 'local' && profile.groupId === localGroupIdFor(shell.id)))
+    if (missing.length > 0) {
+        const rebuilt = profilesFromShells(missing, loginShell).map(profile =>
+            ({ ...profile, isDefault: false }) as LocalProfile)
+        nextProfiles.push(...rebuilt)
+    }
+    return { groups, profiles: nextProfiles }
 }
 
 /**
@@ -277,6 +376,41 @@ export function defaultFirstProfiles<T extends TerminalProfile> (profiles: T[]):
     const [defaultProfile] = sorted.splice(index, 1)
     sorted.unshift(defaultProfile!)
     return sorted
+}
+
+/** 设置页本地档案分段视图（默认分组置顶 + 各分组定义序） */
+export interface LocalProfileSection {
+    group: LocalGroup | null
+    profiles: LocalProfile[]
+}
+
+/**
+ * @description 把本地档案按分组整理为分段列表：未分组段以「默认分组」语义置顶
+ *              （对齐 SSH 页 buildGroupViews 的默认分组置顶；空则不出现），其后各
+ *              分组按定义序（默认分组生成在先、自定义组在后）；段内档案保持传入顺序
+ * @param profiles 本地档案列表
+ * @param groups 本地分组列表（config 顺序）
+ * @returns LocalProfileSection[] 分段列表
+ *
+ * @example groupLocalProfiles([{ groupId: 'g' }], [{ id: 'g', name: 'zsh', builtin: true }])[0].group // null（默认分组）
+ *
+ */
+export function groupLocalProfiles (profiles: LocalProfile[], groups: LocalGroup[]): LocalProfileSection[] {
+    const sections: LocalProfileSection[] = groups.map(group => ({ group, profiles: [] }))
+    const index = new Map(sections.map(section => [section.group!.id, section]))
+    const ungrouped: LocalProfile[] = []
+    for (const profile of profiles) {
+        const section = profile.groupId ? index.get(profile.groupId) : undefined
+        if (section) {
+            section.profiles.push(profile)
+        } else {
+            ungrouped.push(profile)
+        }
+    }
+    if (ungrouped.length > 0) {
+        sections.unshift({ group: null, profiles: ungrouped })
+    }
+    return sections
 }
 
 /**
@@ -363,6 +497,7 @@ export function fallbackProfile (): LocalProfile {
         colorScheme: null,
         loginShell: true,
         isDefault: true,
+        builtin: true,
     }
 }
 
@@ -417,6 +552,7 @@ export interface SavedBaseline {
     profiles: Record<string, string>
     quickCommands: Record<string, string>
     quickCommandGroups: Record<string, string>
+    localGroups: Record<string, string>
     sshGroups: Record<string, string>
     tabGroups: Record<string, string>
     colorSchemes: Record<string, string>
@@ -435,6 +571,9 @@ export type FlushOp =
     | { kind: 'quickCommandGroupCreate'; group: QuickCommandGroup; saved: string }
     | { kind: 'quickCommandGroupUpdate'; group: QuickCommandGroup; saved: string }
     | { kind: 'quickCommandGroupDelete'; id: string }
+    | { kind: 'localGroupCreate'; group: LocalGroup; saved: string }
+    | { kind: 'localGroupUpdate'; group: LocalGroup; saved: string }
+    | { kind: 'localGroupDelete'; id: string }
     | { kind: 'sshGroupCreate'; group: SshGroup; saved: string }
     | { kind: 'sshGroupUpdate'; group: SshGroup; saved: string }
     | { kind: 'sshGroupDelete'; id: string }
@@ -560,6 +699,17 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
         ops.push({ kind: 'quickCommandGroupUpdate', group, saved: stableStringify(group) })
     }
 
+    const localGroupDiff = diffById(store.localGroups, saved.localGroups)
+    for (const id of localGroupDiff.deletes) {
+        ops.push({ kind: 'localGroupDelete', id })
+    }
+    for (const group of localGroupDiff.creates) {
+        ops.push({ kind: 'localGroupCreate', group, saved: stableStringify(group) })
+    }
+    for (const group of localGroupDiff.updates) {
+        ops.push({ kind: 'localGroupUpdate', group, saved: stableStringify(group) })
+    }
+
     const sshGroupDiff = diffById(store.sshGroups, saved.sshGroups)
     for (const id of sshGroupDiff.deletes) {
         ops.push({ kind: 'sshGroupDelete', id })
@@ -600,7 +750,7 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
 
 /** 空基线：任何非空 store 与之 diff 都会产出全量导入操作（legacy 迁移用） */
 export function emptyBaseline (): SavedBaseline {
-    return { terminal: '', appearance: '', advanced: '', recents: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
+    return { terminal: '', appearance: '', advanced: '', recents: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, localGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
 }
 
 /**
@@ -621,6 +771,7 @@ export function captureBaseline (store: ConfigStore): SavedBaseline {
         profiles: Object.fromEntries(store.profiles.map(profile => [profile.id, stableStringify(profile)])),
         quickCommands: Object.fromEntries(store.quickCommands.map(command => [command.id, stableStringify(command)])),
         quickCommandGroups: Object.fromEntries(store.quickCommandGroups.map(group => [group.id, stableStringify(group)])),
+        localGroups: Object.fromEntries(store.localGroups.map(group => [group.id, stableStringify(group)])),
         sshGroups: Object.fromEntries(store.sshGroups.map(group => [group.id, stableStringify(group)])),
         tabGroups: Object.fromEntries(store.tabGroups.map(group => [group.id, stableStringify(group)])),
         colorSchemes: Object.fromEntries(store.colorSchemes.map(scheme => [scheme.name, stableStringify(scheme)])),
@@ -667,6 +818,15 @@ async function runFlushOp (op: FlushOp): Promise<void> {
             break
         case 'quickCommandGroupDelete':
             await invoke('quick_command_group_delete', { id: op.id })
+            break
+        case 'localGroupCreate':
+            await invoke('local_group_create', { group: op.group })
+            break
+        case 'localGroupUpdate':
+            await invoke('local_group_update', { group: op.group })
+            break
+        case 'localGroupDelete':
+            await invoke('local_group_delete', { id: op.id })
             break
         case 'sshGroupCreate':
             await invoke('ssh_group_create', { group: op.group })
@@ -731,6 +891,13 @@ function commitOp (saved: SavedBaseline, op: FlushOp): void {
         case 'quickCommandGroupDelete':
             delete saved.quickCommandGroups[op.id]
             break
+        case 'localGroupCreate':
+        case 'localGroupUpdate':
+            saved.localGroups[op.group.id] = op.saved
+            break
+        case 'localGroupDelete':
+            delete saved.localGroups[op.id]
+            break
         case 'sshGroupCreate':
         case 'sshGroupUpdate':
             saved.sshGroups[op.group.id] = op.saved
@@ -770,7 +937,7 @@ export const useConfigStore = defineStore('config', () => {
 
     // 持久化 watch 必须在 setup 同步流创建（load() 的 await 之后创建在 WKWebView 实测不触发）；
     // getter 数组 + deep 逐分片建依赖（theme store 同款模式）。loaded 门控在 scheduleSave 内。
-    watch(() => [store.terminal, store.appearance, store.advanced, store.recents, store.hotkeys, store.profiles, store.sshGroups, store.tabGroups, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
+    watch(() => [store.terminal, store.appearance, store.advanced, store.recents, store.hotkeys, store.profiles, store.localGroups, store.sshGroups, store.tabGroups, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
 
     async function load (): Promise<void> {
         let userConfig: Record<string, unknown> | null = null
@@ -806,9 +973,11 @@ export const useConfigStore = defineStore('config', () => {
         loaded = true
         // 迁移走空基线：首次 flush 把合并后的全量状态写入新库
         lastSaved = migratedFromLegacy ? emptyBaseline() : captureBaseline(store)
-        // 首次运行/旧配置（用户配置无 profiles 键）：由 /etc/shells 生成默认档案并持久化；
+        // 首次运行/旧配置（用户配置无 profiles 键）：由 /etc/shells 生成默认分组与档案并持久化；
         // 键存在（即使空数组）视为用户已管理，不再生成
         await generateProfilesIfAbsent(userConfig)
+        // 存量平铺档案（有 profiles 键但 localGroups 为空）：迁移进默认分组
+        await migrateLocalGroupsIfAbsent(userConfig)
         if (migratedFromLegacy) {
             await flush()
             await invoke('config_archive_legacy_yaml').catch(error => console.error('could not archive legacy config', error))
@@ -827,8 +996,17 @@ export const useConfigStore = defineStore('config', () => {
      */
     function sanitizeProfiles (): void {
         const groupIds = new Set(store.sshGroups.map(group => group.id))
+        const localGroupIds = new Set(store.localGroups.map(group => group.id))
         for (const profile of store.profiles) {
-            if (profile.type !== 'ssh') {
+            if (profile.type === 'local') {
+                const legacy = profile as Record<string, unknown>
+                // 旧快照/迁移前数据可能缺 builtin 键（快照档案整体替换语义不填默认值）
+                if (typeof profile.builtin !== 'boolean') {
+                    profile.builtin = false
+                }
+                if (profile.groupId && !localGroupIds.has(profile.groupId)) {
+                    delete legacy.groupId
+                }
                 continue
             }
             const legacy = profile as Record<string, unknown>
@@ -863,7 +1041,7 @@ export const useConfigStore = defineStore('config', () => {
     }
 
     /**
-     * @description 用户配置不含 profiles 键时，由系统 shell 列表生成默认档案（触发持久化）
+     * @description 用户配置不含 profiles 键时，由系统 shell 列表生成默认分组与档案（触发持久化）
      * @param userConfig 解析后的用户配置对象（可为 null）
      * @returns Promise<void>
      *
@@ -874,9 +1052,32 @@ export const useConfigStore = defineStore('config', () => {
         }
         try {
             const shells = await listShells()
+            store.localGroups = localGroupsFromShells(shells)
             store.profiles = profilesFromShells(shells, store.terminal.loginShell)
         } catch (error) {
             console.error('could not generate default profiles', error)
+        }
+    }
+
+    /**
+     * @description 用户配置有 profiles 键但 localGroups 为空（存量平铺档案；Rust 快照恒序列化
+     *              localGroups 键，故以空列表判「从未迁移」——迁移后 builtin 默认组常驻，不会
+     *              再触空）时，迁移进默认分组模型；迁移产生的 store 变更走防抖 flush 落库
+     * @param userConfig 解析后的用户配置对象（可为 null）
+     * @returns Promise<void>
+     *
+     */
+    async function migrateLocalGroupsIfAbsent (userConfig: Record<string, unknown> | null): Promise<void> {
+        if (!userConfig || !('profiles' in userConfig) || store.localGroups.length > 0) {
+            return
+        }
+        try {
+            const shells = await listShells()
+            const migrated = migrateLocalGroups(store.profiles, shells, store.terminal.loginShell)
+            store.localGroups = migrated.groups
+            store.profiles = migrated.profiles
+        } catch (error) {
+            console.error('could not migrate local profile groups', error)
         }
     }
 

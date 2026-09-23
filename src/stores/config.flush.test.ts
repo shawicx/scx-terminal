@@ -15,8 +15,9 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 import { createPinia, setActivePinia } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
+import { listShells } from '@/services/shells'
 import { computeOps, defaultConfig, emptyBaseline, upsertRecentEntry, useConfigStore } from './config'
-import type { ConfigStore, SshProfile, TerminalProfile } from './config'
+import type { ConfigStore, LocalProfile, SshProfile, TerminalProfile } from './config'
 
 const mockInvoke = vi.mocked(invoke)
 
@@ -28,6 +29,7 @@ const db = {
     profiles: new Map<string, Record<string, unknown>>(),
     quickCommands: new Map<string, Record<string, unknown>>(),
     groups: new Map<string, Record<string, unknown>>(),
+    localGroups: new Map<string, Record<string, unknown>>(),
     sshGroups: new Map<string, Record<string, unknown>>(),
     tabGroups: new Map<string, Record<string, unknown>>(),
     colorSchemes: new Map<string, Record<string, unknown>>(),
@@ -40,6 +42,7 @@ function resetDb (): void {
     db.profiles.clear()
     db.quickCommands.clear()
     db.groups.clear()
+    db.localGroups.clear()
     db.sshGroups.clear()
     db.tabGroups.clear()
     db.colorSchemes.clear()
@@ -67,6 +70,7 @@ function mockImplementationBody (): void {
                         colorSchemes: [...db.colorSchemes.values()],
                         quickCommands: [...db.quickCommands.values()],
                         quickCommandGroups: [...db.groups.values()],
+                        localGroups: [...db.localGroups.values()],
                         sshGroups: [...db.sshGroups.values()],
                         tabGroups: [...db.tabGroups.values()],
                     }
@@ -113,6 +117,20 @@ function mockImplementationBody (): void {
                 for (const command of db.quickCommands.values()) {
                     if (command.groupId === a.id) {
                         delete command.groupId
+                    }
+                }
+                return null
+            }
+            case 'local_group_create':
+            case 'local_group_update':
+                db.localGroups.set((a.group as Record<string, unknown>).id as string, a.group as Record<string, unknown>)
+                db.initialized = true
+                return null
+            case 'local_group_delete': {
+                db.localGroups.delete(a.id as string)
+                for (const profile of db.profiles.values()) {
+                    if (profile.type === 'local' && profile.groupId === a.id) {
+                        delete profile.groupId
                     }
                 }
                 return null
@@ -268,6 +286,82 @@ describe('config store diff-flush integration', () => {
         db.profiles.set('s1', {
             id: 's1', type: 'ssh', name: 'web', host: 'h', port: 22, user: 'root',
             auth: 'auto', keyId: null, colorScheme: null, isDefault: false, groupId: 'gone',
+        } as unknown as Record<string, unknown>)
+        setActivePinia(createPinia())
+        const config = useConfigStore()
+        await config.load()
+        expect(config.store.profiles[0]).not.toHaveProperty('groupId')
+    })
+
+    it('flushes local group CRUD and cascades ungroup on delete', async () => {
+        db.initialized = true
+        db.profiles.set('l1', {
+            id: 'local-zsh-Ab3xY9', type: 'local', name: 'zsh', command: '/bin/zsh', args: [], env: {},
+            cwd: null, colorScheme: null, loginShell: true, isDefault: true, builtin: true,
+        } as unknown as Record<string, unknown>)
+        setActivePinia(createPinia())
+        const config = useConfigStore()
+        await config.load()
+        expect(config.store.profiles).toHaveLength(1)
+
+        // 建默认组 + 归组：分组 create 与档案 update 都要落库
+        config.store.localGroups.push({ id: 'localgroup-zsh', name: 'zsh', builtin: true })
+        ;(config.store.profiles[0] as LocalProfile).groupId = 'localgroup-zsh'
+        await new Promise(resolve => setTimeout(resolve, 700))
+        expect(mockInvoke).toHaveBeenCalledWith('local_group_create', { group: { id: 'localgroup-zsh', name: 'zsh', builtin: true } })
+        expect(mockInvoke).toHaveBeenCalledWith('profile_update', { profile: expect.objectContaining({ id: 'local-zsh-Ab3xY9', groupId: 'localgroup-zsh' }) })
+
+        // 建自定义组 + 把档案移入：分组 create 与档案 update 都要落库
+        config.store.localGroups.push({ id: 'lg1', name: '工作', builtin: false })
+        ;(config.store.profiles[0] as LocalProfile).groupId = 'lg1'
+        await new Promise(resolve => setTimeout(resolve, 700))
+        expect(mockInvoke).toHaveBeenCalledWith('local_group_create', { group: { id: 'lg1', name: '工作', builtin: false } })
+        expect(db.profiles.get('local-zsh-Ab3xY9')).toMatchObject({ groupId: 'lg1' })
+
+        // 删自定义组：组删除命令 + 前端级联把档案降级未分组（再触发一条 profile_update）
+        config.store.localGroups.splice(1, 1)
+        delete (config.store.profiles[0] as LocalProfile).groupId
+        await new Promise(resolve => setTimeout(resolve, 700))
+        expect(mockInvoke).toHaveBeenCalledWith('local_group_delete', { id: 'lg1' })
+        expect(db.localGroups.has('lg1')).toBe(false)
+        expect(db.profiles.get('local-zsh-Ab3xY9')).not.toHaveProperty('groupId')
+    })
+
+    it('migrates flat local profiles into default groups on load when localGroups is empty', async () => {
+        // 存量库：profiles 键存在（老版本自动生成的 zsh + 用户自建），localGroups 为空
+        db.initialized = true
+        vi.mocked(listShells).mockResolvedValueOnce([
+            { id: 'zsh', name: 'zsh', command: '/bin/zsh', args: [], default: true },
+        ])
+        db.profiles.set('local-zsh-Ab3xY9', {
+            id: 'local-zsh-Ab3xY9', type: 'local', name: 'zsh', command: '/bin/zsh', args: [], env: {},
+            cwd: null, colorScheme: null, loginShell: true, isDefault: true,
+        } as unknown as Record<string, unknown>)
+        db.profiles.set('local-Zz1x2Y3w', {
+            id: 'local-Zz1x2Y3w', type: 'local', name: 'zsh-工作', command: '/bin/zsh', args: [], env: {},
+            cwd: null, colorScheme: null, loginShell: true, isDefault: false,
+        } as unknown as Record<string, unknown>)
+        setActivePinia(createPinia())
+        const config = useConfigStore()
+        await config.load()
+
+        expect(config.store.localGroups).toEqual([{ id: 'localgroup-zsh', name: 'zsh', builtin: true }])
+        const [migrated, custom] = config.store.profiles as LocalProfile[]
+        expect(migrated).toMatchObject({ id: 'local-zsh-Ab3xY9', builtin: true, groupId: 'localgroup-zsh' })
+        expect(custom).toMatchObject({ id: 'local-Zz1x2Y3w', builtin: false })
+
+        // 迁移结果落库（防抖 flush 后）
+        await new Promise(resolve => setTimeout(resolve, 700))
+        expect(mockInvoke).toHaveBeenCalledWith('local_group_create', { group: { id: 'localgroup-zsh', name: 'zsh', builtin: true } })
+        expect(db.localGroups.has('localgroup-zsh')).toBe(true)
+        expect(db.profiles.get('local-zsh-Ab3xY9')).toMatchObject({ builtin: true, groupId: 'localgroup-zsh' })
+    })
+
+    it('drops dangling local profile groupId on load (sanitize)', async () => {
+        db.initialized = true
+        db.profiles.set('l1', {
+            id: 'l1', type: 'local', name: 'zsh', command: '/bin/zsh', args: [], env: {},
+            cwd: null, colorScheme: null, loginShell: true, isDefault: false, builtin: false, groupId: 'gone',
         } as unknown as Record<string, unknown>)
         setActivePinia(createPinia())
         const config = useConfigStore()

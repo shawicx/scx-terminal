@@ -11,6 +11,9 @@ import {
     deepMerge,
     defaultHotkeys,
     profilesFromShells,
+    localGroupsFromShells,
+    migrateLocalGroups,
+    groupLocalProfiles,
     defaultFirstProfiles,
     fallbackProfile,
     defaultConfig,
@@ -21,6 +24,7 @@ import {
     emptyBaseline,
     type TerminalProfile,
     type SshProfile,
+    type LocalProfile,
     type FlushOp,
 } from './config'
 import { getKeyName, metaKeyName, altKeyName, normalizeHotkeysConfig, parseKeystroke } from '@/lib/hotkeys/hotkeys'
@@ -113,7 +117,7 @@ describe('diffById', () => {
 
 describe('computeOps (entity-level diff flush)', () => {
     function localProfile (id: string, name: string): TerminalProfile {
-        return { id, type: 'local', name, command: `/bin/${name}`, args: [], env: {}, cwd: null, colorScheme: null, loginShell: true, isDefault: false }
+        return { id, type: 'local', name, command: `/bin/${name}`, args: [], env: {}, cwd: null, colorScheme: null, loginShell: true, isDefault: false, builtin: false }
     }
 
     function scheme (name: string): TerminalColorScheme {
@@ -270,14 +274,112 @@ describe('profiles from shells', () => {
 
     it('defaultFirstProfiles moves the default profile first without mutating the input', () => {
         const input: TerminalProfile[] = [
-            { id: 'p-bash', type: 'local', name: 'bash', command: '/bin/bash', args: [], env: {}, cwd: null, colorScheme: null, loginShell: true, isDefault: false },
-            { id: 'p-zsh', type: 'local', name: 'zsh', command: '/bin/zsh', args: [], env: {}, cwd: null, colorScheme: null, loginShell: true, isDefault: true },
+            { id: 'p-bash', type: 'local', name: 'bash', command: '/bin/bash', args: [], env: {}, cwd: null, colorScheme: null, loginShell: true, isDefault: false, builtin: false },
+            { id: 'p-zsh', type: 'local', name: 'zsh', command: '/bin/zsh', args: [], env: {}, cwd: null, colorScheme: null, loginShell: true, isDefault: true, builtin: false },
         ]
         const sorted = defaultFirstProfiles(input)
         expect(sorted[0]!.name).toBe('zsh')
         expect(input[0]!.name).toBe('bash')
     })
+})
 
+describe('local groups from shells', () => {
+    const shells: Shell[] = [
+        { id: 'bash', name: 'bash', command: '/bin/bash', args: [], default: false },
+        { id: 'zsh', name: 'zsh', command: '/bin/zsh', args: [], default: true },
+    ]
+
+    it('creates one builtin group per shell with the default shell first', () => {
+        const groups = localGroupsFromShells(shells)
+        expect(groups).toHaveLength(2)
+        expect(groups[0]).toEqual({ id: 'localgroup-zsh', name: 'zsh', builtin: true })
+        expect(groups[1]).toEqual({ id: 'localgroup-bash', name: 'bash', builtin: true })
+    })
+
+    it('generated profiles are builtin and assigned to their shell group', () => {
+        const profiles = profilesFromShells(shells, true)
+        expect(profiles.every(p => p.builtin)).toBe(true)
+        expect(profiles.map(p => p.groupId)).toEqual(['localgroup-zsh', 'localgroup-bash'])
+    })
+})
+
+describe('migrateLocalGroups', () => {
+    const shells: Shell[] = [
+        { id: 'zsh', name: 'zsh', command: '/bin/zsh', args: [], default: true },
+        { id: 'bash', name: 'bash', command: '/bin/bash', args: [], default: false },
+    ]
+    const ssh: TerminalProfile = {
+        id: 'ssh-1', type: 'ssh', name: 'web', host: 'h', port: 22, user: 'root',
+        auth: 'auto', keyId: null, colorScheme: null, isDefault: false,
+    }
+
+    /** 存量自动生成档案的字面量（id 遵循 local-{shellId}- 前缀） */
+    function generated (shellId: string, command: string, isDefault = false): TerminalProfile {
+        return { id: `local-${shellId}-Ab3xY9`, type: 'local', name: shellId, command, args: [], env: {}, cwd: null, colorScheme: null, loginShell: true, isDefault, builtin: false }
+    }
+
+    it('marks auto-generated profiles builtin and assigns their default group', () => {
+        const profiles = [generated('zsh', '/bin/zsh', true), generated('bash', '/bin/bash')]
+        const migrated = migrateLocalGroups(profiles, shells, true)
+        expect(migrated.groups.map(g => g.id)).toEqual(['localgroup-zsh', 'localgroup-bash'])
+        const [zsh, bash] = migrated.profiles as Extract<TerminalProfile, { type: 'local' }>[]
+        expect(zsh).toMatchObject({ builtin: true, groupId: 'localgroup-zsh', isDefault: true })
+        expect(bash).toMatchObject({ builtin: true, groupId: 'localgroup-bash', isDefault: false })
+    })
+
+    it('leaves user-created profiles ungrouped and non-builtin', () => {
+        const custom: TerminalProfile = {
+            id: 'local-Zz1x2Y3w', type: 'local', name: 'zsh-工作', command: '/bin/zsh', args: [], env: {}, cwd: '/tmp', colorScheme: null, loginShell: true, isDefault: false, builtin: false,
+        }
+        const migrated = migrateLocalGroups([generated('zsh', '/bin/zsh'), custom], shells, true)
+        const moved = migrated.profiles.find(p => p.id === custom.id) as Extract<TerminalProfile, { type: 'local' }>
+        expect(moved.builtin).toBe(false)
+        expect(moved.groupId).toBeUndefined()
+        expect(moved.cwd).toBe('/tmp')
+    })
+
+    it('rebuilds a builtin profile for shells whose auto profile was deleted', () => {
+        const migrated = migrateLocalGroups([generated('zsh', '/bin/zsh', true)], shells, true)
+        const rebuilt = migrated.profiles.find(p => p.name === 'bash') as Extract<TerminalProfile, { type: 'local' }>
+        expect(rebuilt).toMatchObject({ type: 'local', command: '/bin/bash', builtin: true, groupId: 'localgroup-bash', isDefault: false })
+    })
+
+    it('does not mutate the input array and passes ssh profiles through', () => {
+        const input = [generated('zsh', '/bin/zsh'), ssh]
+        const migrated = migrateLocalGroups(input, shells, true)
+        expect(migrated.profiles).toContain(ssh)
+        expect(input[0]).toMatchObject({ builtin: false })
+        expect(migrated.profiles[0]).not.toBe(input[0])
+    })
+})
+
+describe('groupLocalProfiles (settings sections)', () => {
+    const groups = [
+        { id: 'localgroup-zsh', name: 'zsh', builtin: true },
+        { id: 'lg-work', name: '工作', builtin: false },
+    ]
+
+    /** 本地档案字面量（仅填分段所需字段） */
+    function local (id: string, groupId?: string): LocalProfile {
+        return { id, type: 'local', name: id, command: '/bin/zsh', args: [], env: {}, cwd: null, colorScheme: null, loginShell: true, isDefault: false, builtin: false, ...(groupId ? { groupId } : {}) }
+    }
+
+    it('puts the ungrouped (default) section first and keeps group order after', () => {
+        const sections = groupLocalProfiles([local('u1'), local('w1', 'lg-work'), local('z1', 'localgroup-zsh')], groups)
+        expect(sections.map(s => s.group?.id ?? null)).toEqual([null, 'localgroup-zsh', 'lg-work'])
+        expect(sections[0]!.profiles.map(p => p.id)).toEqual(['u1'])
+        expect(sections[1]!.profiles.map(p => p.id)).toEqual(['z1'])
+    })
+
+    it('drops dangling groupId into the default section and omits it when empty', () => {
+        const sections = groupLocalProfiles([local('ghost', 'gone')], groups)
+        expect(sections.map(s => s.group?.id ?? null)).toEqual([null, 'localgroup-zsh', 'lg-work'])
+        expect(sections[0]!.profiles.map(p => p.id)).toEqual(['ghost'])
+        expect(groupLocalProfiles([], groups)).toHaveLength(2)
+    })
+})
+
+describe('profiles misc', () => {
     it('provides a /bin/zsh fallback profile', () => {
         expect(fallbackProfile()).toMatchObject({ type: 'local', command: '/bin/zsh', loginShell: true, isDefault: true })
     })

@@ -45,6 +45,16 @@ pub struct SshGroupRecord {
     pub name: String,
 }
 
+/// 本地档案分组记录（is_default 标系统默认分组：不可删除、不可重命名，锁定为前端 UI 约束）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalGroupRecord {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub is_default: bool,
+}
+
 /// 标签分组记录（collapsed 为 TabStrip 折叠态，随定义持久化）
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +84,7 @@ pub struct ConfigSnapshot {
     pub color_schemes: Vec<Value>,
     pub quick_commands: Vec<QuickCommandRecord>,
     pub quick_command_groups: Vec<QuickCommandGroupRecord>,
+    pub local_groups: Vec<LocalGroupRecord>,
     pub ssh_groups: Vec<SshGroupRecord>,
     pub tab_groups: Vec<TabGroupRecord>,
 }
@@ -175,6 +186,18 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             PRAGMA user_version = 3;",
         )
         .map_err(|e| format!("failed to create tab_groups schema: {e}"))?;
+    }
+    if version < 4 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS local_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                is_default INTEGER NOT NULL DEFAULT 0,
+                sort_order INTEGER NOT NULL
+            );
+            PRAGMA user_version = 4;",
+        )
+        .map_err(|e| format!("failed to create local_groups schema: {e}"))?;
     }
     Ok(())
 }
@@ -314,6 +337,24 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
         .map_err(|e| format!("failed to read quick commands: {e}"))?;
     for row in rows {
         snapshot.quick_commands.push(row.map_err(|e| e.to_string())?);
+    }
+
+    {
+        let mut stmt = conn
+            .prepare("SELECT id, name, is_default FROM local_groups ORDER BY sort_order")
+            .map_err(|e| format!("failed to read local groups: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(LocalGroupRecord {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    is_default: row.get::<_, i64>(2)? != 0,
+                })
+            })
+            .map_err(|e| format!("failed to read local groups: {e}"))?;
+        for row in rows {
+            snapshot.local_groups.push(row.map_err(|e| e.to_string())?);
+        }
     }
 
     {
@@ -551,6 +592,72 @@ fn quick_command_group_delete_internal(state: &ConfigState, id: &str) -> Result<
         .map_err(|e| format!("failed to ungroup quick commands of {id}: {e}"))?;
     mark_initialized(&tx).map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| format!("failed to commit quick command group delete: {e}"))
+}
+
+// ---- 写入：本地档案分组 ----
+
+/// 新增本地档案分组
+fn local_group_create_internal(state: &ConfigState, group: &LocalGroupRecord) -> Result<(), String> {
+    let mut conn = state.conn.lock().unwrap();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let sort_order = next_sort_order(&tx, "local_groups").map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO local_groups (id, name, is_default, sort_order) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![group.id, group.name, group.is_default as i64, sort_order],
+    )
+    .map_err(|e| format!("failed to create local group {}: {e}", group.id))?;
+    mark_initialized(&tx).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| format!("failed to commit local group create: {e}"))
+}
+
+/// 更新本地档案分组（按 id）
+fn local_group_update_internal(state: &ConfigState, group: &LocalGroupRecord) -> Result<(), String> {
+    let mut conn = state.conn.lock().unwrap();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let changed = tx
+        .execute(
+            "UPDATE local_groups SET name = ?1, is_default = ?2 WHERE id = ?3",
+            rusqlite::params![group.name, group.is_default as i64, group.id],
+        )
+        .map_err(|e| format!("failed to update local group {}: {e}", group.id))?;
+    if changed == 0 {
+        return Err(format!("local group not found: {}", group.id));
+    }
+    mark_initialized(&tx).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| format!("failed to commit local group update: {e}"))
+}
+
+/// 删除本地档案分组：单事务内删组并把组内本地档案降级未分组（groupId 存于 profiles 的
+/// data JSON 内，需逐行改写 JSON 后回写；对齐 SSH 分组「删组降级」语义）
+fn local_group_delete_internal(state: &ConfigState, id: &str) -> Result<(), String> {
+    let mut conn = state.conn.lock().unwrap();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM local_groups WHERE id = ?1", [id])
+        .map_err(|e| format!("failed to delete local group {id}: {e}"))?;
+    let members: Vec<(String, String)> = {
+        let mut stmt = tx
+            .prepare("SELECT id, data FROM profiles WHERE type = 'local'")
+            .map_err(|e| format!("failed to read local profiles: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .map_err(|e| format!("failed to read local profiles: {e}"))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
+    };
+    for (profile_id, raw) in members {
+        let Ok(mut data) = serde_json::from_str::<serde_json::Map<String, Value>>(&raw) else {
+            continue;
+        };
+        if data.get("groupId").and_then(Value::as_str) == Some(id) {
+            data.remove("groupId");
+            tx.execute(
+                "UPDATE profiles SET data = ?1 WHERE id = ?2",
+                rusqlite::params![Value::Object(data).to_string(), profile_id],
+            )
+            .map_err(|e| format!("failed to ungroup local profile {profile_id}: {e}"))?;
+        }
+    }
+    mark_initialized(&tx).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| format!("failed to commit local group delete: {e}"))
 }
 
 // ---- 写入：SSH 分组 ----
@@ -883,6 +990,24 @@ pub fn quick_command_group_delete(state: State<'_, ConfigState>, id: String) -> 
     quick_command_group_delete_internal(&state, &id)
 }
 
+/// 新增本地档案分组
+#[tauri::command]
+pub fn local_group_create(state: State<'_, ConfigState>, group: LocalGroupRecord) -> Result<(), String> {
+    local_group_create_internal(&state, &group)
+}
+
+/// 更新本地档案分组
+#[tauri::command]
+pub fn local_group_update(state: State<'_, ConfigState>, group: LocalGroupRecord) -> Result<(), String> {
+    local_group_update_internal(&state, &group)
+}
+
+/// 删除本地档案分组（组内本地档案降级未分组）
+#[tauri::command]
+pub fn local_group_delete(state: State<'_, ConfigState>, id: String) -> Result<(), String> {
+    local_group_delete_internal(&state, &id)
+}
+
 /// 新增 SSH 分组
 #[tauri::command]
 pub fn ssh_group_create(state: State<'_, ConfigState>, group: SshGroupRecord) -> Result<(), String> {
@@ -986,7 +1111,7 @@ mod tests {
         let state = temp_state("version");
         let conn = state.conn.lock().unwrap();
         let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 
     #[test]
@@ -1218,6 +1343,74 @@ mod tests {
         // 其余字段原样保留（仅移除 groupId 键）
         assert_eq!(snapshot.profiles[0]["name"], "web");
         assert_eq!(snapshot.profiles[0]["host"], "h");
+    }
+
+    #[test]
+    fn local_group_crud_round_trip() {
+        let state = temp_state("local-group");
+        local_group_create_internal(
+            &state,
+            &LocalGroupRecord { id: "lg1".into(), name: "zsh".into(), is_default: true },
+        )
+        .unwrap();
+        local_group_create_internal(
+            &state,
+            &LocalGroupRecord { id: "lg2".into(), name: "工作".into(), is_default: false },
+        )
+        .unwrap();
+        local_group_update_internal(
+            &state,
+            &LocalGroupRecord { id: "lg1".into(), name: "Zsh".into(), is_default: true },
+        )
+        .unwrap();
+
+        let snapshot = load_internal(&state).unwrap().unwrap();
+        assert_eq!(snapshot.local_groups.len(), 2);
+        assert_eq!(snapshot.local_groups[0].name, "Zsh");
+        assert!(snapshot.local_groups[0].is_default);
+        assert!(!snapshot.local_groups[1].is_default);
+        assert!(local_group_update_internal(
+            &state,
+            &LocalGroupRecord { id: "ghost".into(), name: "x".into(), is_default: false },
+        )
+        .is_err());
+
+        local_group_delete_internal(&state, "lg1").unwrap();
+        local_group_delete_internal(&state, "lg1").unwrap(); // 幂等
+        let snapshot = load_internal(&state).unwrap().unwrap();
+        assert_eq!(snapshot.local_groups.len(), 1);
+        assert_eq!(snapshot.local_groups[0].id, "lg2");
+    }
+
+    #[test]
+    fn local_group_delete_cascades_ungroup() {
+        let state = temp_state("local-group-cascade");
+        local_group_create_internal(
+            &state,
+            &LocalGroupRecord { id: "lg1".into(), name: "zsh".into(), is_default: true },
+        )
+        .unwrap();
+        profile_create_internal(&state, &serde_json::json!({
+            "id": "l1", "type": "local", "name": "zsh", "command": "/bin/zsh",
+            "isDefault": false, "builtin": true, "groupId": "lg1",
+        }))
+        .unwrap();
+        profile_create_internal(&state, &serde_json::json!({
+            "id": "s1", "type": "ssh", "name": "web", "isDefault": false, "groupId": "lg1",
+        }))
+        .unwrap();
+
+        local_group_delete_internal(&state, "lg1").unwrap();
+
+        let snapshot = load_internal(&state).unwrap().unwrap();
+        assert!(snapshot.local_groups.is_empty());
+        // local 档案被降级（groupId 键移除），builtin 等其余字段原样保留
+        let local = snapshot.profiles.iter().find(|p| p["id"] == "l1").unwrap();
+        assert!(local.get("groupId").is_none(), "groupId must be dropped: {local}");
+        assert_eq!(local["builtin"], true);
+        // ssh 档案的 groupId 不受 local 分组删除影响（分组空间互不相干）
+        let ssh = snapshot.profiles.iter().find(|p| p["id"] == "s1").unwrap();
+        assert_eq!(ssh["groupId"], "lg1");
     }
 
     #[test]

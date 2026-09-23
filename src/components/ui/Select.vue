@@ -32,6 +32,7 @@ const model = defineModel<string>({ default: '' })
 const props = defineProps<{
     options: SelectOption[]
     placeholder?: string
+    disabled?: boolean
 }>()
 
 const internalOptions = computed(() =>
@@ -46,7 +47,7 @@ const internalModel = computed<string>({
 </script>
 
 <template>
-    <SelectRoot v-model="internalModel">
+    <SelectRoot v-model="internalModel" :disabled="props.disabled">
         <SelectTrigger
             :class="cn('flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:truncate cursor-pointer', $attrs.class ?? '')"
         >

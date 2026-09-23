@@ -1,8 +1,8 @@
 /**
- * @description 连接中心（起始页）纯逻辑：SSH 档案分组视图构建、全局搜索过滤、
- *              最近连接排序与相对时间分桶。UI 无关，便于单测。
+ * @description 连接中心（起始页）纯逻辑：SSH 档案分组视图构建、本地终端分组过滤、
+ *              全局搜索过滤、最近连接排序与相对时间分桶。UI 无关，便于单测。
  */
-import type { SshGroup, SshProfile, TerminalProfile } from '@/stores/config'
+import { groupLocalProfiles, type LocalGroup, type LocalProfile, type LocalProfileSection, type SshGroup, type SshProfile, type TerminalProfile } from '@/stores/config'
 
 /** 起始页一组的展示视图（'default' 为内置默认组 id，展示名由组件按 i18n 解析） */
 export interface StartGroupView {
@@ -77,6 +77,47 @@ export function filterGroupViews (views: StartGroupView[], query: string, groupN
     return views
         .map(view => ({ ...view, profiles: view.profiles.filter(match) }))
         .filter(view => view.profiles.length > 0)
+}
+
+/**
+ * @description 本地终端分组视图构建（连接中心用）：直接复用设置页分段逻辑（分组定义序、
+ *              未分组段置末、悬空 groupId 容错归未分组）
+ * @param profiles 全部档案（取其中 local 类型）
+ * @param groups 本地分组列表（config 顺序）
+ * @returns LocalProfileSection[] 分段列表（空段保留，是否隐藏由渲染层决定）
+ *
+ * @example buildLocalSections([{ name: 'zsh' }], [{ id: 'localgroup-zsh', name: 'zsh', builtin: true }]).length // 1
+ *
+ */
+export function buildLocalSections (profiles: TerminalProfile[], groups: LocalGroup[]): LocalProfileSection[] {
+    const localProfiles = profiles.filter((p): p is LocalProfile => p.type === 'local')
+    return groupLocalProfiles(localProfiles, groups)
+}
+
+/**
+ * @description 本地终端分段搜索过滤：query 对档案 name/command/所属组名做不区分大小写
+ *              includes；组名命中保留整段，否则逐档案过滤；空段丢弃；query 为空原样返回
+ * @param sections 分段列表
+ * @param query 搜索词
+ * @returns LocalProfileSection[] 过滤后分段
+ *
+ * @example filterLocalSections(sections, 'zsh').length // 1
+ *
+ */
+export function filterLocalSections (sections: LocalProfileSection[], query: string): LocalProfileSection[] {
+    const q = query.trim().toLowerCase()
+    if (!q) {
+        return sections
+    }
+    return sections
+        .map(section => {
+            if (section.group && section.group.name.toLowerCase().includes(q)) {
+                return section
+            }
+            return { group: section.group, profiles: section.profiles.filter(p =>
+                p.name.toLowerCase().includes(q) || p.command.toLowerCase().includes(q)) }
+        })
+        .filter(section => section.profiles.length > 0)
 }
 
 /**

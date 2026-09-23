@@ -100,6 +100,16 @@ pub struct GroupRow {
     pub sort_order: i64,
 }
 
+/// 本地档案分组备份行（多 is_default 列：系统默认分组标记随备份往返）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalGroupRow {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+    pub sort_order: i64,
+}
+
 /// config.db 纳入实体的行级全量
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +120,9 @@ pub struct BackupConfig {
     pub color_schemes: Vec<ColorSchemeRow>,
     pub quick_commands: Vec<QuickCommandRow>,
     pub quick_command_groups: Vec<GroupRow>,
+    /// 本地档案分组（v1 后期新增；default 使旧备份缺字段仍可导入）
+    #[serde(default)]
+    pub local_groups: Vec<LocalGroupRow>,
     pub ssh_groups: Vec<GroupRow>,
 }
 
@@ -273,6 +286,25 @@ fn read_config_rows(config: &ConfigState) -> Result<BackupConfig, String> {
         }
     }
 
+    {
+        let mut stmt = conn
+            .prepare("SELECT id, name, is_default, sort_order FROM local_groups ORDER BY sort_order")
+            .map_err(|e| format!("failed to read local groups: {e}"))?;
+        let result = stmt
+            .query_map([], |row| {
+                Ok(LocalGroupRow {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    is_default: row.get::<_, i64>(2)? != 0,
+                    sort_order: row.get(3)?,
+                })
+            })
+            .map_err(|e| format!("failed to read local groups: {e}"))?;
+        for row in result {
+            rows.local_groups.push(row.map_err(|e| format!("failed to read local groups: {e}"))?);
+        }
+    }
+
     for (table, into) in [
         ("quick_command_groups", &mut rows.quick_command_groups),
         ("ssh_groups", &mut rows.ssh_groups),
@@ -314,6 +346,9 @@ fn validate_backup_rows(rows: &BackupConfig) -> Result<(), String> {
     }
     if rows.quick_command_groups.iter().chain(rows.ssh_groups.iter()).any(|row| row.id.is_empty()) {
         return Err("invalid backup file: group row missing id".to_string());
+    }
+    if rows.local_groups.iter().any(|row| row.id.is_empty()) {
+        return Err("invalid backup file: local group row missing id".to_string());
     }
     Ok(())
 }
@@ -384,6 +419,14 @@ fn write_config_rows(config: &ConfigState, rows: &BackupConfig) -> Result<(), St
             rusqlite::params![row.id, row.group_id, row.name, row.command, row.auto_run, row.sort_order],
         )
         .map_err(|e| format!("failed to import quick command {}: {e}", row.id))?;
+    }
+    tx.execute("DELETE FROM local_groups", []).map_err(|e| format!("failed to clear local groups: {e}"))?;
+    for row in &rows.local_groups {
+        tx.execute(
+            "INSERT INTO local_groups (id, name, is_default, sort_order) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![row.id, row.name, row.is_default, row.sort_order],
+        )
+        .map_err(|e| format!("failed to import local group {}: {e}", row.id))?;
     }
     tx.execute("DELETE FROM ssh_groups", []).map_err(|e| format!("failed to clear ssh groups: {e}"))?;
     for row in &rows.ssh_groups {
@@ -579,6 +622,7 @@ mod tests {
             INSERT INTO quick_commands (id, group_id, name, command, auto_run, sort_order)
                 VALUES ('q1', 'g1', 'df', 'df -h', 1, 0);
             INSERT INTO ssh_groups (id, name, sort_order) VALUES ('sg1', 'prod', 0);
+            INSERT INTO local_groups (id, name, is_default, sort_order) VALUES ('lg1', 'zsh', 1, 0);
             INSERT INTO meta (key, value) VALUES ('initialized', '1');"##,
         ).unwrap();
     }
@@ -678,12 +722,40 @@ mod tests {
         assert_eq!(snapshot.quick_command_groups[0].name, "ops");
         assert_eq!(snapshot.ssh_groups.len(), 1);
         assert_eq!(snapshot.ssh_groups[0].name, "prod");
+        assert_eq!(snapshot.local_groups.len(), 1);
+        assert_eq!(snapshot.local_groups[0].name, "zsh");
+        assert!(snapshot.local_groups[0].is_default);
 
         // B 机凭据：用 B 自己的主密钥可解回明文
         let loaded = load_private_key(&secrets_b, "k1").unwrap();
         assert_eq!(loaded.private_key_pem, pem);
         assert_eq!(loaded.passphrase.as_deref(), Some("keypass"));
         assert_eq!(load_password(&secrets_b, "p-ssh").unwrap().as_deref(), Some("hunter2"));
+    }
+
+    #[test]
+    fn import_accepts_backup_without_local_groups_field() {
+        // v1 早期备份（local_groups 字段加入前）去掉该键后仍可导入
+        let dir_a = temp_dir("old-a");
+        let config_a = ConfigState::new(&dir_a);
+        let secrets_a = crate::secrets::test_state(&dir_a);
+        seed_config(&config_a);
+        let file = dir_a.join("backup.json");
+        export_internal(&config_a, &secrets_a, &file, "pass123", "0.1.6-test").unwrap();
+
+        let mut doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        doc["config"].as_object_mut().unwrap().remove("localGroups");
+        let old = dir_a.join("old-format.json");
+        std::fs::write(&old, doc.to_string()).unwrap();
+
+        let dir_b = temp_dir("old-b");
+        let config_b = ConfigState::new(&dir_b);
+        let secrets_b = crate::secrets::test_state(&dir_b);
+        import_internal(&config_b, &secrets_b, &old, "pass123").unwrap();
+        let snapshot = load_internal(&config_b).unwrap().expect("old-format import must initialize");
+        assert!(snapshot.local_groups.is_empty());
+        assert_eq!(snapshot.profiles.len(), 2);
     }
 
     #[test]

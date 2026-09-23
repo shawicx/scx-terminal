@@ -7,7 +7,7 @@ import { openPath } from '@tauri-apps/plugin-opener'
 import type { Update } from '@tauri-apps/plugin-updater'
 import { nanoid } from 'nanoid'
 import { writeClipboardText } from '@/lib/frontendContext'
-import { Terminal, Palette, Keyboard, Info, FolderOpen, KeyRound, Copy, Plus, Trash2, Upload, Download, HardDriveDownload, Zap, Pencil, X, Globe, Server, SquareTerminal, Layers, Eye, EyeOff } from 'lucide-vue-next'
+import { Terminal, Palette, Keyboard, Info, FolderOpen, KeyRound, Copy, Plus, Trash2, Upload, Download, HardDriveDownload, Zap, Pencil, X, Globe, Server, SquareTerminal, Layers, Eye, EyeOff, ChevronRight } from 'lucide-vue-next'
 import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
 import type { Event as TauriEvent, UnlistenFn } from '@tauri-apps/api/event'
 import type { SshKeyMeta, SshKeyInspection } from '@/services/secrets'
@@ -37,7 +37,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ColorSchemePicker from '@/components/settings/ColorSchemePicker.vue'
 import ProfileForwardingsCard from '@/components/settings/ProfileForwardingsCard.vue'
 import TabGroupFormDialog from '@/components/settings/TabGroupFormDialog.vue'
-import { useConfigStore, defaultFirstProfiles, defaultShellCommand, type LocalProfile, type QuickCommand, type SshProfile, type TabGroup, type TerminalProfile } from '@/stores/config'
+import { useConfigStore, defaultFirstProfiles, defaultShellCommand, groupLocalProfiles, type LocalProfile, type QuickCommand, type SshProfile, type TabGroup, type TerminalProfile } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
 import type { SettingsPageId } from '@/stores/tabs'
 import { backgroundPreviewUrl } from '@/services/backgroundImage'
@@ -626,6 +626,82 @@ const selectedLocalProfile = computed<LocalProfile | null>(() =>
     ?? localProfiles.value[0]
     ?? null)
 
+/** 左列表分段：默认分组（未分组）置顶 + 各分组按定义序；没有未分组档案时默认分组段
+ *  也常驻置顶（空段可见，对齐 SSH 页空段常驻） */
+const localSections = computed(() => {
+    const sections = groupLocalProfiles(localProfiles.value, store.localGroups)
+    if (localProfiles.value.length > 0 && !sections.some(section => section.group === null)) {
+        sections.unshift({ group: null, profiles: [] })
+    }
+    return sections
+})
+
+/** 手风琴当前展开的分段键（分组 id / '__ungrouped'；空 = 全收起；同时仅一段展开） */
+const openLocalSectionKey = ref('')
+
+/** 未分组段在手风琴状态中的键 */
+const LOCAL_UNGROUPED_KEY = '__ungrouped'
+
+/** 首段是否已自动展开过（仅一次，之后完全交由用户操作） */
+let localSectionAutoOpened = false
+
+// 首次出现分段时自动展开选中档案所在段（兜底首段）
+watch(localSections, sections => {
+    if (localSectionAutoOpened || sections.length === 0) {
+        return
+    }
+    localSectionAutoOpened = true
+    const selectedId = selectedLocalProfile.value?.id
+    const owner = sections.find(section => section.profiles.some(p => p.id === selectedId))
+    openLocalSectionKey.value = owner?.group?.id ?? sections[0]!.group?.id ?? LOCAL_UNGROUPED_KEY
+}, { immediate: true })
+
+/**
+ * @description 本地终端手风琴分段是否展开（同时仅一段展开）
+ * @param key 分段键（分组 id 或 '__ungrouped'）
+ * @returns boolean 是否展开渲染
+ *
+ * @example isLocalSectionOpen('localgroup-zsh') // 仅当前展开段为 true
+ *
+ */
+function isLocalSectionOpen (key: string): boolean {
+    return openLocalSectionKey.value === key
+}
+
+/**
+ * @description 手风琴切换：点击已展开段收起（全收起状态），点击其余段则展开该段
+ *              并收起其他段（同时仅一段展开）
+ * @param key 分段键（分组 id 或 '__ungrouped'）
+ * @returns void
+ *
+ * @example toggleLocalSection('localgroup-zsh')
+ *
+ */
+function toggleLocalSection (key: string): void {
+    openLocalSectionKey.value = openLocalSectionKey.value === key ? '' : key
+}
+
+/** 编辑器分组下拉：未分组 + 各分组（默认分组也开放容纳自建档案） */
+const localGroupOptions = computed(() => [
+    { value: '', label: t('settings.localDefaultGroup') },
+    ...store.localGroups.map(group => ({ value: group.id, label: group.name })),
+])
+
+const localGroupModel = computed({
+    get: () => selectedLocalProfile.value?.groupId ?? '',
+    set: (value: string) => {
+        const profile = selectedLocalProfile.value
+        if (!profile) {
+            return
+        }
+        if (value) {
+            profile.groupId = value
+        } else {
+            delete profile.groupId
+        }
+    },
+})
+
 const argsText = computed({
     get: () => selectedLocalProfile.value?.args.join(' ') ?? '',
     set: (value: string) => {
@@ -718,13 +794,13 @@ const sshGroupModel = computed({
     },
 })
 
-// ---- 分组名称弹窗（SSH 分组与快捷命令分组共用：两者均仅名称字段；确认才落库，新建不再先插默认名） ----
-type GroupNameDialogKind = 'ssh-create' | 'ssh-rename' | 'qc-create' | 'qc-rename'
+// ---- 分组名称弹窗（SSH 分组 / 快捷命令分组 / 本地档案分组共用：均仅名称字段；确认才落库） ----
+type GroupNameDialogKind = 'ssh-create' | 'ssh-rename' | 'qc-create' | 'qc-rename' | 'local-create' | 'local-rename'
 
 /** null = 弹窗关闭；打开时携带来源、目标组与名称草稿 */
 const groupNameDialog = ref<{ kind: GroupNameDialogKind, groupId: string | null, draft: string } | null>(null)
 
-/** 弹窗标题随来源切换（新建/重命名 × SSH/快捷命令） */
+/** 弹窗标题随来源切换（新建/重命名 × SSH/快捷命令/本地档案） */
 const groupNameDialogTitle = computed(() => {
     const dialog = groupNameDialog.value
     if (!dialog) {
@@ -735,6 +811,12 @@ const groupNameDialogTitle = computed(() => {
     }
     if (dialog.kind === 'ssh-rename') {
         return t('settings.sshRenameGroup')
+    }
+    if (dialog.kind === 'local-create') {
+        return t('settings.localNewGroup')
+    }
+    if (dialog.kind === 'local-rename') {
+        return t('settings.localRenameGroup')
     }
     return dialog.kind === 'qc-create' ? t('settings.quickCommandNewGroup') : t('settings.quickCommandRenameGroup')
 })
@@ -760,16 +842,87 @@ function commitGroupNameDialog (): void {
         store.sshGroups.push({ id: `sshgroup-${nanoid(6)}`, name })
     } else if (dialog.kind === 'qc-create') {
         store.quickCommandGroups.push({ id: `qcgroup-${nanoid(6)}`, name })
+    } else if (dialog.kind === 'local-create') {
+        store.localGroups.push({ id: `localgroup-${nanoid(6)}`, name, builtin: false })
     } else if (dialog.kind === 'ssh-rename') {
         const group = store.sshGroups.find(g => g.id === dialog.groupId)
         if (group) {
             group.name = name
         }
-    } else {
+    } else if (dialog.kind === 'qc-rename') {
         const group = store.quickCommandGroups.find(g => g.id === dialog.groupId)
         if (group) {
             group.name = name
         }
+    } else {
+        const group = store.localGroups.find(g => g.id === dialog.groupId)
+        if (group && !group.builtin) {
+            group.name = name
+        }
+    }
+}
+
+/**
+ * @description 打开本地档案分组新建弹窗
+ * @returns void
+ *
+ * @example openCreateLocalGroup()
+ *
+ */
+function openCreateLocalGroup (): void {
+    groupNameDialog.value = { kind: 'local-create', groupId: null, draft: '' }
+}
+
+/**
+ * @description 打开本地档案分组重命名弹窗（预填当前组名；默认分组锁定不可达）
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example openRenameLocalGroup('localgroup-zsh')
+ *
+ */
+function openRenameLocalGroup (id: string): void {
+    const group = store.localGroups.find(g => g.id === id)
+    if (group && !group.builtin) {
+        groupNameDialog.value = { kind: 'local-rename', groupId: id, draft: group.name }
+    }
+}
+
+/**
+ * @description 删除本地档案分组：组内档案降级未分组（groupId 清空，Rust 删组命令同语义级联）；
+ *              默认分组（builtin）锁定不可删
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example deleteLocalGroup('localgroup-a1b2')
+ *
+ */
+function deleteLocalGroup (id: string): void {
+    const index = store.localGroups.findIndex(group => group.id === id)
+    const group = store.localGroups[index]
+    if (index === -1 || group?.builtin) {
+        return
+    }
+    store.localGroups.splice(index, 1)
+    for (const profile of store.profiles) {
+        if (profile.type === 'local' && profile.groupId === id) {
+            delete profile.groupId
+        }
+    }
+}
+
+/**
+ * @description 删除本地档案分组（经确认弹窗；组内档案降级未分组；默认分组锁定不可达）
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example confirmDeleteLocalGroup('localgroup-a1b2')
+ *
+ */
+function confirmDeleteLocalGroup (id: string): void {
+    const group = store.localGroups.find(g => g.id === id)
+    if (group && !group.builtin) {
+        confirmAction(t('settings.deleteConfirmBody', { name: group.name }), () => deleteLocalGroup(id))
     }
 }
 
@@ -1304,6 +1457,7 @@ function createLocalProfile (): void {
         colorScheme: null,
         loginShell: template?.loginShell ?? true,
         isDefault: false,
+        builtin: false,
     }
     store.profiles.push(profile)
     selectedLocalProfileId.value = profile.id
@@ -2017,20 +2171,50 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                                 <Plus :size="14" />
                                 <span>{{ t('settings.profileNew') }}</span>
                             </button>
+                            <button class="profile-new-button" @click="openCreateLocalGroup">
+                                <Plus :size="14" />
+                                <span>{{ t('settings.localNewGroup') }}</span>
+                            </button>
                         </div>
-                        <button
-                            v-for="p in localProfiles"
-                            :key="p.id"
-                            class="profile-item"
-                            :class="{ active: p.id === selectedLocalProfile?.id }"
-                            @click="selectedLocalProfileId = p.id"
-                        >
-                            <span class="profile-item-head">
-                                <span class="profile-item-name">{{ p.name }}</span>
-                                <span v-if="p.isDefault" class="profile-default-badge">{{ t('tab.defaultProfile') }}</span>
-                            </span>
-                            <span class="profile-item-command">{{ p.command }}</span>
-                        </button>
+                        <template v-for="section in localSections" :key="section.group?.id ?? '__ungrouped'">
+                            <div
+                                class="qc-group-header qc-group-header--collapsible"
+                                @click="toggleLocalSection(section.group?.id ?? LOCAL_UNGROUPED_KEY)"
+                            >
+                                <ChevronRight :size="14" class="qc-group-chevron" :class="{ open: isLocalSectionOpen(section.group?.id ?? LOCAL_UNGROUPED_KEY) }" />
+                                <span class="qc-group-name">{{ section.group?.name ?? t('settings.localDefaultGroup') }}</span>
+                                <span class="qc-group-count">{{ section.profiles.length }}</span>
+                                <span v-if="section.group?.builtin" class="profile-default-badge">{{ t('settings.localDefaultGroupBadge') }}</span>
+                                <span v-if="section.group && !section.group.builtin" class="qc-group-actions" @click.stop>
+                                    <button class="qc-group-action" :title="t('settings.localRenameGroup')" @click.stop="openRenameLocalGroup(section.group.id)">
+                                        <Pencil :size="12" />
+                                    </button>
+                                    <button class="qc-group-action" :title="t('settings.localDeleteGroup')" @click.stop="confirmDeleteLocalGroup(section.group.id)">
+                                        <X :size="12" />
+                                    </button>
+                                </span>
+                            </div>
+                            <div class="qc-group-body" :class="{ collapsed: !isLocalSectionOpen(section.group?.id ?? LOCAL_UNGROUPED_KEY) }">
+                                <div class="qc-group-body-inner">
+                                    <button
+                                        v-for="p in section.profiles"
+                                        :key="p.id"
+                                        class="profile-item"
+                                        :class="{ active: p.id === selectedLocalProfile?.id }"
+                                        @click="selectedLocalProfileId = p.id"
+                                    >
+                                        <span class="profile-item-head">
+                                            <span class="profile-item-name">{{ p.name }}</span>
+                                            <span v-if="p.isDefault" class="profile-default-badge">{{ t('tab.defaultProfile') }}</span>
+                                        </span>
+                                        <span class="profile-item-command">{{ p.command }}</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </template>
+                        <p v-if="localProfiles.length === 0 && store.localGroups.length === 0" class="hint">
+                            {{ t('settings.localEmptyHint') }}
+                        </p>
                     </div>
                     <div v-if="selectedLocalProfile" class="detail-content">
                         <div class="settings-section">
@@ -2049,6 +2233,15 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                                         :placeholder="t('settings.searchPlaceholder')"
                                     />
                                 </div>
+                                <div class="settings-card-row">
+                                    <Label>{{ t('settings.localGroupLabel') }}</Label>
+                                    <Select
+                                        v-model="localGroupModel"
+                                        :options="localGroupOptions"
+                                        class="w-60"
+                                        :disabled="selectedLocalProfile.builtin"
+                                    />
+                                </div>
                             </div>
                         </div>
 
@@ -2064,8 +2257,11 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                                     <Input v-model="argsText" class="w-60" />
                                 </div>
                                 <div class="settings-card-row">
-                                    <Label>{{ t('settings.profileCwd') }}</Label>
-                                    <Input v-model="cwdModel" class="w-60" />
+                                    <Label>
+                                        {{ t('settings.profileCwd') }}
+                                        <span v-if="selectedLocalProfile.builtin" class="value-hint">{{ t('settings.profileCwdLockedHint') }}</span>
+                                    </Label>
+                                    <Input v-model="cwdModel" class="w-60" :disabled="selectedLocalProfile.builtin" />
                                 </div>
                                 <div class="settings-card-row stacked">
                                     <Label>{{ t('settings.profileEnv') }} <span class="value-hint">{{ t('settings.profileEnvHint') }}</span></Label>
@@ -2087,7 +2283,13 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                             >
                                 {{ t('settings.profileSetDefault') }}
                             </Button>
-                            <Button variant="destructive-outline" size="sm" @click="confirmDeleteProfile(selectedLocalProfile)">
+                            <Button
+                                variant="destructive-outline"
+                                size="sm"
+                                :disabled="selectedLocalProfile.builtin"
+                                :title="selectedLocalProfile.builtin ? t('settings.profileDeleteLockedHint') : undefined"
+                                @click="confirmDeleteProfile(selectedLocalProfile)"
+                            >
                                 <Trash2 :size="14" />
                                 {{ t('settings.profileDelete') }}
                             </Button>
@@ -3403,6 +3605,72 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     padding: 12px 6px 4px;
     border-bottom: 1px solid var(--color-border);
     margin-bottom: 4px;
+}
+
+/* 本地终端页可折叠组头：配色页 scheme-group-header 同款 flex 行——图标/名称/计数/徽标
+   皆为直接子项垂直居中，动作钮右贴；space-between 会把多子项撑散，改 flex-start。
+   垂直 padding 对称（基础类 12/4 不对称会让 hover 背景内内容偏移），顶距用 margin 补 */
+.qc-group-header--collapsible {
+    cursor: pointer;
+    user-select: none;
+    justify-content: flex-start;
+    gap: 6px;
+    padding: 6px 8px;
+    margin-top: 6px;
+    border-radius: 6px;
+    transition: background-color 0.15s ease;
+}
+.qc-group-header--collapsible:hover { background: var(--color-accent); }
+.qc-group-header--collapsible .qc-group-name {
+    min-width: 0;
+    flex: 0 1 auto;
+}
+.qc-group-header--collapsible .qc-group-actions {
+    margin-left: auto;
+}
+
+.qc-group-chevron {
+    flex: none;
+    color: var(--color-muted-foreground);
+    transition: transform 0.15s ease;
+}
+
+.qc-group-chevron.open {
+    transform: rotate(90deg);
+}
+
+/* 收展过渡：grid 行高 0fr↔1fr 平滑动画（无需 JS 量高）；收起时内容淡出且
+   visibility 随过渡结束时翻转（离散插值），折叠项不可聚焦。
+   内层为 flex 列（对齐 detail-list），成员按钮恢复全宽拉伸 */
+.qc-group-body {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows 0.18s ease, visibility 0.18s;
+}
+
+.qc-group-body.collapsed {
+    grid-template-rows: 0fr;
+    visibility: hidden;
+}
+
+.qc-group-body-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+    min-height: 0;
+    transition: opacity 0.15s ease;
+}
+
+.qc-group-body.collapsed .qc-group-body-inner {
+    opacity: 0;
+}
+
+.qc-group-count {
+    flex: none;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--color-muted-foreground);
 }
 
 .qc-group-name {

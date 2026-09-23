@@ -1,17 +1,18 @@
 <!--
-  @description 连接中心（起始页）标签页：左侧分组导航（全部主机默认选中 + 分组计数 +
-              管理入口 + 本地终端区），右侧全局搜索 + 最近连接条 + 分组分段主机卡片网格；
-              连接状态点实时取自 sshConnections 的响应式 connectionStates。
+  @description 连接中心（起始页）标签页：左侧分组导航（主机区 + 本地终端区，各含全部/
+              分组/管理入口）+ 右侧全局搜索 + 最近连接条 + 分组分段卡片网格（主机卡片/
+              终端卡片随选中域切换）；连接状态点实时取自 sshConnections 的响应式
+              connectionStates。
 -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus, Search, Server, Settings } from 'lucide-vue-next'
+import { Search, Server, Settings, SquareTerminal } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import HostCard from '@/components/start/HostCard.vue'
-import { buildGroupViews, filterGroupViews, recentEntries, relativeTimeBucket } from '@/lib/startPage'
+import { buildGroupViews, buildLocalSections, filterGroupViews, filterLocalSections, recentEntries, relativeTimeBucket } from '@/lib/startPage'
 import { connectionErrors, connectionStates, type ProfileConnectionStatus } from '@/services/sshConnections'
-import { useConfigStore, defaultFirstProfiles, type SshProfile } from '@/stores/config'
+import { useConfigStore, defaultFirstProfiles, type LocalProfile, type SshProfile } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
 
 const props = defineProps<{ tabId: string }>()
@@ -23,7 +24,10 @@ const config = useConfigStore()
 // 标题在 setup 同步设置（避免闪空标题，同 ForwardingTabContent 先例）
 tabs.setTitle(props.tabId, t('start.tabTitle'))
 
+/** 当前域：主机（SSH）/ 本地终端；决定右侧内容与侧栏选中态 */
+const domain = ref<'ssh' | 'local'>('ssh')
 const selectedGroup = ref<'all' | string>('all')
+const selectedLocalGroup = ref<'all' | string>('all')
 const searchQuery = ref('')
 
 /* 侧栏拖拽调宽范围（px） */
@@ -87,8 +91,28 @@ const visibleViews = computed(() => selectedGroup.value === 'all'
 const sshProfiles = computed(() => config.store.profiles.filter((p): p is SshProfile => p.type === 'ssh'))
 const activeCount = computed(() => sshProfiles.value.filter(p => connectionStates[p.id] === 'connected').length)
 const recents = computed(() => recentEntries(config.store.recents, config.store.profiles))
-const localProfiles = computed(() => defaultFirstProfiles(config.store.profiles).filter(p => p.type === 'local'))
+const localProfiles = computed(() => defaultFirstProfiles(config.store.profiles).filter((p): p is LocalProfile => p.type === 'local'))
 const hasAnySsh = computed(() => sshProfiles.value.length > 0)
+
+/** 本地终端分段（分组定义序 + 未分组置末）与其搜索/选组过滤 */
+const localSections = computed(() => buildLocalSections(config.store.profiles, config.store.localGroups))
+const localGroupNames = computed(() => new Map(config.store.localGroups.map(g => [g.id, g.name])))
+/** 侧栏本地分组成员计数（含未计入分组的悬空档案不计数，与分段视图一致） */
+const localGroupCounts = computed(() => {
+    const counts: Record<string, number> = {}
+    for (const section of localSections.value) {
+        if (section.group) {
+            counts[section.group.id] = section.profiles.length
+        }
+    }
+    return counts
+})
+const visibleLocalSections = computed(() => {
+    const filtered = filterLocalSections(localSections.value, searchQuery.value)
+    return selectedLocalGroup.value === 'all'
+        ? filtered
+        : filtered.filter(section => section.group?.id === selectedLocalGroup.value)
+})
 
 const weekdayLabels = computed(() => locale.value.startsWith('zh')
     ? ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -104,6 +128,18 @@ const weekdayLabels = computed(() => locale.value.startsWith('zh')
  */
 function groupLabel (view: { id: 'default' | string; name: string }): string {
     return view.id === 'default' ? t('start.defaultGroup') : view.name
+}
+
+/**
+ * @description 本地终端分段显示名（未分组段即「默认分组」，走主机区同款 i18n 键）
+ * @param section 分段视图
+ * @returns string 显示名
+ *
+ * @example localSectionLabel({ group: null }) // '默认'
+ *
+ */
+function localSectionLabel (section: { group: { name: string } | null }): string {
+    return section.group ? section.group.name : t('start.defaultGroup')
 }
 
 /**
@@ -145,7 +181,11 @@ function recentLabel (ts: number): string {
     <div class="start-page" :class="{ resizing: sidebarResizing }">
         <aside ref="sidebarEl" class="sidebar" :style="{ width: `${sidebarWidth}px` }">
             <div class="sidebar-label">{{ t('start.hostsLabel') }}</div>
-            <button class="nav-item" :class="{ sel: selectedGroup === 'all' }" @click="selectedGroup = 'all'">
+            <button
+                class="nav-item"
+                :class="{ sel: domain === 'ssh' && selectedGroup === 'all' }"
+                @click="domain = 'ssh'; selectedGroup = 'all'"
+            >
                 <span class="nav-name">{{ t('start.allHosts') }}</span>
                 <span class="nav-count">{{ sshProfiles.length }}</span>
             </button>
@@ -153,8 +193,8 @@ function recentLabel (ts: number): string {
                 v-for="view in customGroups"
                 :key="view.id"
                 class="nav-item"
-                :class="{ sel: selectedGroup === view.id }"
-                @click="selectedGroup = view.id"
+                :class="{ sel: domain === 'ssh' && selectedGroup === view.id }"
+                @click="domain = 'ssh'; selectedGroup = view.id"
             >
                 <span class="nav-name">{{ view.name }}</span>
                 <span class="nav-count">{{ view.profiles.length }}</span>
@@ -163,15 +203,29 @@ function recentLabel (ts: number): string {
                 <Settings class="h-4 w-4" />
                 {{ t('start.manageGroups') }}
             </button>
-            <div v-if="localProfiles.length > 0" class="locals">
+            <div class="locals">
                 <div class="sidebar-label">{{ t('start.localTerminals') }}</div>
-                <button v-for="p in localProfiles" :key="p.id" class="local-chip" @click="tabs.openTerminalTab(p.id)">
-                    <span class="local-name">{{ p.name }}</span>
-                    <span v-if="p.isDefault" class="badge">{{ t('start.defaultBadge') }}</span>
+                <button
+                    class="nav-item"
+                    :class="{ sel: domain === 'local' && selectedLocalGroup === 'all' }"
+                    @click="domain = 'local'; selectedLocalGroup = 'all'"
+                >
+                    <span class="nav-name">{{ t('start.allTerminals') }}</span>
+                    <span class="nav-count">{{ localProfiles.length }}</span>
                 </button>
-                <button class="local-chip ghost" @click="tabs.openSettingsTab('profiles')">
-                    <Plus class="h-4 w-4" />
-                    {{ t('start.newProfile') }}
+                <button
+                    v-for="group in config.store.localGroups"
+                    :key="group.id"
+                    class="nav-item"
+                    :class="{ sel: domain === 'local' && selectedLocalGroup === group.id }"
+                    @click="domain = 'local'; selectedLocalGroup = group.id"
+                >
+                    <span class="nav-name">{{ group.name }}</span>
+                    <span class="nav-count">{{ localGroupCounts[group.id] ?? 0 }}</span>
+                </button>
+                <button class="manage-link" @click="tabs.openSettingsTab('profiles')">
+                    <Settings class="h-4 w-4" />
+                    {{ t('start.manageGroups') }}
                 </button>
             </div>
         </aside>
@@ -187,15 +241,20 @@ function recentLabel (ts: number): string {
         <section class="content">
             <header class="content-head">
                 <div>
-                    <h2 class="content-title">{{ selectedGroup === 'all' ? t('start.allHosts') : groupLabel({ id: selectedGroup, name: groupNames.get(selectedGroup) ?? '' }) }}</h2>
-                    <p class="content-sub">{{ t('start.hostsSummary', { n: sshProfiles.length, m: activeCount }) }}</p>
+                    <h2 v-if="domain === 'ssh'" class="content-title">{{ selectedGroup === 'all' ? t('start.allHosts') : groupLabel({ id: selectedGroup, name: groupNames.get(selectedGroup) ?? '' }) }}</h2>
+                    <h2 v-else class="content-title">{{ selectedLocalGroup === 'all' ? t('start.allTerminals') : localGroupNames.get(selectedLocalGroup) ?? '' }}</h2>
+                    <p class="content-sub">
+                        {{ domain === 'ssh'
+                            ? t('start.hostsSummary', { n: sshProfiles.length, m: activeCount })
+                            : t('start.localSummary', { n: localProfiles.length }) }}
+                    </p>
                 </div>
                 <div class="search-box">
                     <Search class="h-4 w-4" />
                     <input v-model="searchQuery" type="text" :placeholder="t('start.searchPlaceholder')" />
                 </div>
             </header>
-            <div v-if="recents.length > 0" class="recents">
+            <div v-if="domain === 'ssh' && recents.length > 0" class="recents">
                 <span class="sidebar-label">{{ t('start.recent') }}</span>
                 <button
                     v-for="entry in recents"
@@ -208,9 +267,30 @@ function recentLabel (ts: number): string {
                     <span class="recent-time">{{ recentLabel(entry.ts) }}</span>
                 </button>
             </div>
-            <!-- 分组切换过渡：key 绑定 selectedGroup，搜索过滤不触发重挂载 -->
+            <!-- 分组切换过渡：key 绑定域 + 选中组，搜索过滤不触发重挂载 -->
             <Transition name="page-fade" mode="out-in">
-                <div v-if="hasAnySsh" :key="selectedGroup" class="group-views">
+                <div v-if="domain === 'local'" :key="`local-${selectedLocalGroup}`" class="group-views">
+                    <p v-if="visibleLocalSections.length === 0" class="empty-hint">{{ t('start.noMatch') }}</p>
+                    <section v-for="section in visibleLocalSections" :key="section.group?.id ?? '__ungrouped'" class="group-section">
+                        <div class="group-title">{{ localSectionLabel(section) }} · {{ section.profiles.length }}</div>
+                        <div class="card-grid">
+                            <div
+                                v-for="p in section.profiles"
+                                :key="p.id"
+                                class="local-card"
+                                @click="tabs.openTerminalTab(p.id)"
+                            >
+                                <div class="local-card-head">
+                                    <SquareTerminal class="local-card-icon" />
+                                    <span class="local-card-name">{{ p.name }}</span>
+                                    <span v-if="p.isDefault" class="local-card-badge">{{ t('start.defaultBadge') }}</span>
+                                </div>
+                                <div class="local-card-command">{{ p.command }}</div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+                <div v-else-if="hasAnySsh" :key="selectedGroup" class="group-views">
                     <p v-if="visibleViews.length === 0" class="empty-hint">
                         {{ searchQuery.trim() ? t('start.noMatch') : t('start.noHosts') }}
                     </p>
@@ -316,24 +396,38 @@ function recentLabel (ts: number): string {
     transition: background-color 0.15s ease, color 0.15s ease;
 }
 .manage-link:hover { background: var(--color-card); color: var(--color-foreground); }
-.locals { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
-.local-chip {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    border: 1px solid var(--color-border);
+.locals { margin-top: auto; display: flex; flex-direction: column; gap: 3px; padding-top: 14px; }
+/* 本地终端卡片：对齐 host-card 外壳（无状态点/次级动作，整卡点击开终端） */
+.local-card {
     background: var(--color-card);
-    border-radius: var(--radius-md);
-    padding: 5px 12px;
-    color: var(--color-foreground);
-    font-size: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    cursor: pointer;
     transition: border-color 0.15s ease;
 }
-.local-chip:hover { border-color: color-mix(in oklch, var(--color-primary) 45%, transparent); }
-.local-chip.ghost { justify-content: center; gap: 6px; color: var(--color-muted-foreground); }
-.local-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.badge { color: var(--color-muted-foreground); font-size: 10px; flex: none; }
+.local-card:hover { border-color: color-mix(in oklch, var(--color-primary) 45%, transparent); }
+.local-card-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.local-card-icon { width: 15px; height: 15px; flex: none; color: var(--color-muted-foreground); }
+.local-card-name {
+    color: var(--color-foreground);
+    font-weight: 600;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.local-card-badge { color: var(--color-muted-foreground); font-size: 10px; flex: none; }
+.local-card-command {
+    color: var(--color-muted-foreground);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    margin-top: 4px;
+    padding-left: 22px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .content { flex: 1; min-width: 0; padding: 18px 22px; overflow-y: auto; }
 .content-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .content-title { font-size: 15px; font-weight: 600; }
