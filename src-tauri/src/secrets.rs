@@ -8,13 +8,47 @@ use std::sync::Mutex;
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::State;
 
 const KEYCHAIN_SERVICE: &str = "scx-terminal";
 const KEYCHAIN_USER: &str = "master-key";
 const NONCE_LEN: usize = 12;
+
+const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS ssh_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    algorithm TEXT NOT NULL,
+    public_key TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    private_key_enc BLOB NOT NULL,
+    passphrase_enc BLOB,
+    comment TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ssh_credentials (
+    profile_id TEXT PRIMARY KEY,
+    password_enc BLOB NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS s3_sync (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    endpoint TEXT NOT NULL,
+    region TEXT NOT NULL DEFAULT 'us-east-1',
+    bucket TEXT NOT NULL,
+    path_style INTEGER NOT NULL DEFAULT 1,
+    access_key TEXT NOT NULL,
+    secret_key_enc BLOB NOT NULL
+);";
+
+/// 打开/建库并初始化 schema
+fn open_db(dir: &Path) -> Connection {
+    std::fs::create_dir_all(dir).expect("failed to create app data dir");
+    let conn = Connection::open(dir.join("secrets.db")).expect("failed to open secrets.db");
+    conn.execute_batch(SCHEMA_SQL).expect("failed to init secrets schema");
+    conn
+}
 
 /// 密钥链条目元数据（私钥本体不出库）
 #[derive(Debug, Serialize)]
@@ -39,31 +73,27 @@ pub struct SecretsState {
 impl SecretsState {
     /// 打开/建库并初始化主密钥；失败直接 panic（无加密库则敏感功能全不可用）
     pub fn new(dir: &Path) -> Self {
-        std::fs::create_dir_all(dir).expect("failed to create app data dir");
-        let conn = Connection::open(dir.join("secrets.db")).expect("failed to open secrets.db");
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS ssh_keys (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                algorithm TEXT NOT NULL,
-                public_key TEXT NOT NULL,
-                fingerprint TEXT NOT NULL,
-                private_key_enc BLOB NOT NULL,
-                passphrase_enc BLOB,
-                comment TEXT NOT NULL DEFAULT '',
-                created_at INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS ssh_credentials (
-                profile_id TEXT PRIMARY KEY,
-                password_enc BLOB NOT NULL,
-                updated_at INTEGER NOT NULL
-            );",
-        )
-        .expect("failed to init secrets schema");
+        let conn = open_db(dir);
         let master = load_or_create_master_key().expect("failed to load master key");
         let cipher = Aes256Gcm::new((&master).into());
         Self { conn: Mutex::new(conn), cipher }
     }
+
+    /// 测试构造：注入主密钥，绕过系统钥匙串——单测不得依赖/触发钥匙串授权弹窗
+    #[cfg(test)]
+    pub fn with_master_key(dir: &Path, master: [u8; 32]) -> Self {
+        let conn = open_db(dir);
+        let cipher = Aes256Gcm::new((&master).into());
+        Self { conn: Mutex::new(conn), cipher }
+    }
+}
+
+/// 测试用：随机主密钥构造（不同实例即不同「机器」，天然覆盖跨机迁移路径）
+#[cfg(test)]
+pub(crate) fn test_state(dir: &Path) -> SecretsState {
+    let mut key = [0u8; 32];
+    getrandom::fill(&mut key).expect("random generation failed");
+    SecretsState::with_master_key(dir, key)
 }
 
 /// 主密钥：钥匙串无则生成 32 随机字节并以 hex 存入；有则读回解析
@@ -296,6 +326,117 @@ pub fn replace_all(state: &SecretsState, plain: &SecretsPlain) -> Result<(), Str
         .map_err(|e| format!("failed to import ssh credential {}: {e}", cred.profile_id))?;
     }
     tx.commit().map_err(|e| format!("failed to commit secrets import: {e}"))
+}
+
+/// 云端同步（S3 兼容）配置：非敏感字段明文列 + secretKey 加密列；secret 仅存于 Rust 侧
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct S3SyncConfig {
+    pub endpoint: String,
+    pub region: String,
+    pub bucket: String,
+    pub path_style: bool,
+    pub access_key: String,
+    pub secret_key: String,
+}
+
+/// 读取云端同步配置（未配置返回 None；secretKey 用主密钥解密，仅供 Rust 侧签名使用）
+///
+/// # Arguments
+///
+/// * `state` - 加密存储状态
+///
+/// # Returns
+///
+/// 配置或 None
+///
+/// # Examples
+///
+/// `if let Some(cfg) = s3_sync_load(&state)? { ... }`
+pub fn s3_sync_load(state: &SecretsState) -> Result<Option<S3SyncConfig>, String> {
+    let conn = state.conn.lock().unwrap();
+    let row = conn
+        .query_row(
+            "SELECT endpoint, region, bucket, path_style, access_key, secret_key_enc
+             FROM s3_sync WHERE id = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)? != 0,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Vec<u8>>(5)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| format!("failed to read s3 sync config: {e}"))?;
+    drop(conn);
+    match row {
+        None => Ok(None),
+        Some((endpoint, region, bucket, path_style, access_key, secret_enc)) => Ok(Some(S3SyncConfig {
+            endpoint,
+            region,
+            bucket,
+            path_style,
+            access_key,
+            secret_key: decrypt_field(&state.cipher, &secret_enc)?,
+        })),
+    }
+}
+
+/// 保存/覆盖云端同步配置（secretKey 入库前加密；单行表）
+///
+/// # Arguments
+///
+/// * `state` - 加密存储状态
+/// * `config` - 完整配置（含 secretKey 明文）
+///
+/// # Examples
+///
+/// `s3_sync_store(&state, &config)?;`
+pub fn s3_sync_store(state: &SecretsState, config: &S3SyncConfig) -> Result<(), String> {
+    let secret_enc = encrypt_field(&state.cipher, &config.secret_key)?;
+    let conn = state.conn.lock().unwrap();
+    conn.execute(
+        "INSERT INTO s3_sync (id, endpoint, region, bucket, path_style, access_key, secret_key_enc)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(id) DO UPDATE SET
+            endpoint = excluded.endpoint,
+            region = excluded.region,
+            bucket = excluded.bucket,
+            path_style = excluded.path_style,
+            access_key = excluded.access_key,
+            secret_key_enc = excluded.secret_key_enc",
+        rusqlite::params![
+            config.endpoint,
+            config.region,
+            config.bucket,
+            config.path_style as i64,
+            config.access_key,
+            secret_enc
+        ],
+    )
+    .map_err(|e| format!("failed to save s3 sync config: {e}"))?;
+    Ok(())
+}
+
+/// 清除云端同步配置
+///
+/// # Arguments
+///
+/// * `state` - 加密存储状态
+///
+/// # Examples
+///
+/// `s3_sync_forget(&state)?;`
+pub fn s3_sync_forget(state: &SecretsState) -> Result<(), String> {
+    let conn = state.conn.lock().unwrap();
+    conn.execute("DELETE FROM s3_sync WHERE id = 1", [])
+        .map_err(|e| format!("failed to clear s3 sync config: {e}"))?;
+    Ok(())
 }
 
 /// 认证链内部读取：按 keyId 解密私钥与口令
@@ -754,7 +895,7 @@ mod tests {
     fn temp_state(tag: &str) -> SecretsState {
         let dir = std::env::temp_dir().join(format!("scx-secrets-test-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        SecretsState::new(&dir)
+        test_state(&dir)
     }
 
     #[test]
@@ -840,5 +981,38 @@ mod tests {
         assert_eq!(load_password(&state, "p1").unwrap().as_deref(), Some("hunter2"));
         remove_password_internal(&state, "p1").unwrap();
         assert_eq!(load_password(&state, "p1").unwrap(), None);
+    }
+
+    #[test]
+    fn s3_sync_config_round_trip_and_forget() {
+        let state = temp_state("s3cfg");
+        assert!(s3_sync_load(&state).unwrap().is_none());
+        let config = S3SyncConfig {
+            endpoint: "http://127.0.0.1:9000".into(),
+            region: "us-east-1".into(),
+            bucket: "backups".into(),
+            path_style: true,
+            access_key: "ak".into(),
+            secret_key: "sk-plain-secret".into(),
+        };
+        s3_sync_store(&state, &config).unwrap();
+        let loaded = s3_sync_load(&state).unwrap().expect("stored config must load");
+        assert_eq!(loaded.endpoint, config.endpoint);
+        assert_eq!(loaded.bucket, config.bucket);
+        assert!(loaded.path_style);
+        assert_eq!(loaded.secret_key, "sk-plain-secret");
+        // secretKey 明文不得落盘
+        let raw = std::fs::read(state_db_path(&state)).unwrap();
+        assert!(!String::from_utf8_lossy(&raw).contains("sk-plain-secret"));
+        s3_sync_forget(&state).unwrap();
+        assert!(s3_sync_load(&state).unwrap().is_none());
+    }
+
+    /// 取回 state 底层 secrets.db 文件全路径，供断言密文不落明文
+    fn state_db_path(state: &SecretsState) -> std::path::PathBuf {
+        let conn = state.conn.lock().unwrap();
+        conn.query_row("PRAGMA database_list", [], |row| row.get::<_, String>(2))
+            .unwrap()
+            .into()
     }
 }

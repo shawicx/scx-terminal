@@ -397,14 +397,24 @@ fn write_config_rows(config: &ConfigState, rows: &BackupConfig) -> Result<(), St
     tx.commit().map_err(|e| format!("failed to commit config import: {e}"))
 }
 
-/// 导出：读两库 → 组装快照 → 口令包裹 secrets → 写入 path
-pub(crate) fn export_internal(
+/// 组装完整快照（云端 push 与本地导出共用）：读两库 → 口令包裹 secrets 段
+///
+/// # Arguments
+///
+/// * `config` - 配置库状态
+/// * `secrets` - 加密存储状态
+/// * `passphrase` - 用户口令（非空）
+/// * `app_version` - 应用版本号（写入信封）
+///
+/// # Returns
+///
+/// (快照, 导出摘要)——摘要需在包裹前统计（密文段不可回推条数）
+pub(crate) fn build_snapshot(
     config: &ConfigState,
     secrets: &SecretsState,
-    path: &Path,
     passphrase: &str,
     app_version: &str,
-) -> Result<ExportSummary, String> {
+) -> Result<(BackupSnapshot, ExportSummary), String> {
     if passphrase.trim().is_empty() {
         return Err("passphrase must not be empty".to_string());
     }
@@ -424,24 +434,21 @@ pub(crate) fn export_internal(
         config: backup_config,
         secrets: wrap_secrets(&plain_json, passphrase)?,
     };
-    let json = serde_json::to_string_pretty(&snapshot).map_err(|e| format!("failed to serialize backup: {e}"))?;
-    std::fs::write(path, json).map_err(|e| format!("failed to write backup file: {e}"))?;
-    Ok(summary)
+    Ok((snapshot, summary))
 }
 
-/// 导入：读文件 → 校验信封/版本/行身份键 → 解包 secrets → 全部通过后先 secrets 后 config 全量替换写库
-pub(crate) fn import_internal(
+/// 校验并应用快照（云端 pull 与本地导入共用）：信封/版本/行身份键 → 解包 → 先 secrets 后 config 替换
+pub(crate) fn parse_and_apply(
     config: &ConfigState,
     secrets: &SecretsState,
-    path: &Path,
+    raw: &str,
     passphrase: &str,
 ) -> Result<(), String> {
     if passphrase.trim().is_empty() {
         return Err("passphrase must not be empty".to_string());
     }
-    let raw = std::fs::read_to_string(path).map_err(|e| format!("failed to read backup file: {e}"))?;
     let doc: BackupSnapshot =
-        serde_json::from_str(&raw).map_err(|_| "invalid backup file: not JSON".to_string())?;
+        serde_json::from_str(raw).map_err(|_| "invalid backup file: not JSON".to_string())?;
     if doc.format != BACKUP_FORMAT {
         return Err("invalid backup file: unknown format".to_string());
     }
@@ -455,6 +462,31 @@ pub(crate) fn import_internal(
     replace_all(secrets, &plain)?;
     write_config_rows(config, &doc.config)?;
     Ok(())
+}
+
+/// 导出：组装快照 → 写入 path
+pub(crate) fn export_internal(
+    config: &ConfigState,
+    secrets: &SecretsState,
+    path: &Path,
+    passphrase: &str,
+    app_version: &str,
+) -> Result<ExportSummary, String> {
+    let (snapshot, summary) = build_snapshot(config, secrets, passphrase, app_version)?;
+    let json = serde_json::to_string_pretty(&snapshot).map_err(|e| format!("failed to serialize backup: {e}"))?;
+    std::fs::write(path, json).map_err(|e| format!("failed to write backup file: {e}"))?;
+    Ok(summary)
+}
+
+/// 导入：读文件 → 校验并应用（见 parse_and_apply）
+pub(crate) fn import_internal(
+    config: &ConfigState,
+    secrets: &SecretsState,
+    path: &Path,
+    passphrase: &str,
+) -> Result<(), String> {
+    let raw = std::fs::read_to_string(path).map_err(|e| format!("failed to read backup file: {e}"))?;
+    parse_and_apply(config, secrets, &raw, passphrase)
 }
 
 /// 导出配置备份到本地文件（见 export_internal）
@@ -606,7 +638,7 @@ mod tests {
         // 机器 A：种子 + 导出
         let dir_a = temp_dir("a");
         let config_a = ConfigState::new(&dir_a);
-        let secrets_a = SecretsState::new(&dir_a);
+        let secrets_a = crate::secrets::test_state(&dir_a);
         seed_config(&config_a);
         let pem = test_pem();
         seed_secrets(&secrets_a, &pem);
@@ -628,7 +660,7 @@ mod tests {
         // 机器 B：全新状态导入（不同主密钥）
         let dir_b = temp_dir("b");
         let config_b = ConfigState::new(&dir_b);
-        let secrets_b = SecretsState::new(&dir_b);
+        let secrets_b = crate::secrets::test_state(&dir_b);
         import_internal(&config_b, &secrets_b, &file, "pass123").unwrap();
 
         let snapshot = load_internal(&config_b).unwrap().expect("imported config must be initialized");
@@ -658,7 +690,7 @@ mod tests {
     fn import_rejects_unknown_version_without_touching_target() {
         let dir_a = temp_dir("a");
         let config_a = ConfigState::new(&dir_a);
-        let secrets_a = SecretsState::new(&dir_a);
+        let secrets_a = crate::secrets::test_state(&dir_a);
         seed_config(&config_a);
         let pem = test_pem();
         seed_secrets(&secrets_a, &pem);
@@ -673,7 +705,7 @@ mod tests {
 
         let dir_b = temp_dir("b");
         let config_b = ConfigState::new(&dir_b);
-        let secrets_b = SecretsState::new(&dir_b);
+        let secrets_b = crate::secrets::test_state(&dir_b);
         let err = import_internal(&config_b, &secrets_b, &bad, "pass123").unwrap_err();
         assert!(err.contains("unsupported backup version"), "unexpected error: {err}");
         assert!(
@@ -694,7 +726,7 @@ mod tests {
 
         let dir_b = temp_dir("b");
         let config_b = ConfigState::new(&dir_b);
-        let secrets_b = SecretsState::new(&dir_b);
+        let secrets_b = crate::secrets::test_state(&dir_b);
         let err = import_internal(&config_b, &secrets_b, &bad, "pass123").unwrap_err();
         assert!(err.contains("invalid backup file"), "unexpected error: {err}");
         assert!(load_internal(&config_b).unwrap().is_none());
@@ -704,13 +736,13 @@ mod tests {
     fn import_snapshot_with_empty_secrets_succeeds() {
         let dir_a = temp_dir("a");
         let config_a = ConfigState::new(&dir_a);
-        let secrets_a = SecretsState::new(&dir_a);
+        let secrets_a = crate::secrets::test_state(&dir_a);
         let file = dir_a.join("empty.json");
         export_internal(&config_a, &secrets_a, &file, "pass123", "0.1.6-test").unwrap();
 
         let dir_b = temp_dir("b");
         let config_b = ConfigState::new(&dir_b);
-        let secrets_b = SecretsState::new(&dir_b);
+        let secrets_b = crate::secrets::test_state(&dir_b);
         import_internal(&config_b, &secrets_b, &file, "pass123").unwrap();
 
         let snapshot = load_internal(&config_b).unwrap().expect("empty import still initializes");

@@ -188,6 +188,21 @@ pub(crate) fn mark_initialized(conn: &Connection) -> rusqlite::Result<usize> {
     )
 }
 
+/// 读 meta 键值（不存在返回 None）——deviceId / 云端同步时间戳等机器本地元数据
+pub(crate) fn meta_get(conn: &Connection, key: &str) -> rusqlite::Result<Option<String>> {
+    conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| row.get(0))
+        .optional()
+}
+
+/// upsert meta 键值（机器本地元数据；不影响 initialized 语义）
+pub(crate) fn meta_set(conn: &Connection, key: &str, value: &str) -> rusqlite::Result<usize> {
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        rusqlite::params![key, value],
+    )
+}
+
 /// 从 JSON 提取字符串字段（缺失/类型不符时用空串兜底）
 fn json_str(value: &Value, key: &str) -> String {
     value.get(key).and_then(Value::as_str).unwrap_or("").to_string()

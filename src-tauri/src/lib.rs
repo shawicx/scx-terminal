@@ -10,6 +10,7 @@ mod pty;
 mod secrets;
 mod sftp;
 mod snapshot;
+mod s3sync;
 mod shells;
 mod ssh;
 mod transfers;
@@ -129,6 +130,14 @@ pub fn run() {
             config::color_scheme_delete,
             snapshot::config_export,
             snapshot::config_import,
+            s3sync::s3_sync_get,
+            s3sync::s3_sync_set,
+            s3sync::s3_sync_clear,
+            s3sync::s3_sync_test,
+            s3sync::s3_sync_status,
+            s3sync::s3_sync_push,
+            s3sync::s3_sync_list_remote,
+            s3sync::s3_sync_pull,
             secrets::key_generate,
             secrets::key_import,
             secrets::key_inspect,

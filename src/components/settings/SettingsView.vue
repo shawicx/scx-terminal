@@ -7,12 +7,25 @@ import { openPath } from '@tauri-apps/plugin-opener'
 import type { Update } from '@tauri-apps/plugin-updater'
 import { nanoid } from 'nanoid'
 import { writeClipboardText } from '@/lib/frontendContext'
-import { Terminal, Palette, Keyboard, Info, FolderOpen, KeyRound, Copy, Plus, Trash2, Upload, Download, HardDriveDownload, Zap, Pencil, X, Globe, Server, SquareTerminal, Layers } from 'lucide-vue-next'
+import { Terminal, Palette, Keyboard, Info, FolderOpen, KeyRound, Copy, Plus, Trash2, Upload, Download, HardDriveDownload, Zap, Pencil, X, Globe, Server, SquareTerminal, Layers, Eye, EyeOff } from 'lucide-vue-next'
 import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
 import type { Event as TauriEvent, UnlistenFn } from '@tauri-apps/api/event'
 import type { SshKeyMeta, SshKeyInspection } from '@/services/secrets'
 import { generateSshKey, importSshKey, inspectSshKey, listSshKeys, updateSshKey, deleteSshKey, setProfilePassword, removeProfilePassword, hasProfilePassword } from '@/services/secrets'
 import { exportConfigBackup, importConfigBackup } from '@/services/configBackup'
+import {
+    getS3SyncConfig,
+    setS3SyncConfig,
+    clearS3SyncConfig,
+    testS3SyncConnection,
+    getS3SyncStatus,
+    pushBackupToCloud,
+    listRemoteSnapshots,
+    pullRemoteSnapshot,
+    type RemoteSnapshot,
+    type S3SyncConfig,
+    type SyncStatus,
+} from '@/services/configSync'
 import Button from '@/components/ui/Button.vue'
 import Dialog from '@/components/ui/Dialog.vue'
 import Input from '@/components/ui/Input.vue'
@@ -108,7 +121,16 @@ async function clearBackgroundImage (): Promise<void> {
 const backupBusy = ref(false)
 const backupError = ref('')
 const backupNotice = ref('')
-const passphraseDialog = ref<null | { mode: 'export' | 'import'; path: string; passphrase: string; confirm: string }>(null)
+const passphraseDialog = ref<null | {
+    mode: 'export' | 'import'
+    kind: 'local' | 's3'
+    /** 本地文件路径（kind=local） */
+    path?: string
+    /** 云端对象键（kind=s3 且 mode=import） */
+    key?: string
+    passphrase: string
+    confirm: string
+}>(null)
 
 /**
  * @description 生成默认备份文件名 scx-terminal-backup-YYYYMMDD-HHmmss.json
@@ -138,7 +160,7 @@ async function startBackupExport (): Promise<void> {
     }
     backupError.value = ''
     backupNotice.value = ''
-    passphraseDialog.value = { mode: 'export', path, passphrase: '', confirm: '' }
+    passphraseDialog.value = { mode: 'export', kind: 'local', path, passphrase: '', confirm: '' }
 }
 
 /**
@@ -158,7 +180,7 @@ async function startBackupImport (): Promise<void> {
     backupError.value = ''
     backupNotice.value = ''
     confirmAction(t('settings.backupImportConfirmBody'), () => {
-        passphraseDialog.value = { mode: 'import', path: picked, passphrase: '', confirm: '' }
+        passphraseDialog.value = { mode: 'import', kind: 'local', path: picked, passphrase: '', confirm: '' }
     })
 }
 
@@ -174,8 +196,31 @@ const passphraseValid = computed(() => {
     return dialog.passphrase.length > 0
 })
 
+/** 口令弹窗标题（本地导出/导入与云端上传/恢复区分） */
+const passphraseDialogTitle = computed(() => {
+    const dialog = passphraseDialog.value
+    if (!dialog) {
+        return ''
+    }
+    if (dialog.kind === 's3') {
+        return dialog.mode === 'export'
+            ? t('settings.syncPushTitle')
+            : t('settings.backupImportTitle')
+    }
+    return dialog.mode === 'export' ? t('settings.backupExportTitle') : t('settings.backupImportTitle')
+})
+
+/** 口令弹窗确认按钮文案 */
+const passphraseDialogAction = computed(() => {
+    const dialog = passphraseDialog.value
+    if (!dialog) {
+        return ''
+    }
+    return dialog.mode === 'export' ? t('settings.backupExportAction') : t('settings.backupImportAction')
+})
+
 /**
- * @description 提交口令弹窗：执行导出或导入；导入成功后重载配置并提示重启
+ * @description 提交口令弹窗：按 kind/mode 执行本地导出导入或云端上传恢复；导入成功后重载配置并提示重启
  * @returns Promise<void>
  *
  */
@@ -187,24 +232,277 @@ async function commitBackupPassphrase (): Promise<void> {
     backupBusy.value = true
     backupError.value = ''
     try {
-        if (dialog.mode === 'export') {
-            const summary = await exportConfigBackup(dialog.path, dialog.passphrase)
+        if (dialog.kind === 'local' && dialog.mode === 'export') {
+            const summary = await exportConfigBackup(dialog.path ?? '', dialog.passphrase)
             backupNotice.value = t('settings.backupExportDone', {
                 p: summary.profileCount,
                 q: summary.quickCommandCount,
                 k: summary.sshKeyCount,
             })
-        } else {
-            await importConfigBackup(dialog.path, dialog.passphrase)
+        } else if (dialog.kind === 'local') {
+            await importConfigBackup(dialog.path ?? '', dialog.passphrase)
             await config.load()
             backupNotice.value = t('settings.backupImportDone')
+        } else if (dialog.mode === 'export') {
+            const result = await pushBackupToCloud(dialog.passphrase)
+            backupNotice.value = t('settings.syncPushDone', { size: formatBytes(result.size) })
+            void refreshSyncState()
+        } else {
+            await pullRemoteSnapshot(dialog.key ?? '', dialog.passphrase)
+            await config.load()
+            backupNotice.value = t('settings.backupImportDone')
+            void refreshSyncState()
         }
         passphraseDialog.value = null
     } catch (error) {
-        backupError.value = String(error instanceof Error ? error.message : error)
+        backupError.value = dialog.kind === 's3'
+            ? syncErrorMessage(error)
+            : String(error instanceof Error ? error.message : error)
     } finally {
         backupBusy.value = false
     }
+}
+
+// ---- 云端同步（S3 兼容 / MinIO）----
+
+const syncBusy = ref(false)
+const syncError = ref('')
+const syncNotice = ref('')
+const syncForm = ref<S3SyncConfig>({
+    endpoint: '',
+    region: 'us-east-1',
+    bucket: '',
+    pathStyle: true,
+    accessKey: '',
+    secretKey: '',
+})
+const syncHasSecret = ref(false)
+const syncStatus = ref<SyncStatus | null>(null)
+const pullDialog = ref<null | { items: RemoteSnapshot[] }>(null)
+const showSyncSecret = ref(false)
+
+watch(page, value => {
+    if (value === 'backup') {
+        void refreshSyncState()
+    }
+}, { immediate: true })
+
+/**
+ * @description 拉取云端同步配置与状态（进入配置备份分页时刷新）
+ * @returns Promise<void>
+ *
+ */
+async function refreshSyncState (): Promise<void> {
+    try {
+        const view = await getS3SyncConfig()
+        if (view) {
+            syncForm.value = {
+                endpoint: view.endpoint,
+                region: view.region || 'us-east-1',
+                bucket: view.bucket,
+                pathStyle: view.pathStyle,
+                accessKey: view.accessKey,
+                secretKey: '',
+            }
+            syncHasSecret.value = view.hasSecretKey
+        } else {
+            syncForm.value = { endpoint: '', region: 'us-east-1', bucket: '', pathStyle: true, accessKey: '', secretKey: '' }
+            syncHasSecret.value = false
+        }
+        syncStatus.value = await getS3SyncStatus()
+    } catch (error) {
+        syncError.value = syncErrorMessage(error)
+    }
+}
+
+/** 配置表单可保存：endpoint/bucket/accessKey 必填；secretKey 已存则可留空 */
+const syncFormValid = computed(() => {
+    const form = syncForm.value
+    return form.endpoint.trim() !== ''
+        && form.bucket.trim() !== ''
+        && form.accessKey.trim() !== ''
+        && (syncHasSecret.value || form.secretKey.length > 0)
+})
+
+/**
+ * @description 保存云端同步配置（secretKey 留空 = 沿用已存值由后端保持）
+ * @returns Promise<void>
+ *
+ */
+async function saveSyncConfig (): Promise<void> {
+    if (!syncFormValid.value || syncBusy.value) {
+        return
+    }
+    syncBusy.value = true
+    syncError.value = ''
+    syncNotice.value = ''
+    try {
+        await setS3SyncConfig(syncForm.value)
+        syncNotice.value = t('settings.syncSaved')
+        await refreshSyncState()
+    } catch (error) {
+        syncError.value = syncErrorMessage(error)
+    } finally {
+        syncBusy.value = false
+    }
+}
+
+/**
+ * @description 测试连接（用当前表单值；secretKey 留空时后端沿用已存密钥）
+ * @returns Promise<void>
+ *
+ */
+async function runSyncTest (): Promise<void> {
+    if (syncBusy.value) {
+        return
+    }
+    syncBusy.value = true
+    syncError.value = ''
+    syncNotice.value = ''
+    try {
+        await testS3SyncConnection(syncForm.value)
+        syncNotice.value = t('settings.syncTestOk')
+    } catch (error) {
+        syncError.value = syncErrorMessage(error)
+    } finally {
+        syncBusy.value = false
+    }
+}
+
+/**
+ * @description 清除云端同步配置（覆盖确认后执行）
+ * @returns void
+ *
+ */
+function clearSyncConfig (): void {
+    confirmAction(t('settings.syncClearConfirmBody'), () => { void doClearSyncConfig() })
+}
+
+async function doClearSyncConfig (): Promise<void> {
+    syncBusy.value = true
+    syncError.value = ''
+    syncNotice.value = ''
+    try {
+        await clearS3SyncConfig()
+        syncNotice.value = t('settings.syncSaved')
+        await refreshSyncState()
+    } catch (error) {
+        syncError.value = syncErrorMessage(error)
+    } finally {
+        syncBusy.value = false
+    }
+}
+
+/** 云端操作前置校验：未保存配置直接前端拦截 */
+function requireSyncConfigured (): boolean {
+    if (!syncHasSecret.value) {
+        syncError.value = t('settings.syncErrNotConfigured')
+        return false
+    }
+    syncError.value = ''
+    return true
+}
+
+/**
+ * @description 发起云端上传：口令弹窗（export 模式，s3 kind）
+ * @returns void
+ *
+ */
+function startSyncPush (): void {
+    if (syncBusy.value || !requireSyncConfigured()) {
+        return
+    }
+    backupError.value = ''
+    backupNotice.value = ''
+    passphraseDialog.value = { mode: 'export', kind: 's3', passphrase: '', confirm: '' }
+}
+
+/**
+ * @description 发起云端恢复：列出设备快照 → 选择 → 覆盖确认 → 口令弹窗
+ * @returns Promise<void>
+ *
+ */
+async function startSyncPull (): Promise<void> {
+    if (syncBusy.value || !requireSyncConfigured()) {
+        return
+    }
+    syncBusy.value = true
+    syncError.value = ''
+    try {
+        const items = (await listRemoteSnapshots())
+            .sort((a, b) => b.lastModified.localeCompare(a.lastModified))
+        pullDialog.value = { items }
+    } catch (error) {
+        syncError.value = syncErrorMessage(error)
+    } finally {
+        syncBusy.value = false
+    }
+}
+
+/**
+ * @description 选定设备快照：关列表 → 覆盖确认 → 口令弹窗（import 模式，s3 kind）
+ * @param item 选中的云端快照条目
+ * @returns void
+ *
+ */
+function chooseRemoteSnapshot (item: RemoteSnapshot): void {
+    pullDialog.value = null
+    confirmAction(t('settings.backupImportConfirmBody'), () => {
+        passphraseDialog.value = { mode: 'import', kind: 's3', key: item.key, passphrase: '', confirm: '' }
+    })
+}
+
+/** 后端英文技术错误 → 用户文案映射（按 S3 错误码分诊） */
+function syncErrorMessage (error: unknown): string {
+    const raw = String(error instanceof Error ? error.message : error)
+    if (raw.includes('failed to reach object storage')) {
+        return t('settings.syncErrUnreachable')
+    }
+    if (raw.includes('SignatureDoesNotMatch')) {
+        return t('settings.syncErrSignature')
+    }
+    if (raw.includes('InvalidAccessKeyId')) {
+        return t('settings.syncErrAccessKey')
+    }
+    if (raw.includes('AccessDenied')) {
+        return t('settings.syncErrAccessDenied')
+    }
+    if (raw.includes('RequestTimeTooSkewed')) {
+        return t('settings.syncErrSkew')
+    }
+    if (raw.includes('rejected credentials')) {
+        return t('settings.syncErrCredentials')
+    }
+    if (raw.includes('bucket not found')) {
+        return t('settings.syncErrBucket')
+    }
+    if (raw.includes('object not found')) {
+        return t('settings.syncErrObject')
+    }
+    if (raw.includes('not configured')) {
+        return t('settings.syncErrNotConfigured')
+    }
+    return raw
+}
+
+/** 毫秒时间戳或 ISO 字符串 → 本地化时间（无效值显示 —） */
+function formatSyncTime (value: string | number | null): string {
+    if (value === null || value === '') {
+        return '—'
+    }
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
+}
+
+/** 字节数 → 人类可读（B/KB/MB） */
+function formatBytes (size: number): string {
+    if (size >= 1024 * 1024) {
+        return `${(size / 1024 / 1024).toFixed(1)} MB`
+    }
+    if (size >= 1024) {
+        return `${(size / 1024).toFixed(1)} KB`
+    }
+    return `${size} B`
 }
 
 function bindingFor (hotkeyId: string): string {
@@ -2415,6 +2713,96 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                     <p v-if="backupError" class="import-error">{{ backupError }}</p>
                     <p class="hint">{{ t('settings.backupSecurityHint') }}</p>
                 </div>
+                <div class="settings-section">
+                    <p class="settings-section-title">{{ t('settings.syncSectionTitle') }}</p>
+                    <div class="settings-card">
+                        <div class="settings-card-row stacked">
+                            <div class="settings-field">
+                                <Label>{{ t('settings.syncEndpoint') }}</Label>
+                                <Input
+                                    v-model="syncForm.endpoint"
+                                    :placeholder="t('settings.syncEndpointPlaceholder')"
+                                />
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.syncRegion') }}</Label>
+                                <Input v-model="syncForm.region" />
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.syncBucket') }}</Label>
+                                <Input v-model="syncForm.bucket" />
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.syncAccessKey') }}</Label>
+                                <Input v-model="syncForm.accessKey" autocomplete="off" />
+                            </div>
+                            <div class="settings-field">
+                                <Label>{{ t('settings.syncSecretKey') }}</Label>
+                                <div class="secret-input">
+                                    <Input
+                                        v-model="syncForm.secretKey"
+                                        :type="showSyncSecret ? 'text' : 'password'"
+                                        autocomplete="off"
+                                        :placeholder="syncHasSecret ? t('settings.syncSecretKeep') : ''"
+                                    />
+                                    <button
+                                        type="button"
+                                        class="secret-toggle"
+                                        :title="showSyncSecret ? t('settings.syncHideSecret') : t('settings.syncShowSecret')"
+                                        @click="showSyncSecret = !showSyncSecret"
+                                    >
+                                        <EyeOff v-if="showSyncSecret" :size="14" />
+                                        <Eye v-else :size="14" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="settings-field row">
+                                <Label>{{ t('settings.syncPathStyle') }}</Label>
+                                <Switch v-model="syncForm.pathStyle" />
+                            </div>
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.syncActions') }}</Label>
+                            <div class="about-config">
+                                <Button variant="outline" size="sm" :disabled="syncBusy" @click="runSyncTest">
+                                    {{ t('settings.syncTest') }}
+                                </Button>
+                                <Button variant="outline" size="sm" :disabled="syncBusy || !syncFormValid" @click="saveSyncConfig">
+                                    {{ t('settings.syncSave') }}
+                                </Button>
+                                <Button variant="ghost" size="sm" :disabled="syncBusy || !syncHasSecret" @click="clearSyncConfig">
+                                    {{ t('settings.syncClear') }}
+                                </Button>
+                            </div>
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.syncStatus') }}</Label>
+                            <div class="sync-status">
+                                <span class="value-hint mono">
+                                    {{ syncStatus ? t('settings.syncDevice', { id: syncStatus.deviceId.slice(0, 8) }) : '…' }}
+                                </span>
+                                <span class="value-hint">{{ t('settings.syncLastPush') }} {{ formatSyncTime(syncStatus?.lastPushAt ?? null) }}</span>
+                                <span class="value-hint">{{ t('settings.syncLastPull') }} {{ formatSyncTime(syncStatus?.lastPullAt ?? null) }}</span>
+                            </div>
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.syncBackup') }}</Label>
+                            <div class="about-config">
+                                <Button variant="outline" size="sm" :disabled="syncBusy" @click="startSyncPush">
+                                    <Upload :size="14" />
+                                    {{ t('settings.syncPush') }}
+                                </Button>
+                                <Button variant="outline" size="sm" :disabled="syncBusy" @click="startSyncPull">
+                                    <Download :size="14" />
+                                    {{ t('settings.syncPull') }}
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                    <p v-if="syncNotice" class="hint">{{ syncNotice }}</p>
+                    <p v-if="syncError" class="import-error">{{ syncError }}</p>
+                    <p class="hint">{{ t('settings.syncHint') }}</p>
+                </div>
             </div>
 
             <div v-else key="about">
@@ -2504,7 +2892,7 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
         </Dialog>
         <Dialog
             v-if="passphraseDialog"
-            :title="passphraseDialog.mode === 'export' ? t('settings.backupExportTitle') : t('settings.backupImportTitle')"
+            :title="passphraseDialogTitle"
             :width="380"
             @cancel="passphraseDialog = null"
         >
@@ -2530,9 +2918,25 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
             <template #footer>
                 <Button variant="outline" size="sm" :disabled="backupBusy" @click="passphraseDialog = null">{{ t('settings.cancel') }}</Button>
                 <Button size="sm" :disabled="!passphraseValid || backupBusy" @click="commitBackupPassphrase">
-                    {{ passphraseDialog.mode === 'export' ? t('settings.backupExportAction') : t('settings.backupImportAction') }}
+                    {{ passphraseDialogAction }}
                 </Button>
             </template>
+        </Dialog>
+        <Dialog v-if="pullDialog" :title="t('settings.syncPullTitle')" :width="440" @cancel="pullDialog = null">
+            <div class="sync-pull-list">
+                <p v-if="pullDialog.items.length === 0" class="hint">{{ t('settings.syncPullEmpty') }}</p>
+                <button
+                    v-for="item in pullDialog.items"
+                    :key="item.key"
+                    class="sync-pull-item"
+                    @click="chooseRemoteSnapshot(item)"
+                >
+                    <span class="value-hint mono">{{ item.deviceId.slice(0, 8) }}</span>
+                    <span class="sync-pull-meta">
+                        {{ formatSyncTime(item.lastModified) }} · {{ formatBytes(item.size) }}
+                    </span>
+                </button>
+            </div>
         </Dialog>
     </div>
 </template>
@@ -3307,6 +3711,74 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     display: flex;
     flex-direction: column;
     gap: 8px;
+}
+
+.sync-status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    justify-content: flex-end;
+}
+
+.sync-pull-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.sync-pull-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-foreground);
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.sync-pull-item:hover {
+    background: var(--color-accent);
+}
+
+.sync-pull-meta {
+    color: var(--color-muted-foreground);
+    font-size: 11px;
+}
+
+.secret-input {
+    position: relative;
+}
+
+.secret-input :deep(input) {
+    padding-right: 34px;
+}
+
+.secret-toggle {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    padding: 5px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.secret-toggle:hover {
+    color: var(--color-foreground);
 }
 
 .qc-group-action.danger {
