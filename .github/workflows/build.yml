@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.create_release.outputs.release_id }}
+      release_notes: ${{ steps.persist_notes.outputs.notes }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,6 +25,21 @@ jobs:
         with:
           config: cliff.toml
           args: --latest --strip header
+
+      # cliff 的 notes 持久化为多行 output：build 阶段传给 tauri-action 的 releaseBody。
+      # 不传时 tauri-action 会用 head_commit.message 覆盖 release body（v0.1.6 实测），
+      # 导致 changelog 只剩一条提交信息
+      - name: Persist release notes
+        id: persist_notes
+        env:
+          NOTES: ${{ steps.git-cliff.outputs.content }}
+        run: |
+          {
+            echo 'notes<<NOTES_EOF'
+            printf '%s' "$NOTES"
+            echo
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
 
       # 先建 draft release，各平台构建用 releaseId 直传产物，避免多 job 并发创建同一 release 撞 already_exists
       # release_id 必须直接取自创建响应（列表接口存在读后延迟，2026-09-19 v0.1.1 run 曾因此回读 null，
@@ -107,6 +123,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.changelog.outputs.release_id }}
+          releaseBody: ${{ needs.changelog.outputs.release_notes }}
           tagName: ${{ github.ref_name }}
           args: ${{ matrix.args }}
 

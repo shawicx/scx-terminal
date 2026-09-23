@@ -14,11 +14,12 @@ commit_parsers = [
   { message = "^fix", group = "<!-- 1 -->🐛 修复" },
   { message = "^perf", group = "<!-- 2 -->⚡ 性能优化" },
   { message = "^refactor", group = "<!-- 3 -->♻️ 重构" },
-  { message = "^doc", skip = true },
-  { message = "^style", skip = true },
-  { message = "^chore", skip = true },
-  { message = "^ci", skip = true },
-  { message = "^test", skip = true },
+  # style 必须保留分组：纯样式迭代（如 v0.1.6）若被 skip 会得到空 changelog
+  { message = "^style", group = "<!-- 4 -->🎨 界面样式" },
+  { message = "^docs", group = "<!-- 5 -->📚 文档" },
+  { message = "^ci", group = "<!-- 6 -->🔧 CI/CD" },
+  { message = "^chore", group = "<!-- 7 -->🧹 其他杂项" },
+  { message = "^test", group = "<!-- 8 -->🧪 测试" },
 ]
 protect_breaking_commits = false
 filter_commits = true

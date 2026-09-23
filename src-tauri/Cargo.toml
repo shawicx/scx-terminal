@@ -1,6 +1,6 @@
 [package]
 name = "scx-terminal"
-version = "0.1.5"
+version = "0.1.6"
 description = "scx-terminal — a terminal built with Tauri V2"
 edition = "2021"
 
