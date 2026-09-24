@@ -172,6 +172,28 @@ export const useTabsStore = defineStore('tabs', {
             return tab
         },
         /**
+         * @description 打开（或聚焦）主机的 SSH 终端标签并展开监控侧栏：已有该档案的
+         *              终端标签则聚焦复用，否则新建；监控栏开合态由 config store 的
+         *              monitor section 持久化（HostCard 监控入口与命令面板共用）
+         * @param profileId SSH 档案 id
+         * @returns Tab 终端标签（既有的或新建的）
+         *
+         * @example openSshWithMonitor('ssh-web-01')
+         *
+         */
+        openSshWithMonitor (profileId: string): Tab {
+            const existing = this.tabs.find(t => t.type === 'terminal' && t.profileId === profileId)
+            let tab: Tab
+            if (existing) {
+                tab = existing
+                this.activeId = existing.id
+            } else {
+                tab = this.openTerminalTab(profileId)
+            }
+            useConfigStore().setMonitor({ open: true })
+            return tab
+        },
+        /**
          * @description 关闭标签；活动标签被关时接替激活展示序最近的可见邻居（折叠组成员
          *              不可见，直接跳过——见 visibleNeighborId），全部关空时回到连接中心起始页
          * @param id 标签 id

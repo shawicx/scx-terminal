@@ -200,7 +200,8 @@ describe('computeOps (entity-level diff flush)', () => {
     it('emits a full import against the empty baseline (legacy migration)', () => {
         const config = defaultConfig()
         const ops = computeOps(config, emptyBaseline())
-        expect(ops.filter(op => op.kind === 'settingsSection')).toHaveLength(4)
+        const sections = ops.filter(op => op.kind === 'settingsSection').map(op => op.kind === 'settingsSection' ? op.key : '')
+        expect(sections).toEqual(['terminal', 'appearance', 'advanced', 'recents', 'monitor'])
         expect(ops.filter(op => op.kind === 'hotkey')).toHaveLength(Object.keys(defaultHotkeys()).length)
     })
 })

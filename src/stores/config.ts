@@ -151,6 +151,14 @@ export interface AdvancedConfig {
 /** 最近 SSH 连接记录（profileId → 最后一次连接的 epoch 毫秒；仅 SSH 档案记录） */
 export type RecentsConfig = Record<string, number>
 
+/** SSH 终端页监控侧栏（全局一份：展开态与栏宽；档案级差异不支持） */
+export interface MonitorConfig {
+    /** 侧栏是否展开（收起时右侧仅留展开把手） */
+    open: boolean
+    /** 展开时的栏宽 px（260–480） */
+    width: number
+}
+
 /** hotkey id -> list of sequences, each sequence a list of keystrokes */
 export type HotkeysConfig = Record<string, string[][]>
 
@@ -159,6 +167,7 @@ export interface ConfigStore {
     appearance: AppearanceConfig
     advanced: AdvancedConfig
     recents: RecentsConfig
+    monitor: MonitorConfig
     hotkeys: HotkeysConfig
     profiles: TerminalProfile[]
     /** 本地档案分组（本地档案以 groupId 引用） */
@@ -179,6 +188,7 @@ export interface ConfigSnapshot {
     appearance?: Partial<AppearanceConfig>
     advanced?: Partial<AdvancedConfig>
     recents?: RecentsConfig
+    monitor?: Partial<MonitorConfig>
     hotkeys?: HotkeysConfig
     profiles?: TerminalProfile[]
     localGroups?: LocalGroup[]
@@ -233,6 +243,7 @@ export function defaultConfig (): ConfigStore {
             debugEnabled: false,
         },
         recents: {} as RecentsConfig,
+        monitor: { open: false, width: 320 },
         profiles: [],
         localGroups: [],
         sshGroups: [],
@@ -548,6 +559,7 @@ export interface SavedBaseline {
     appearance: string
     advanced: string
     recents: string
+    monitor: string
     hotkeys: Record<string, string>
     profiles: Record<string, string>
     quickCommands: Record<string, string>
@@ -560,7 +572,7 @@ export interface SavedBaseline {
 
 /** 一条待执行的持久化操作；saved 为该实体写入成功后记入基线的快照串 */
 export type FlushOp =
-    | { kind: 'settingsSection'; key: 'terminal' | 'appearance' | 'advanced' | 'recents'; value: TerminalConfig | AppearanceConfig | AdvancedConfig | RecentsConfig; saved: string }
+    | { kind: 'settingsSection'; key: 'terminal' | 'appearance' | 'advanced' | 'recents' | 'monitor'; value: TerminalConfig | AppearanceConfig | AdvancedConfig | RecentsConfig | MonitorConfig; saved: string }
     | { kind: 'hotkey'; action: string; bindings: string[][]; saved: string }
     | { kind: 'profileCreate'; profile: TerminalProfile; saved: string }
     | { kind: 'profileUpdate'; profile: TerminalProfile; saved: string }
@@ -656,6 +668,10 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
     if (recents !== saved.recents) {
         ops.push({ kind: 'settingsSection', key: 'recents', value: store.recents, saved: recents })
     }
+    const monitor = stableStringify(store.monitor)
+    if (monitor !== saved.monitor) {
+        ops.push({ kind: 'settingsSection', key: 'monitor', value: store.monitor, saved: monitor })
+    }
 
     // 热键取两侧 action 并集：saved-only 的 action 视为清空绑定（[]）
     for (const action of new Set([...Object.keys(store.hotkeys), ...Object.keys(saved.hotkeys)])) {
@@ -750,7 +766,7 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
 
 /** 空基线：任何非空 store 与之 diff 都会产出全量导入操作（legacy 迁移用） */
 export function emptyBaseline (): SavedBaseline {
-    return { terminal: '', appearance: '', advanced: '', recents: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, localGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
+    return { terminal: '', appearance: '', advanced: '', recents: '', monitor: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, localGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
 }
 
 /**
@@ -767,6 +783,7 @@ export function captureBaseline (store: ConfigStore): SavedBaseline {
         appearance: stableStringify(store.appearance),
         advanced: stableStringify(store.advanced),
         recents: stableStringify(store.recents),
+        monitor: stableStringify(store.monitor),
         hotkeys: Object.fromEntries(Object.entries(store.hotkeys).map(([action, bindings]) => [action, stableStringify(bindings)])),
         profiles: Object.fromEntries(store.profiles.map(profile => [profile.id, stableStringify(profile)])),
         quickCommands: Object.fromEntries(store.quickCommands.map(command => [command.id, stableStringify(command)])),
@@ -937,7 +954,7 @@ export const useConfigStore = defineStore('config', () => {
 
     // 持久化 watch 必须在 setup 同步流创建（load() 的 await 之后创建在 WKWebView 实测不触发）；
     // getter 数组 + deep 逐分片建依赖（theme store 同款模式）。loaded 门控在 scheduleSave 内。
-    watch(() => [store.terminal, store.appearance, store.advanced, store.recents, store.hotkeys, store.profiles, store.localGroups, store.sshGroups, store.tabGroups, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
+    watch(() => [store.terminal, store.appearance, store.advanced, store.recents, store.monitor, store.hotkeys, store.profiles, store.localGroups, store.sshGroups, store.tabGroups, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
 
     async function load (): Promise<void> {
         let userConfig: Record<string, unknown> | null = null
@@ -1115,6 +1132,18 @@ export const useConfigStore = defineStore('config', () => {
     }
 
     /**
+     * @description 更新监控侧栏配置（展开态/栏宽；config store 的 deep watch 自动防抖落库）
+     * @param patch 待合并的监控配置分片
+     * @returns void
+     *
+     * @example setMonitor({ open: true })
+     *
+     */
+    function setMonitor (patch: Partial<MonitorConfig>): void {
+        Object.assign(store.monitor, patch)
+    }
+
+    /**
      * @description 调度一次防抖 flush（500ms 内的多次 mutation 合并）；flush 进行中到达的
      *              变更记为 pending，结束后重新调度
      * @returns void
@@ -1180,5 +1209,5 @@ export const useConfigStore = defineStore('config', () => {
         return `"${font}", monospace`
     }
 
-    return { store, load, reloadFromDisk, getCSSFontFamily, defaultProfile, setDefaultProfile, noteRecentConnection }
+    return { store, load, reloadFromDisk, getCSSFontFamily, defaultProfile, setDefaultProfile, noteRecentConnection, setMonitor }
 })

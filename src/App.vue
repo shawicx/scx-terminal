@@ -18,7 +18,9 @@ import { useTabsStore } from '@/stores/tabs'
 import { useConfigStore } from '@/stores/config'
 import { useTransfersStore } from '@/stores/transfers'
 import { useForwardingStore } from '@/stores/forwarding'
+import { useMonitorStore } from '@/stores/monitor'
 import { useCommands } from '@/services/commands'
+import { initMonitorEvents } from '@/services/monitor'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { pendingHostKey, resolvePendingHostKey, pendingKbdChallenge, resolvePendingKbd } from '@/services/sshConnections'
 import { setBackgroundFit, setBackgroundImageFile } from '@/services/backgroundImage'
@@ -28,6 +30,7 @@ const store = useTabsStore()
 const config = useConfigStore()
 const transfersStore = useTransfersStore()
 const forwardingStore = useForwardingStore()
+const monitorStore = useMonitorStore()
 const { registerDefaults, registerProfileCommands, registerQuickCommandCommands, bindHotkeys } = useCommands()
 const { locale } = useI18n()
 
@@ -69,6 +72,8 @@ onMounted(() => {
     bindHotkeys()
     void transfersStore.init()
     void forwardingStore.init()
+    void monitorStore.init()
+    void initMonitorEvents()
 
     document.addEventListener('keydown', onKeydown)
     document.addEventListener('keyup', onKeyup)
@@ -148,7 +153,7 @@ watch(() => config.store.terminal.fontSize, size => {
                     :tab-id="tab.id"
                 />
                 <SettingsView v-else-if="tab.type === 'settings'" :initial-page="tab.initialPage" />
-                <StartPageContent v-else-if="tab.type === 'start'" :tab-id="tab.id" />
+                <StartPageContent v-else-if="tab.type === 'start'" :tab-id="tab.id" :tab-active="tab.id === store.activeId" />
             </div>
         </div>
         <TabStrip v-if="tabBarBottom" position="bottom" />

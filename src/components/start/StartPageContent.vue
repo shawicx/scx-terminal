@@ -5,17 +5,18 @@
               connectionStates。
 -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Search, Server, Settings, SquareTerminal } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import HostCard from '@/components/start/HostCard.vue'
 import { buildGroupViews, buildLocalSections, filterGroupViews, filterLocalSections, recentEntries, relativeTimeBucket } from '@/lib/startPage'
+import { startCardMonitoring, stopCardMonitoring } from '@/services/monitor'
 import { connectionErrors, connectionStates, type ProfileConnectionStatus } from '@/services/sshConnections'
 import { useConfigStore, defaultFirstProfiles, type LocalProfile, type SshProfile } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
 
-const props = defineProps<{ tabId: string }>()
+const props = defineProps<{ tabId: string, tabActive: boolean }>()
 
 const { t, locale } = useI18n()
 const tabs = useTabsStore()
@@ -29,6 +30,23 @@ const domain = ref<'ssh' | 'local'>('ssh')
 const selectedGroup = ref<'all' | string>('all')
 const selectedLocalGroup = ref<'all' | string>('all')
 const searchQuery = ref('')
+
+/** 连接中心激活即对全部 SSH 档案启动卡片监控（页面驱动按需） */
+const sshProfileIds = computed(() =>
+    config.store.profiles.filter(p => p.type === 'ssh').map(p => p.id))
+
+// 标签面板 v-show 常驻不卸载：卡片监控跟随 tabActive 激活/停用（离开页面即停）；
+// 每次激活重新快照档案列表（orchestrator 跳过已绑定 id，幂等），顺带覆盖页面存续期间新增的档案
+watch(() => props.tabActive, active => {
+    if (active) {
+        startCardMonitoring(sshProfileIds.value)
+    } else {
+        stopCardMonitoring()
+    }
+}, { immediate: true })
+onUnmounted(() => {
+    stopCardMonitoring()
+})
 
 /* 侧栏拖拽调宽范围（px） */
 const SIDEBAR_MIN_WIDTH = 180

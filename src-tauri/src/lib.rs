@@ -12,6 +12,7 @@ mod sftp;
 mod snapshot;
 mod s3sync;
 mod shells;
+mod monitor;
 mod ssh;
 mod transfers;
 
@@ -79,6 +80,7 @@ pub fn run() {
         .manage(sftp::SftpManager::new())
         .manage(forward::ForwardManager::new())
         .manage(transfers::TransferManager::new())
+        .manage(monitor::MonitorManager::new())
         .invoke_handler(tauri::generate_handler![
             pty::pty_spawn,
             pty::pty_write,
@@ -169,6 +171,8 @@ pub fn run() {
             ssh::ssh_ack_data,
             ssh::ssh_confirm_host_key,
             ssh::ssh_respond_kbd,
+            monitor::monitor_start,
+            monitor::monitor_stop,
             debug_set_enabled,
             debug_open_devtools,
             debug_log_dir,

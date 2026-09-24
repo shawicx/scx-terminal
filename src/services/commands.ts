@@ -251,6 +251,19 @@ export function useCommands () {
             handler: () => tabs.openStartTab(),
         })
         register({
+            id: 'toggle-monitor', group: 'app',
+            label: () => t('commands.toggleMonitor'),
+            enabled: () => {
+                const tab = tabs.activeTab
+                return tab?.type === 'terminal'
+                    && !!tab.profileId
+                    && config.store.profiles.some(p => p.id === tab.profileId && p.type === 'ssh')
+            },
+            handler: () => {
+                config.setMonitor({ open: !config.store.monitor.open })
+            },
+        })
+        register({
             id: 'open-forwarding', group: 'app',
             label: () => t('commands.openForwarding'),
             handler: () => tabs.openForwardingTab(),

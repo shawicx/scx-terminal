@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SplitContainer from '@/components/split/SplitContainer.vue'
+import MonitorSidebar from '@/components/monitor/MonitorSidebar.vue'
 import {
     listLeaves,
     makeLeaf,
@@ -14,6 +15,7 @@ import { useTabsStore } from '@/stores/tabs'
 import { fallbackProfile, useConfigStore, type TerminalProfile } from '@/stores/config'
 import { terminalTabApi } from '@/services/terminalTabsApi'
 import { sendBellNotification } from '@/services/notifications'
+import { bindDetailMonitor, unbindDetailMonitor } from '@/services/monitor'
 
 const props = defineProps<{
     tabId: string
@@ -148,7 +150,20 @@ watch(() => props.tabActive, active => {
     }
 }, { immediate: true })
 
+// 监控侧栏（仅 SSH 档案）：采样绑定条件 = 标签激活 && 侧栏展开；收起/切走即停（降级或
+// 释放由编排器语义决定），v-show 常驻面板不卸载因此不能依赖挂载钩子
+const isSshProfile = computed(() => profile.value.type === 'ssh')
+const monitorActive = computed(() => isSshProfile.value && config.store.monitor.open === true)
+watch([() => props.tabActive, monitorActive], ([active, open]) => {
+    if (active && open) {
+        bindDetailMonitor(profile.value.id)
+    } else {
+        unbindDetailMonitor(profile.value.id)
+    }
+}, { immediate: true })
+
 onBeforeUnmount(() => {
+    unbindDetailMonitor(profile.value.id)
     if (terminalTabApi.current === tabApi) {
         terminalTabApi.current = null
     }
@@ -171,6 +186,7 @@ onBeforeUnmount(() => {
             @leaf-bell="handleLeafBell"
             @tree-updated="updated => (tree = updated)"
         />
+        <MonitorSidebar v-if="isSshProfile" :profile-id="profile.id" />
     </div>
 </template>
 

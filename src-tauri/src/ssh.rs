@@ -144,6 +144,72 @@ impl SshSession {
         Ok(channel.into_stream())
     }
 
+    /// 在本连接上开一次性 exec channel 执行命令并收集 stdout（监控采集用）。
+    /// 锁内只开 channel（同 open_sftp_channel 先例），exec 循环在锁外进行，
+    /// 避免慢命令阻塞 disconnect / 其他 channel 打开
+    ///
+    /// # Arguments
+    ///
+    /// * `command` - 待执行的 POSIX shell 命令串
+    /// * `timeout` - 单次执行超时
+    ///
+    /// # Returns
+    ///
+    /// String stdout 输出；连接已关闭 / 执行失败 / 超时 / 空输出附 stderr 返回错误文本
+    ///
+    /// # Examples
+    ///
+    /// `let out = session.exec_command("uname -a", Duration::from_secs(10)).await?;`
+    pub(crate) async fn exec_command(
+        &self,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<String, String> {
+        let channel = {
+            let connection = self.connection.lock().await;
+            let handle = connection
+                .as_ref()
+                .ok_or_else(|| "ssh session is closed".to_string())?;
+            handle
+                .channel_open_session()
+                .await
+                .map_err(|e| format!("failed to open exec channel: {e}"))?
+        };
+        channel
+            .exec(true, command)
+            .await
+            .map_err(|e| format!("failed to exec command: {e}"))?;
+        let mut stdout = Vec::new();
+        let mut stderr = String::new();
+        let exec = async {
+            let mut channel = channel;
+            while let Some(msg) = channel.wait().await {
+                match msg {
+                    russh::ChannelMsg::Data { ref data } => stdout.extend_from_slice(data),
+                    russh::ChannelMsg::ExtendedData { ref data, ext: 1 } => {
+                        stderr.push_str(&String::from_utf8_lossy(data))
+                    }
+                    russh::ChannelMsg::Eof | russh::ChannelMsg::Close => break,
+                    _ => {}
+                }
+            }
+            Ok::<(), String>(())
+        };
+        match tokio::time::timeout(timeout, exec).await {
+            Ok(Ok(())) => {
+                let text = String::from_utf8_lossy(&stdout).into_owned();
+                if text.trim().is_empty() && !stderr.trim().is_empty() {
+                    let snippet: String = stderr.chars().take(200).collect();
+                    Err(format!("command produced no output: {snippet}"))
+                } else {
+                    Ok(text)
+                }
+            }
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err("exec command timed out".to_string()),
+        }
+    }
+
     /// 在本连接上开 direct-tcpip channel（-L/-D 转发的目标连接）
     ///
     /// # Arguments
@@ -242,6 +308,21 @@ impl SshManager {
 
     pub(crate) fn session (&self, id: &str) -> Option<Arc<SshSession>> {
         self.sessions.lock().unwrap().get(id).cloned()
+    }
+
+    /// sessions map 的 Arc 克隆（monitor 采样任务在 spawn 内按 ssh_id 查会话）
+    ///
+    /// # Returns
+    ///
+    /// Arc<Mutex<HashMap<String, Arc<SshSession>>>>
+    ///
+    /// # Examples
+    ///
+    /// `let sessions = manager.sessions_arc();`
+    pub(crate) fn sessions_arc(
+        &self,
+    ) -> Arc<Mutex<HashMap<String, Arc<SshSession>>>> {
+        self.sessions.clone()
     }
 }
 

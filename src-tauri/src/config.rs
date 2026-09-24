@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{Manager, State};
 
-const SETTINGS_KEYS: [&str; 4] = ["terminal", "appearance", "advanced", "recents"];
+const SETTINGS_KEYS: [&str; 5] = ["terminal", "appearance", "advanced", "recents", "monitor"];
 
 /// 快捷命令记录（真实列存储；groupId 为 NULL 时序列化省略键，保持 optional 语义）
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -79,6 +79,7 @@ pub struct ConfigSnapshot {
     pub appearance: Option<Value>,
     pub advanced: Option<Value>,
     pub recents: Option<Value>,
+    pub monitor: Option<Value>,
     pub hotkeys: BTreeMap<String, Value>,
     pub profiles: Vec<Value>,
     pub color_schemes: Vec<Value>,
@@ -271,6 +272,7 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
                 "terminal" => snapshot.terminal = Some(value),
                 "advanced" => snapshot.advanced = Some(value),
                 "recents" => snapshot.recents = Some(value),
+                "monitor" => snapshot.monitor = Some(value),
                 _ => snapshot.appearance = Some(value),
             }
         }
