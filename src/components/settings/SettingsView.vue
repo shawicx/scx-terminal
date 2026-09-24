@@ -41,7 +41,7 @@ import GroupAccordion, { type AccordionSection } from '@/components/settings/Gro
 import { useConfigStore, defaultFirstProfiles, defaultShellCommand, groupLocalProfiles, type LocalProfile, type LocalProfileSection, type QuickCommand, type SshProfile, type TabGroup, type TerminalProfile } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
 import type { SettingsPageId } from '@/stores/tabs'
-import { backgroundPreviewUrl } from '@/services/backgroundImage'
+import { backgroundPreviewUrl, setBackgroundImageFile } from '@/services/backgroundImage'
 import { checkForUpdate, installUpdate, type UpdateProgress } from '@/services/updater'
 import { useCommands } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
@@ -102,6 +102,10 @@ async function chooseBackgroundImage (): Promise<void> {
     try {
         const name = await invoke<string | null>('background_image_set', { path: picked })
         store.appearance.backgroundImage = name ?? null
+        // 同扩展名换图时文件名不变，App.vue 的 watch 因值相等短路不触发，需显式重载新图
+        if (name) {
+            await setBackgroundImageFile(name)
+        }
     } catch (error) {
         console.warn('failed to set background image', error)
     }

@@ -35,10 +35,19 @@ const error = ref('')
 
 // ---- 运行态 → 档案/规则 映射 ----
 const profileOf = (state: ForwardState): SshProfile | undefined => {
-    const profileId = profileIdForSshId(state.sshId)
-    return profileId
-        ? config.store.profiles.find((p): p is SshProfile => p.id === profileId && p.type === 'ssh')
-        : undefined
+    const bySsh = profileIdForSshId(state.sshId)
+    if (bySsh) {
+        const profile = config.store.profiles.find((p): p is SshProfile => p.id === bySsh && p.type === 'ssh')
+        if (profile) {
+            return profile
+        }
+    }
+    // 连接已注销（窗格关闭/headless 释放）时按规则归属回查档案，运行态才不至于显示「未知主机」
+    if (state.ruleId) {
+        return config.store.profiles.find((p): p is SshProfile =>
+            p.type === 'ssh' && (p.forwardings?.some(rule => rule.id === state.ruleId) ?? false))
+    }
+    return undefined
 }
 
 /** 运行中（active）与失败（failed，含 autoStart 失败）的隧道总览 */

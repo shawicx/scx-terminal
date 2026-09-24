@@ -730,7 +730,10 @@ function onAuxClick (id: string, event: MouseEvent) {
     justify-content: center;
     width: 28px;
     height: 28px;
-    align-self: center;
+    /* 对齐标签行而非标题栏几何中心：标签贴底（顶模式约 8..41px，中心 ~24.5），按钮
+       居中于标签带才与标签文字一线；标题栏中心（21px）会让按钮浮高于标签行 */
+    align-self: flex-end;
+    margin-bottom: 3px;
     flex-shrink: 0;
     margin-left: 2px;
     margin-right: 2px;
@@ -744,6 +747,13 @@ function onAuxClick (id: string, event: MouseEvent) {
     color: var(--color-muted-foreground);
     cursor: pointer;
     transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* bottom 模式镜像：标签贴顶，按钮对齐标签带上缘而非顶死 */
+.tab-strip--bottom .new-tab-button {
+    align-self: flex-start;
+    margin-top: 3px;
+    margin-bottom: 0;
 }
 
 .new-tab-button:hover {
