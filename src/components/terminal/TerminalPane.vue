@@ -638,6 +638,8 @@ watch(() => props.active, active => {
         }
     }
     if (active && frontend) {
+        // 窗格隐藏期间改过的字体/字号此时才测得到（display:none 下测量取 0×0 沿用旧值）
+        frontend.remeasureFont()
         frontend.reactivate()
         frontend.focus()
     }

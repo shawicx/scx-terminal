@@ -365,6 +365,8 @@ export class XTermFrontend extends Frontend {
             this.canvasAddon = new CanvasAddon()
             this.xterm.loadAddon(this.canvasAddon)
         }
+        // 渲染器刚按当前设置构建，记下字体指纹供 remeasureFont 判断是否需要重建
+        this.renderedFontKey = this.currentFontKey()
 
         // Allow an animation frame
         await new Promise(r => setTimeout(r, 100))
@@ -700,12 +702,8 @@ export class XTermFrontend extends Frontend {
         const config = this.context.config
 
         setTimeout(() => {
-            if (this.xterm.cols && this.xterm.rows && this.xtermCore.charMeasure) {
-                this.xtermCore.charMeasure.measure(this.xtermCore.options)
-                if (this.xtermCore.renderer) {
-                    this.xtermCore.renderer._updateDimensions()
-                }
-                this.resizeHandler()
+            if (this.xterm.cols && this.xterm.rows) {
+                this.remeasureFont()
             }
         }, 0)
 
@@ -793,6 +791,51 @@ export class XTermFrontend extends Frontend {
         this.xterm.options.fontSize = this.configuredFontSize * scale
         this.xterm.options.lineHeight = Math.max(1, (this.configuredFontSize + this.configuredLinePadding * 2) / this.configuredFontSize)
         this.resizeHandler()
+    }
+
+    /** 影响字形渲染的设置指纹（字号/行距/字体族），用于判断渲染器是否需要重建 */
+    private currentFontKey (): string {
+        return `${this.xterm.options.fontSize}|${this.configuredLinePadding}|${this.context.getCSSFontFamily()}`
+    }
+
+    /** 渲染器最近一次构建时的字体指纹；不一致 = 图集与当前设置脱节 */
+    private renderedFontKey = ''
+
+    /**
+     * @description 强制重测字符尺寸；窗格变为可见且字体设置与渲染器构建时不一致时整体
+     *              重建渲染器——WKWebView 下字号在窗格隐藏期间变更时，单元格尺寸会更新
+     *              （列数/布局随之变化）但 WebGL 渲染器不按新尺寸重建字形图集（字形停留
+     *              旧尺寸），复用上下文丢失恢复的重建路径全量重算
+     * @returns void
+     *
+     * @example frontend.remeasureFont()
+     *
+     */
+    remeasureFont (): void {
+        this.xtermCore?._charSizeService?.measure()
+        const visible = !!this.element && this.element.getBoundingClientRect().height > 0
+        if (this.opened && visible && this.renderedFontKey !== this.currentFontKey()) {
+            this.renderedFontKey = this.currentFontKey()
+            this.rebuildRenderer()
+        }
+        this.resizeHandler()
+    }
+
+    /** 重建渲染器（WebGL/Canvas 附加器 dispose 后重挂，图集与尺寸全量重算）并重绘 */
+    private rebuildRenderer (): void {
+        // 清除挂起的上下文丢失恢复标记，防止后续 reactivate 再叠加挂载一个渲染器
+        this.pendingRendererRecovery = false
+        if (this.webGLAddon) {
+            this.webGLAddon.dispose()
+            this.webGLAddon = undefined
+            this.attachWebGLAddon()
+        } else if (this.canvasAddon) {
+            this.canvasAddon.dispose()
+            this.canvasAddon = undefined
+            this.canvasAddon = new CanvasAddon()
+            this.xterm.loadAddon(this.canvasAddon)
+        }
+        this.redraw()
     }
 
     /**

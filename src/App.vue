@@ -113,6 +113,12 @@ watch(() => config.store.appearance.backgroundImage, fileName => {
 watch(() => config.store.appearance.backgroundFit, fit => {
     setBackgroundFit(fit)
 })
+
+// 界面随终端字号缩放（UI 正文基准 13px，故除以 13 使正文与终端字号一致）：
+// 写入全局 CSS 变量，非终端标签页据此缩放；终端窗格（xterm 自管字号）与标题栏不受影响
+watch(() => config.store.terminal.fontSize, size => {
+    document.documentElement.style.setProperty('--ui-zoom', String(size / 13))
+}, { immediate: true })
 </script>
 
 <template>
@@ -124,6 +130,7 @@ watch(() => config.store.appearance.backgroundFit, fit => {
                 :key="tab.id"
                 v-show="tab.id === store.activeId"
                 class="tab-pane"
+                :class="tab.type !== 'terminal' ? 'tab-pane--ui-scaled' : null"
             >
                 <TerminalTabContent
                     v-if="tab.type === 'terminal'"
@@ -180,6 +187,17 @@ watch(() => config.store.appearance.backgroundFit, fit => {
 .tab-pane {
     position: absolute;
     inset: 0;
+}
+
+/* 非终端标签页（设置/连接中心/SFTP/隧道）随终端字号整体缩放。
+   用 transform:scale 而非 zoom：zoom 的百分比解析语义各引擎不一（Chromium 新规范在
+   缩放坐标系内解析、WebKit 旧实现按父坐标解析后放大），transform 的布局计算与引擎无关；
+   布局盒缩小为 1/zoom、内容在小盒内排版后整体放大 zoom 倍，可视尺寸仍占满标签区 */
+.tab-pane--ui-scaled {
+    width: calc(100% / var(--ui-zoom, 1));
+    height: calc(100% / var(--ui-zoom, 1));
+    transform: scale(var(--ui-zoom, 1));
+    transform-origin: top left;
 }
 
 @keyframes fadeIn {

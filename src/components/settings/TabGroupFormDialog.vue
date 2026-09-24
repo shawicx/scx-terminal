@@ -122,10 +122,14 @@ function commit (): void {
     gap: 12px;
 }
 
+/* 标签列宽随文案自适应（英文 Persist tabs in this group 远超 96px），最小宽对齐短文案行；
+   nowrap 保证「持久化组内标签」等长文案不折行 */
 .form-row > :first-child {
-    width: 96px;
+    width: fit-content;
+    min-width: 96px;
     flex-shrink: 0;
     text-align: right;
+    white-space: nowrap;
 }
 
 .color-options {

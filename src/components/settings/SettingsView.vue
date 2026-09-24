@@ -7,7 +7,7 @@ import { openPath } from '@tauri-apps/plugin-opener'
 import type { Update } from '@tauri-apps/plugin-updater'
 import { nanoid } from 'nanoid'
 import { writeClipboardText } from '@/lib/frontendContext'
-import { Terminal, Palette, Keyboard, Info, FolderOpen, KeyRound, Copy, Plus, Trash2, Upload, Download, HardDriveDownload, Zap, Pencil, X, Globe, Server, SquareTerminal, Layers, Eye, EyeOff, ChevronRight } from 'lucide-vue-next'
+import { Terminal, Palette, Keyboard, Info, FolderOpen, KeyRound, Copy, Plus, Trash2, Upload, Download, HardDriveDownload, Zap, Pencil, X, Globe, Server, SquareTerminal, Layers, Eye, EyeOff } from 'lucide-vue-next'
 import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
 import type { Event as TauriEvent, UnlistenFn } from '@tauri-apps/api/event'
 import type { SshKeyMeta, SshKeyInspection } from '@/services/secrets'
@@ -37,7 +37,8 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ColorSchemePicker from '@/components/settings/ColorSchemePicker.vue'
 import ProfileForwardingsCard from '@/components/settings/ProfileForwardingsCard.vue'
 import TabGroupFormDialog from '@/components/settings/TabGroupFormDialog.vue'
-import { useConfigStore, defaultFirstProfiles, defaultShellCommand, groupLocalProfiles, type LocalProfile, type QuickCommand, type SshProfile, type TabGroup, type TerminalProfile } from '@/stores/config'
+import GroupAccordion, { type AccordionSection } from '@/components/settings/GroupAccordion.vue'
+import { useConfigStore, defaultFirstProfiles, defaultShellCommand, groupLocalProfiles, type LocalProfile, type LocalProfileSection, type QuickCommand, type SshProfile, type TabGroup, type TerminalProfile } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
 import type { SettingsPageId } from '@/stores/tabs'
 import { backgroundPreviewUrl } from '@/services/backgroundImage'
@@ -636,50 +637,23 @@ const localSections = computed(() => {
     return sections
 })
 
-/** 手风琴当前展开的分段键（分组 id / '__ungrouped'；空 = 全收起；同时仅一段展开） */
-const openLocalSectionKey = ref('')
-
-/** 未分组段在手风琴状态中的键 */
+/** 未分组段在手风琴分段键中的键 */
 const LOCAL_UNGROUPED_KEY = '__ungrouped'
 
-/** 首段是否已自动展开过（仅一次，之后完全交由用户操作） */
-let localSectionAutoOpened = false
+/** 本地终端手风琴分段视图（GroupAccordion 消费；未分组段以「默认分组」语义置顶） */
+const localAccordionSections = computed<AccordionSection<LocalProfileSection>[]>(() =>
+    localSections.value.map(section => ({
+        key: section.group?.id ?? LOCAL_UNGROUPED_KEY,
+        title: section.group?.name ?? t('settings.localDefaultGroup'),
+        count: section.profiles.length,
+        ...(section.group?.builtin ? { badge: t('settings.localDefaultGroupBadge') } : {}),
+        manageable: !!section.group && !section.group.builtin,
+        data: section,
+    })))
 
-// 首次出现分段时自动展开选中档案所在段（兜底首段）
-watch(localSections, sections => {
-    if (localSectionAutoOpened || sections.length === 0) {
-        return
-    }
-    localSectionAutoOpened = true
-    const selectedId = selectedLocalProfile.value?.id
-    const owner = sections.find(section => section.profiles.some(p => p.id === selectedId))
-    openLocalSectionKey.value = owner?.group?.id ?? sections[0]!.group?.id ?? LOCAL_UNGROUPED_KEY
-}, { immediate: true })
-
-/**
- * @description 本地终端手风琴分段是否展开（同时仅一段展开）
- * @param key 分段键（分组 id 或 '__ungrouped'）
- * @returns boolean 是否展开渲染
- *
- * @example isLocalSectionOpen('localgroup-zsh') // 仅当前展开段为 true
- *
- */
-function isLocalSectionOpen (key: string): boolean {
-    return openLocalSectionKey.value === key
-}
-
-/**
- * @description 手风琴切换：点击已展开段收起（全收起状态），点击其余段则展开该段
- *              并收起其他段（同时仅一段展开）
- * @param key 分段键（分组 id 或 '__ungrouped'）
- * @returns void
- *
- * @example toggleLocalSection('localgroup-zsh')
- *
- */
-function toggleLocalSection (key: string): void {
-    openLocalSectionKey.value = openLocalSectionKey.value === key ? '' : key
-}
+/** 自动展开目标：选中档案所在分段 */
+const selectedLocalSectionKey = computed(() =>
+    localAccordionSections.value.find(section => section.data.profiles.some(p => p.id === selectedLocalProfile.value?.id))?.key)
 
 /** 编辑器分组下拉：未分组 + 各分组（默认分组也开放容纳自建档案） */
 const localGroupOptions = computed(() => [
@@ -772,6 +746,22 @@ const sshSections = computed(() => {
     }
     return sections
 })
+
+/** 默认分组段在手风琴分段键中的键 */
+const SSH_DEFAULT_KEY = '__default'
+
+/** SSH 手风琴分段视图（GroupAccordion 消费） */
+const sshAccordionSections = computed(() => sshSections.value.map(section => ({
+    key: section.groupId ?? SSH_DEFAULT_KEY,
+    title: section.title ?? t('settings.sshDefaultGroup'),
+    count: section.items.length,
+    manageable: section.groupId !== null,
+    data: section,
+})))
+
+/** 自动展开目标：选中档案所在分段 */
+const selectedSshSectionKey = computed(() =>
+    sshAccordionSections.value.find(section => section.data.items.some(p => p.id === selectedSshProfile.value?.id))?.key)
 
 /** 编辑器分组下拉：默认分组 + 各分组 */
 const sshGroupOptions = computed(() => [
@@ -1553,6 +1543,22 @@ const selectedQuickCommand = computed(() =>
 const quickCommandSections = computed(() =>
     groupQuickCommandSections(store.quickCommands, store.quickCommandGroups))
 
+/** 未分组段在手风琴分段键中的键 */
+const QUICK_COMMAND_UNGROUPED_KEY = '__ungrouped'
+
+/** 快捷命令手风琴分段视图（GroupAccordion 消费；未分组段仅有成员时出现，标题「未分组」） */
+const quickCommandAccordionSections = computed(() => quickCommandSections.value.map(section => ({
+    key: section.groupId ?? QUICK_COMMAND_UNGROUPED_KEY,
+    title: section.title ?? t('settings.quickCommandUngrouped'),
+    count: section.items.length,
+    manageable: section.groupId !== null,
+    data: section,
+})))
+
+/** 自动展开目标：选中命令所在分段 */
+const selectedQuickCommandSectionKey = computed(() =>
+    quickCommandAccordionSections.value.find(section => section.data.items.some(qc => qc.id === selectedQuickCommand.value?.id))?.key)
+
 /** 编辑器分组下拉：未分组 + 各分组 */
 const quickCommandGroupOptions = computed(() => [
     { value: '', label: t('settings.quickCommandUngrouped') },
@@ -2176,42 +2182,30 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                                 <span>{{ t('settings.localNewGroup') }}</span>
                             </button>
                         </div>
-                        <template v-for="section in localSections" :key="section.group?.id ?? '__ungrouped'">
-                            <div
-                                class="qc-group-header qc-group-header--collapsible"
-                                @click="toggleLocalSection(section.group?.id ?? LOCAL_UNGROUPED_KEY)"
-                            >
-                                <ChevronRight :size="14" class="qc-group-chevron" :class="{ open: isLocalSectionOpen(section.group?.id ?? LOCAL_UNGROUPED_KEY) }" />
-                                <span class="qc-group-name">{{ section.group?.name ?? t('settings.localDefaultGroup') }}</span>
-                                <span class="qc-group-count">{{ section.profiles.length }}</span>
-                                <span v-if="section.group?.builtin" class="profile-default-badge">{{ t('settings.localDefaultGroupBadge') }}</span>
-                                <span v-if="section.group && !section.group.builtin" class="qc-group-actions" @click.stop>
-                                    <button class="qc-group-action" :title="t('settings.localRenameGroup')" @click.stop="openRenameLocalGroup(section.group.id)">
-                                        <Pencil :size="12" />
-                                    </button>
-                                    <button class="qc-group-action" :title="t('settings.localDeleteGroup')" @click.stop="confirmDeleteLocalGroup(section.group.id)">
-                                        <X :size="12" />
-                                    </button>
-                                </span>
-                            </div>
-                            <div class="qc-group-body" :class="{ collapsed: !isLocalSectionOpen(section.group?.id ?? LOCAL_UNGROUPED_KEY) }">
-                                <div class="qc-group-body-inner">
-                                    <button
-                                        v-for="p in section.profiles"
-                                        :key="p.id"
-                                        class="profile-item"
-                                        :class="{ active: p.id === selectedLocalProfile?.id }"
-                                        @click="selectedLocalProfileId = p.id"
-                                    >
-                                        <span class="profile-item-head">
-                                            <span class="profile-item-name">{{ p.name }}</span>
-                                            <span v-if="p.isDefault" class="profile-default-badge">{{ t('tab.defaultProfile') }}</span>
-                                        </span>
-                                        <span class="profile-item-command">{{ p.command }}</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </template>
+                        <GroupAccordion
+                            :sections="localAccordionSections"
+                            :preferred-key="selectedLocalSectionKey"
+                            :rename-title="t('settings.localRenameGroup')"
+                            :delete-title="t('settings.localDeleteGroup')"
+                            @rename="openRenameLocalGroup"
+                            @delete="confirmDeleteLocalGroup"
+                        >
+                            <template #default="{ data }">
+                                <button
+                                    v-for="p in data.profiles"
+                                    :key="p.id"
+                                    class="profile-item"
+                                    :class="{ active: p.id === selectedLocalProfile?.id }"
+                                    @click="selectedLocalProfileId = p.id"
+                                >
+                                    <span class="profile-item-head">
+                                        <span class="profile-item-name">{{ p.name }}</span>
+                                        <span v-if="p.isDefault" class="profile-default-badge">{{ t('tab.defaultProfile') }}</span>
+                                    </span>
+                                    <span class="profile-item-command">{{ p.command }}</span>
+                                </button>
+                            </template>
+                        </GroupAccordion>
                         <p v-if="localProfiles.length === 0 && store.localGroups.length === 0" class="hint">
                             {{ t('settings.localEmptyHint') }}
                         </p>
@@ -2312,32 +2306,30 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                                 <span>{{ t('settings.sshNewGroup') }}</span>
                             </button>
                         </div>
-                        <template v-for="section in sshSections" :key="section.groupId ?? '__default'">
-                            <div class="qc-group-header">
-                                <span class="qc-group-name">{{ section.title }}</span>
-                                <span v-if="section.groupId !== null" class="qc-group-actions">
-                                    <button class="qc-group-action" :title="t('settings.sshRenameGroup')" @click.stop="openRenameSshGroup(section.groupId!)">
-                                        <Pencil :size="12" />
-                                    </button>
-                                    <button class="qc-group-action" :title="t('settings.sshDeleteGroup')" @click.stop="confirmDeleteSshGroup(section.groupId!)">
-                                        <X :size="12" />
-                                    </button>
-                                </span>
-                            </div>
-                            <button
-                                v-for="p in section.items"
-                                :key="p.id"
-                                class="profile-item"
-                                :class="{ active: p.id === selectedSshProfile?.id }"
-                                @click="selectedSshProfileId = p.id"
-                            >
-                                <span class="profile-item-head">
-                                    <span class="profile-item-name">{{ p.name }}</span>
-                                    <span v-if="p.isDefault" class="profile-default-badge">{{ t('tab.defaultProfile') }}</span>
-                                </span>
-                                <span class="profile-item-command">{{ `${p.user}@${p.host}${p.port === 22 ? '' : `:${p.port}`}` }}</span>
-                            </button>
-                        </template>
+                        <GroupAccordion
+                            :sections="sshAccordionSections"
+                            :preferred-key="selectedSshSectionKey"
+                            :rename-title="t('settings.sshRenameGroup')"
+                            :delete-title="t('settings.sshDeleteGroup')"
+                            @rename="openRenameSshGroup"
+                            @delete="confirmDeleteSshGroup"
+                        >
+                            <template #default="{ data }">
+                                <button
+                                    v-for="p in data.items"
+                                    :key="p.id"
+                                    class="profile-item"
+                                    :class="{ active: p.id === selectedSshProfile?.id }"
+                                    @click="selectedSshProfileId = p.id"
+                                >
+                                    <span class="profile-item-head">
+                                        <span class="profile-item-name">{{ p.name }}</span>
+                                        <span v-if="p.isDefault" class="profile-default-badge">{{ t('tab.defaultProfile') }}</span>
+                                    </span>
+                                    <span class="profile-item-command">{{ `${p.user}@${p.host}${p.port === 22 ? '' : `:${p.port}`}` }}</span>
+                                </button>
+                            </template>
+                        </GroupAccordion>
                         <p v-if="sshProfiles.length === 0 && store.sshGroups.length === 0" class="hint">
                             {{ t('settings.sshEmptyHint') }}
                         </p>
@@ -2445,32 +2437,30 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                                 <span>{{ t('settings.quickCommandNewGroup') }}</span>
                             </button>
                         </div>
-                        <template v-for="section in quickCommandSections" :key="section.groupId ?? '__ungrouped'">
-                            <div v-if="section.title !== null" class="qc-group-header">
-                                <span class="qc-group-name">{{ section.title }}</span>
-                                <span class="qc-group-actions">
-                                    <button class="qc-group-action" :title="t('settings.quickCommandRenameGroup')" @click.stop="openRenameQuickCommandGroup(section.groupId!)">
-                                        <Pencil :size="12" />
-                                    </button>
-                                    <button class="qc-group-action" :title="t('settings.quickCommandDeleteGroup')" @click.stop="confirmDeleteQuickCommandGroup(section.groupId!)">
-                                        <X :size="12" />
-                                    </button>
-                                </span>
-                            </div>
-                            <button
-                                v-for="qc in section.items"
-                                :key="qc.id"
-                                class="profile-item"
-                                :class="{ active: qc.id === selectedQuickCommand?.id }"
-                                @click="selectedQuickCommandId = qc.id"
-                            >
-                                <span class="profile-item-head">
-                                    <span class="profile-item-name">{{ qc.name || previewQuickCommand(qc.command) }}</span>
-                                    <span v-if="qc.autoRun" class="qc-auto-run-badge">↵</span>
-                                </span>
-                                <span class="profile-item-command">{{ previewQuickCommand(qc.command) }}</span>
-                            </button>
-                        </template>
+                        <GroupAccordion
+                            :sections="quickCommandAccordionSections"
+                            :preferred-key="selectedQuickCommandSectionKey"
+                            :rename-title="t('settings.quickCommandRenameGroup')"
+                            :delete-title="t('settings.quickCommandDeleteGroup')"
+                            @rename="openRenameQuickCommandGroup"
+                            @delete="confirmDeleteQuickCommandGroup"
+                        >
+                            <template #default="{ data }">
+                                <button
+                                    v-for="qc in data.items"
+                                    :key="qc.id"
+                                    class="profile-item"
+                                    :class="{ active: qc.id === selectedQuickCommand?.id }"
+                                    @click="selectedQuickCommandId = qc.id"
+                                >
+                                    <span class="profile-item-head">
+                                        <span class="profile-item-name">{{ qc.name || previewQuickCommand(qc.command) }}</span>
+                                        <span v-if="qc.autoRun" class="qc-auto-run-badge">↵</span>
+                                    </span>
+                                    <span class="profile-item-command">{{ previewQuickCommand(qc.command) }}</span>
+                                </button>
+                            </template>
+                        </GroupAccordion>
                         <p v-if="store.quickCommands.length === 0 && store.quickCommandGroups.length === 0" class="hint">
                             {{ t('settings.quickCommandEmptyHint') }}
                         </p>
@@ -3596,110 +3586,7 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
     box-shadow: 0 0 0 1px var(--color-ring);
 }
 
-/* 内容三态（名称文本/改名输入框/操作按钮）统一 22px 高：进入/退出编辑不改变行高 */
-.qc-group-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 4px;
-    padding: 12px 6px 4px;
-    border-bottom: 1px solid var(--color-border);
-    margin-bottom: 4px;
-}
-
-/* 本地终端页可折叠组头：配色页 scheme-group-header 同款 flex 行——图标/名称/计数/徽标
-   皆为直接子项垂直居中，动作钮右贴；space-between 会把多子项撑散，改 flex-start。
-   垂直 padding 对称（基础类 12/4 不对称会让 hover 背景内内容偏移），顶距用 margin 补 */
-.qc-group-header--collapsible {
-    cursor: pointer;
-    user-select: none;
-    justify-content: flex-start;
-    gap: 6px;
-    padding: 6px 8px;
-    margin-top: 6px;
-    border-radius: 6px;
-    transition: background-color 0.15s ease;
-}
-.qc-group-header--collapsible:hover { background: var(--color-accent); }
-.qc-group-header--collapsible .qc-group-name {
-    min-width: 0;
-    flex: 0 1 auto;
-}
-.qc-group-header--collapsible .qc-group-actions {
-    margin-left: auto;
-}
-
-.qc-group-chevron {
-    flex: none;
-    color: var(--color-muted-foreground);
-    transition: transform 0.15s ease;
-}
-
-.qc-group-chevron.open {
-    transform: rotate(90deg);
-}
-
-/* 收展过渡：grid 行高 0fr↔1fr 平滑动画（无需 JS 量高）；收起时内容淡出且
-   visibility 随过渡结束时翻转（离散插值），折叠项不可聚焦。
-   内层为 flex 列（对齐 detail-list），成员按钮恢复全宽拉伸 */
-.qc-group-body {
-    display: grid;
-    grid-template-rows: 1fr;
-    transition: grid-template-rows 0.18s ease, visibility 0.18s;
-}
-
-.qc-group-body.collapsed {
-    grid-template-rows: 0fr;
-    visibility: hidden;
-}
-
-.qc-group-body-inner {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    overflow: hidden;
-    min-height: 0;
-    transition: opacity 0.15s ease;
-}
-
-.qc-group-body.collapsed .qc-group-body-inner {
-    opacity: 0;
-}
-
-.qc-group-count {
-    flex: none;
-    font-size: 11px;
-    font-weight: 400;
-    color: var(--color-muted-foreground);
-}
-
-.qc-group-name {
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 22px;
-    color: var(--color-foreground);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-/* 隐藏但保留占位（visibility 而非 display）避免行高变化；opacity 过渡实现图标淡入淡出 */
-.qc-group-actions {
-    display: inline-flex;
-    gap: 2px;
-    flex-shrink: 0;
-    visibility: hidden;
-    opacity: 0;
-    transition: opacity 0.25s ease, visibility 0.25s ease;
-}
-
-.qc-group-header:hover .qc-group-actions {
-    visibility: visible;
-    opacity: 1;
-}
-
+/* 手风琴组头/收展样式已随 GroupAccordion 组件迁移；此钮仍被标签分组页等行内操作复用 */
 .qc-group-action {
     display: inline-flex;
     align-items: center;

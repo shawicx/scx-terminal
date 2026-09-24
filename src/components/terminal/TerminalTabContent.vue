@@ -49,6 +49,10 @@ function setPaneTitle (leafId: string, title: string) {
     if (!title) {
         return
     }
+    // SSH 标签默认显示档案名：不采用远端 shell 上报的动态标题（本地窗格维持原行为，手动重命名不受影响）
+    if (profile.value.type === 'ssh') {
+        return
+    }
     paneTitles.set(leafId, title)
     if (leafId === activeLeafId.value) {
         tabs.setTitle(props.tabId, title)

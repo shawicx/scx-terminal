@@ -496,7 +496,9 @@ function onAuxClick (id: string, event: MouseEvent) {
                         :class="{
                             active: item.tab.id === store.activeId,
                             'drag-over': tabDragOverId === item.tab.id && dragTabId !== null && dragTabId !== item.tab.id,
+                            'color-marked': !!item.tab.color,
                         }"
+                        :style="item.tab.color ? { '--tab-mark': item.tab.color } : undefined"
                         :draggable="renamingId !== item.tab.id"
                         :title="displayTitle(item.tab)"
                         role="tab"
@@ -512,7 +514,6 @@ function onAuxClick (id: string, event: MouseEvent) {
                         @keydown.space.self.prevent="store.activate(item.tab.id)"
                     >
                         <span v-if="groupOf(config.store.tabGroups, item.tab)?.color" class="tab-group-bar" :style="{ background: groupOf(config.store.tabGroups, item.tab)?.color }"></span>
-                        <span v-if="item.tab.color" class="tab-color-dot" :style="{ background: item.tab.color }"></span>
                         <!-- 后台标签响铃未读标记：激活标签在 store 层已同步清除，无需此处再判 -->
                         <span v-if="store.alerts[item.tab.id]" class="tab-alert-dot"></span>
                         <input
@@ -624,6 +625,19 @@ function onAuxClick (id: string, event: MouseEvent) {
 
 .tab-header:not(.active):hover {
     background: color-mix(in oklch, var(--color-accent) 60%, transparent);
+}
+
+/* 标签颜色标记：整卡浅着色（替代原 8px 圆点），激活/悬停态保留着色底 */
+.tab-header.color-marked {
+    background: color-mix(in oklch, var(--tab-mark) 18%, transparent);
+}
+
+.tab-header.color-marked.active {
+    background: color-mix(in oklch, var(--tab-mark) 22%, var(--color-background));
+}
+
+.tab-header.color-marked:not(.active):hover {
+    background: color-mix(in oklch, var(--tab-mark) 18%, var(--color-accent));
 }
 
 .tab-header.drag-over {
