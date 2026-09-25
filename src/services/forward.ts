@@ -3,9 +3,11 @@
  *              事件订阅（负载为该连接完整状态快照）。生命周期与 SFTP 一致：SSH 会话断开
  *              后后端级联停止全部转发并广播空快照。
  */
+import { autoStartRules, ruleToSpec } from '@/lib/portForwarding'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { ForwardSpec, ForwardState } from '@/lib/portForwarding'
+import type { SshProfile } from '@/stores/config'
 
 /**
  * @description 建立一条转发（本地/远程/动态；listenPort=0 由 OS/server 分配并在返回值回填）
@@ -65,4 +67,24 @@ export function listAllForwards (): Promise<ForwardState[]> {
  */
 export async function onForwardsChanged (sshId: string, cb: (states: ForwardState[]) => void): Promise<UnlistenFn> {
     return listen<ForwardState[]>(`forward:${sshId}:changed`, event => cb(event.payload))
+}
+
+/**
+ * @description SSH 会话建立后批量启动档案上 autoStart 的转发规则（失败仅告警：
+ *              面板中的手动启动会呈现具体错误；重试启动/重连会再次触发）
+ * @param sshId SSH 会话 id
+ * @param profile SSH 档案（读取 forwardings）
+ * @returns Promise<void>
+ *
+ * @example await startAutoForwardRules(sshId, profile)
+ *
+ */
+export async function startAutoForwardRules (sshId: string, profile: SshProfile): Promise<void> {
+    for (const rule of autoStartRules(profile)) {
+        try {
+            await startForward(ruleToSpec(sshId, rule))
+        } catch (error) {
+            console.warn('auto-start forward failed', rule.id, error)
+        }
+    }
 }

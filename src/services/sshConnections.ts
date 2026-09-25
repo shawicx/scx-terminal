@@ -27,9 +27,11 @@ export const registryVersion = ref(0)
 export const pendingHostKey = ref<HostKeyChallenge | null>(null)
 let pendingHostKeyProxy: SshProxy | null = null
 
-/** 全局待应答的凭据挑战（App 层 CredentialDialog 呈现）与对应应答 resolver */
+/** 全局待应答的凭据挑战（App 层 CredentialDialog 呈现）、应答 resolver 与归属代理：
+ *  多条 headless 连接共享弹窗槽位，清理必须按代理作用域，否则会误取消别人的挑战 */
 export const pendingKbdChallenge = ref<KbdChallenge | null>(null)
 let pendingKbdResolver: ((answer: KbdAnswer | null) => void) | null = null
+let pendingKbdProxy: SshProxy | null = null
 
 /** headless 连接的代理登记（disconnect 时 kill） */
 const headlessProxies = new Map<string, SshProxy>()
@@ -64,10 +66,13 @@ async function connectHeadless (profileId: string): Promise<string> {
         headlessProxies.delete(proxy.getID())
         registry.noteHeadlessDead(proxy.getID())
         refreshMirror()
+        // 会话已死：事件监听器随代理退役（分发循环持有旧数组引用，此处退订安全）
+        proxy.unsubscribeAll()
     })
     proxy.subscribe('kbdchallenge', payload => {
         const challenge = payload as KbdChallenge
         pendingKbdChallenge.value = challenge
+        pendingKbdProxy = proxy
         void (async () => {
             const answer = await new Promise<KbdAnswer | null>(resolve => {
                 pendingKbdResolver = resolve
@@ -95,22 +100,34 @@ async function connectHeadless (profileId: string): Promise<string> {
             headless: true,
         })
     } catch (error) {
-        // 连接失败：关闭可能残留的全局凭据弹窗（认证已终结）
-        pendingKbdChallenge.value = null
-        pendingKbdResolver?.(null)
-        pendingKbdResolver = null
+        // 连接失败：仅回收本代理占用的全局弹窗槽位（误清会取消其他连接的待答挑战），
+        // 并退订监听器防泄漏
+        if (pendingHostKeyProxy === proxy) {
+            pendingHostKey.value = null
+            pendingHostKeyProxy = null
+        }
+        if (pendingKbdProxy === proxy) {
+            pendingKbdChallenge.value = null
+            pendingKbdResolver?.(null)
+            pendingKbdResolver = null
+            pendingKbdProxy = null
+        }
+        proxy.unsubscribeAll()
         connectionStates[profileId] = 'failed'
         connectionErrors[profileId] = String(error instanceof Error ? error.message : error)
         registryVersion.value += 1
         throw error
     }
-    // 认证成功后按最后一轮「记住密码」回存；防御性关闭残留全局弹窗
+    // 认证成功后按最后一轮「记住密码」回存；仅回收本代理占用的弹窗槽位
     if (saveable?.remember) {
         void setProfilePassword(profileId, saveable.password).catch(() => {})
     }
-    pendingKbdChallenge.value = null
-    pendingKbdResolver?.(null)
-    pendingKbdResolver = null
+    if (pendingKbdProxy === proxy) {
+        pendingKbdChallenge.value = null
+        pendingKbdResolver?.(null)
+        pendingKbdResolver = null
+        pendingKbdProxy = null
+    }
     headlessProxies.set(proxy.getID(), proxy)
     connectionStates[profileId] = 'connected'
     registryVersion.value += 1
@@ -120,7 +137,10 @@ async function connectHeadless (profileId: string): Promise<string> {
 function disconnectHeadless (sshId: string): void {
     const proxy = headlessProxies.get(sshId)
     headlessProxies.delete(sshId)
-    proxy?.kill()
+    if (proxy) {
+        void proxy.kill()
+        proxy.unsubscribeAll()
+    }
 }
 
 registry = new SshConnectionRegistry({
@@ -262,4 +282,5 @@ export function resolvePendingKbd (answer: KbdAnswer | null): void {
     pendingKbdChallenge.value = null
     pendingKbdResolver?.(answer)
     pendingKbdResolver = null
+    pendingKbdProxy = null
 }

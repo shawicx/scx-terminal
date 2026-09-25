@@ -1,0 +1,289 @@
+/*
+ * @description 设置域共享样式（非 scoped）：settings-* 卡片/分组骨架、主从布局、
+ * 档案列表项等被多个设置页组件共用的类。子组件的 scoped 样式无法继承父组件，
+ * 这些类经 SettingsView 全局引入一次；类名均有 settings/profile 前缀，不会外溢。
+ */
+
+.settings-content h2 {
+    margin: 0 0 16px;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 18px;
+    max-width: 480px;
+}
+
+.settings-field.row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.value-hint {
+    color: var(--color-muted-foreground);
+    font-weight: 400;
+    font-size: 12px;
+}
+
+.value-hint.mono {
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+/* 设置页分组卡片：标题 + 卡片内逐行排布（行间以细线分隔），简单页面共用 */
+.settings-section {
+    max-width: 620px;
+    margin-bottom: 22px;
+}
+
+.settings-section-title {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.settings-section-hint {
+    margin: -4px 0 8px;
+    font-size: 12px;
+    color: var(--color-muted-foreground);
+}
+
+.settings-card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-card);
+}
+
+.settings-card-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 11px 16px;
+}
+
+.settings-card-row + .settings-card-row {
+    border-top: 1px solid var(--color-border);
+}
+
+.settings-card-row.stacked {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+}
+
+.settings-card-row.actions {
+    justify-content: flex-end;
+}
+
+.settings-row-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.settings-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.settings-section-head .settings-section-title {
+    margin: 0;
+}
+
+.settings-section-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* 档案/快捷命令/密钥链共用的主从布局：左列表 + 右编辑内容 */
+.master-detail {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+}
+
+.master-detail .detail-list {
+    width: 240px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.master-detail .detail-content {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 620px;
+}
+
+.profile-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.hint {
+    color: var(--color-muted-foreground);
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
+.profile-new-group {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.profile-new-group .profile-new-button {
+    flex: 1 1 0;
+    margin-bottom: 0;
+}
+
+.profile-new-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    margin-bottom: 6px;
+    border: 1px dashed var(--color-border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-muted-foreground);
+    font-size: 13px;
+    cursor: pointer;
+    transition: color 0.25s ease, border-color 0.25s ease;
+}
+
+.profile-new-button:hover {
+    color: var(--color-foreground);
+    border-color: var(--color-ring);
+}
+
+.profile-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 7px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.25s ease;
+}
+
+.profile-item:hover {
+    background: var(--color-accent);
+}
+
+/* 选中态用 primary 混色，与悬停态（accent）明确区分 */
+.profile-item.active {
+    background: color-mix(in oklch, var(--color-primary) 14%, transparent);
+    color: var(--color-foreground);
+}
+
+.profile-item-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.profile-item-name {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.profile-default-badge {
+    flex-shrink: 0;
+    padding: 0 5px;
+    border-radius: 4px;
+    background: var(--color-primary);
+    color: var(--color-primary-foreground);
+    font-size: 11px;
+    line-height: 18px;
+}
+
+.profile-item-command {
+    font-size: 11px;
+    color: var(--color-muted-foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.profile-delete {
+    color: var(--color-destructive);
+}
+
+.import-label {
+    display: inline-flex;
+    cursor: pointer;
+}
+
+/* 与 Button outline/sm 同视觉，但保持非交互元素（label 才能激活隐藏的 file input） */
+.import-trigger {
+    display: inline-flex;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    white-space: nowrap;
+    padding: 0 12px;
+    border: 1px solid var(--color-input);
+    border-radius: 6px;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 500;
+    transition: background-color 0.15s;
+}
+
+.import-label:hover .import-trigger {
+    background: var(--color-accent);
+}
+
+.import-error {
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: var(--color-destructive);
+}
+
+/* 手风琴组头/收展样式已随 GroupAccordion 组件迁移；此钮仍被标签分组页等行内操作复用 */
+.qc-group-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.qc-group-action:hover {
+    background: var(--color-accent);
+    color: var(--color-accent-foreground);
+}
+
+.qc-group-action.danger {
+    color: var(--color-destructive);
+}
+
+.qc-group-action.danger:hover {
+    background: color-mix(in oklch, var(--color-destructive) 20%, transparent);
+    color: var(--color-destructive);
+}

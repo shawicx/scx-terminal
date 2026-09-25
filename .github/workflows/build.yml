@@ -21,7 +21,9 @@ jobs:
 
       - name: Generate changelog
         id: git-cliff
-        uses: orhun/git-cliff-action@v4
+        # 第三方 action 一律钉 commit SHA（可变 tag 被劫持即获得本 workflow 的
+        # contents:write 与更新器签名私钥）；升级时改 SHA 并同步注释里的版本号
+        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4
         with:
           config: cliff.toml
           args: --latest --strip header
@@ -49,28 +51,33 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NOTES: ${{ steps.git-cliff.outputs.content }}
+          # ref 名/repository 经 env 传递并在 shell 内加引号使用，禁止内插进 run:
+          # （ref 名合法字符包含引号与反引号，直接内插即脚本注入）
+          TAG_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
           printf '%s' "$NOTES" > /tmp/release-notes.md
-          jq -n --arg tag "${{ github.ref_name }}" \
-                --arg name "SCX Terminal ${{ github.ref_name }}" \
+          jq -n --arg tag "$TAG_NAME" \
+                --arg name "SCX Terminal $TAG_NAME" \
                 --rawfile notes /tmp/release-notes.md \
                 '{tag_name: $tag, name: $name, body: $notes, draft: true}' > /tmp/release-payload.json
-          release_id=$(gh api --method POST "repos/${{ github.repository }}/releases" \
+          release_id=$(gh api --method POST "repos/$REPO/releases" \
             --input /tmp/release-payload.json \
             --jq '.id') || release_id=''
           # re-run 场景：同名 release 已存在（already_exists）→ 回退列表按 tag_name 匹配
           if [ -z "$release_id" ] || [ "$release_id" = "null" ]; then
-            release_id=$(gh api "repos/${{ github.repository }}/releases" \
-              --jq "[.[] | select(.tag_name == \"${{ github.ref_name }}\")][0].id")
+            release_id=$(gh api "repos/$REPO/releases" \
+              --arg t "$TAG_NAME" \
+              --jq '[.[] | select(.tag_name == $t)][0].id')
           fi
           if [ -z "$release_id" ] || [ "$release_id" = "null" ]; then
-            echo "::error::release_id not resolvable for tag ${{ github.ref_name }}"
+            echo "::error::release_id not resolvable for tag $TAG_NAME"
             exit 1
           fi
           # 已存在的 release（手动建/re-run 复用）不会经过上面的 create 赋值，
           # 统一补 PATCH 一次 notes，保证 body 与 cliff 输出一致
           jq -n --rawfile notes /tmp/release-notes.md '{body: $notes}' > /tmp/notes-payload.json
-          gh api --method PATCH "repos/${{ github.repository }}/releases/$release_id" \
+          gh api --method PATCH "repos/$REPO/releases/$release_id" \
             --input /tmp/notes-payload.json >/dev/null
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
@@ -95,17 +102,17 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.1
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: './src-tauri -> target'
 
@@ -120,7 +127,8 @@ jobs:
         working-directory: src-tauri
         run: cargo test -- --skip secrets
 
-      - uses: tauri-apps/tauri-action@v0
+      # tauri-action 持有更新器签名私钥：必须钉 SHA，升级前核对其 release 说明
+      - uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # minisign 签名密钥就位后 tauri-action 自动产出 updater 产物（.app.tar.gz/.nsis.zip + .sig）

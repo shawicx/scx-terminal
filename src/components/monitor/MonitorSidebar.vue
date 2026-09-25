@@ -8,7 +8,8 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Activity, PanelRightClose } from 'lucide-vue-next'
-import { useMonitorStore } from '@/stores/monitor'
+import { useMonitorStore, MONITOR_ERROR_UNSUPPORTED } from '@/stores/monitor'
+import { MONITOR_ERROR_RECONNECTING } from '@/lib/monitorOrchestrator'
 import { useConfigStore, type SshProfile } from '@/stores/config'
 import { connectionSources, connectionStates } from '@/services/sshConnections'
 import MetricChart from '@/components/monitor/MetricChart.vue'
@@ -199,8 +200,8 @@ function fmtUptime (seconds: number): string {
                         </div>
                     </header>
 
-                    <div v-if="errorState === 'unsupported'" class="monitor-banner">{{ t('monitor.unsupported') }}</div>
-                    <div v-else-if="errorState === 'reconnecting'" class="monitor-banner">{{ t('monitor.recovering') }}</div>
+                    <div v-if="errorState === MONITOR_ERROR_UNSUPPORTED" class="monitor-banner">{{ t('monitor.unsupported') }}</div>
+                    <div v-else-if="errorState === MONITOR_ERROR_RECONNECTING" class="monitor-banner">{{ t('monitor.recovering') }}</div>
                     <div v-else-if="errorState" class="monitor-banner">{{ t('monitor.samplingError') }}：{{ errorState }}</div>
                     <div v-else-if="!latest" class="monitor-banner">{{ t('monitor.waiting') }}</div>
 

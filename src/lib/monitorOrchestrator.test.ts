@@ -34,6 +34,17 @@ function ops (calls: Calls[]): string[] {
     return calls.map(c => c.op)
 }
 
+/** 手动放行的异步闸门：模拟 acquire 长时间挂起（SSH 建连窗口） */
+function deferred () {
+    let resolve!: (value: string) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<string>((res, rej) => {
+        resolve = res
+        reject = rej
+    })
+    return { promise, resolve, reject }
+}
+
 describe('MonitorOrchestrator', () => {
     beforeEach(() => {
         vi.useFakeTimers()
@@ -154,5 +165,90 @@ describe('MonitorOrchestrator', () => {
         expect(ops(calls)).toEqual(['acquire', 'start:card', 'acquire', 'start:full'])
         const cardIds = (o as unknown as { cardIds: Set<string> }).cardIds
         expect(cardIds.has('p2')).toBe(false)
+    })
+
+    it('stopCard during in-flight ensure compensates the late start (no orphan task)', async () => {
+        const { deps, calls } = makeDeps()
+        const gate = deferred()
+        ;(deps.acquire as ReturnType<typeof vi.fn>).mockImplementation(async (id: string) => {
+            calls.push({ op: 'acquire', args: [id] })
+            return gate.promise
+        })
+        const o = new MonitorOrchestrator(deps)
+        const task = o.startCard(['p1'])
+        await o.stopCard() // ensure 挂起期间停止：先做一轮 stop + release
+        gate.resolve('ssh-p1')
+        await vi.advanceTimersByTimeAsync(1000)
+        await task
+        // 迟到的 start 已复活采样 → epoch 失效后必须再补偿一轮 stop + release
+        expect(ops(calls)).toEqual(['acquire', 'stop', 'release', 'start:card', 'stop', 'release'])
+        const cardIds = (o as unknown as { cardIds: Set<string> }).cardIds
+        expect(cardIds.size).toBe(0)
+    })
+
+    it('start failure compensates release (no leaked consumer)', async () => {
+        const { deps, calls } = makeDeps()
+        ;(deps.start as ReturnType<typeof vi.fn>).mockImplementation(async (id: string) => {
+            calls.push({ op: 'start:card', args: [id] })
+            throw new Error('sampling script missing')
+        })
+        const o = new MonitorOrchestrator(deps)
+        await o.startCard(['p1'])
+        // acquire 成功但 start 失败：不补偿 release 会让 headless 连接永不进宽限期
+        expect(ops(calls)).toEqual(['acquire', 'start:card', 'release', 'report'])
+        const cardIds = (o as unknown as { cardIds: Set<string> }).cardIds
+        expect(cardIds.size).toBe(0)
+    })
+
+    it('stopCard during an in-flight retry attempt does not revive the session', async () => {
+        const { deps, calls } = makeDeps()
+        const gate = deferred()
+        let gated = false
+        ;(deps.acquire as ReturnType<typeof vi.fn>).mockImplementation(async (id: string) => {
+            calls.push({ op: 'acquire', args: [id] })
+            if (gated) {
+                return gate.promise
+            }
+            return `ssh-${id}`
+        })
+        const o = new MonitorOrchestrator(deps)
+        await o.startCard(['p1'])
+        calls.length = 0
+        gated = true
+        void o.onFatal('p1')
+        await vi.advanceTimersByTimeAsync(RETRY_DELAYS_MS[0]!) // 重连体挂起在 gate 上
+        await o.stopCard()
+        gate.resolve('ssh-p1')
+        await vi.advanceTimersByTimeAsync(30000)
+        // stopCard 的停释 + 迟到 start 复活后的补偿停释；绑定已解除则不再排任何后续重试
+        expect(ops(calls)).toEqual(['report', 'release', 'acquire', 'stop', 'release', 'start:card', 'stop', 'release'])
+    })
+
+    it('second onFatal while a retry is in flight does not spawn a duplicate chain', async () => {
+        const { deps, calls } = makeDeps()
+        const gate = deferred()
+        let gated = false
+        ;(deps.acquire as ReturnType<typeof vi.fn>).mockImplementation(async (id: string) => {
+            calls.push({ op: 'acquire', args: [id] })
+            if (gated) {
+                gated = false
+                await gate.promise
+                throw new Error('still down')
+            }
+            return `ssh-${id}`
+        })
+        const o = new MonitorOrchestrator(deps)
+        await o.startCard(['p1'])
+        calls.length = 0
+        gated = true
+        void o.onFatal('p1')
+        await vi.advanceTimersByTimeAsync(RETRY_DELAYS_MS[0]!) // 第一轮重连体挂起
+        void o.onFatal('p1') // 在跑期间再次 fatal：同步 report，但不得另起并发链
+        gate.reject(new Error('still down'))
+        await vi.advanceTimersByTimeAsync(RETRY_DELAYS_MS[1]! - 10)
+        expect(ops(calls)).toEqual(['report', 'release', 'acquire', 'report'])
+        await vi.advanceTimersByTimeAsync(20)
+        // 第二轮（attempt=1 → 2s）只出现一条链的 release + acquire + start
+        expect(ops(calls)).toEqual(['report', 'release', 'acquire', 'report', 'release', 'acquire', 'start:card'])
     })
 })

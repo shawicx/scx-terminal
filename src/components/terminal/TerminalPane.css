@@ -1,0 +1,113 @@
+.terminal-pane {
+    position: absolute;
+    inset: 0;
+}
+
+.terminal-host {
+    position: absolute;
+    inset: 0;
+}
+
+/* 终端背景图层：双层背景——洗色渐变（100% 拉伸铺满宿主，覆盖 fit 取整的右侧/底部
+   条带）叠在图片层上；xterm 挂载追加在其后（DOM 序即层序），viewport 在背景图激活
+   时全透明，着色统一由洗色层承担 */
+.terminal-bg {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+        linear-gradient(var(--term-bg-wash, rgba(0, 0, 0, 0)), var(--term-bg-wash, rgba(0, 0, 0, 0))),
+        var(--term-bg-image, none);
+    background-size: 100% 100%, var(--term-bg-size, cover);
+    background-repeat: no-repeat, var(--term-bg-repeat, no-repeat);
+    background-position: center, var(--term-bg-position, center);
+}
+
+/* 端口转发面板开启时收缩终端区域（xterm 的 ResizeObserver 自动 refit）；
+   min() 与 ForwardPanel 面板宽度保持同一表达式，窄窗格下两侧按比例分摊 */
+.terminal-host.with-forward {
+    inset: 0 min(400px, 60%) 0 0;
+}
+
+.mount-error {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 16px;
+    background: var(--color-background);
+    color: var(--color-destructive);
+    font-size: 13px;
+    text-align: center;
+    white-space: pre-wrap;
+}
+
+.mount-error-text {
+    max-width: 560px;
+    word-break: break-all;
+}
+
+.search-bar {
+    position: absolute;
+    top: 6px;
+    right: 18px;
+    z-index: var(--z-pane-overlay);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+    background: var(--color-popover);
+    color: var(--color-popover-foreground);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    animation: 0.125s cubic-bezier(0, 0, 0.2, 1) searchFadeIn;
+}
+
+.search-input {
+    width: 180px;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: inherit;
+    font-size: 12px;
+}
+
+.search-status {
+    color: var(--color-muted-foreground);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.search-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+.search-button:hover {
+    background: var(--color-accent);
+    color: var(--color-accent-foreground);
+}
+
+@keyframes searchFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

@@ -21,6 +21,9 @@ export interface MonitorDeps {
 /** fatal 重连退避序列；末值封顶重复 */
 export const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000]
 
+/** 「重连中」错误哨兵：HostCard/MonitorSidebar 据此渲染横幅，两侧必须同源 */
+export const MONITOR_ERROR_RECONNECTING = 'reconnecting'
+
 /** 卡片建连错峰间隔 */
 const STAGGER_MS = 500
 
@@ -28,6 +31,8 @@ const STAGGER_MS = 500
 interface RetryState {
     timer: ReturnType<typeof setTimeout> | null
     attempt: number
+    /** 重连体在跑（timer 已触发）：防第二次 onFatal 另起并发重试链 */
+    running: boolean
 }
 
 export class MonitorOrchestrator {
@@ -41,8 +46,8 @@ export class MonitorOrchestrator {
 
     /**
      * @description 启动卡片级监控：逐台串行 acquire + start（500ms 错峰），
-     *              单台失败记入错误不阻塞后续；错峰醒来后建连前复查 epoch，
-     *              stopCard 已发生则剩余档案不再建连（防无人停止的孤儿采样）
+     *              单台失败记入错误不阻塞后续；epoch 失效（stopCard 已发生）
+     *              时不再建连，ensure 期间失效则补偿停释防孤儿采样任务
      * @param profileIds SSH 档案 id 列表
      * @returns Promise<void>
      *
@@ -51,7 +56,8 @@ export class MonitorOrchestrator {
      */
     async startCard (profileIds: string[]): Promise<void> {
         const epoch = this.startEpoch
-        for (const id of profileIds) {
+        for (let i = 0; i < profileIds.length; i++) {
+            const id = profileIds[i]!
             if (epoch !== this.startEpoch) {
                 return
             }
@@ -60,18 +66,21 @@ export class MonitorOrchestrator {
             }
             this.cardIds.add(id)
             try {
-                // ensure 前复查详情绑定：错峰期间到达的 bindDetail 不得被迟到的卡片级 ensure 降级
-                if (this.detailIds.has(id)) {
-                    this.cardIds.delete(id)
-                    continue
+                await this.ensure(id)
+                // ensure 的 await 期间 stopCard 可能已发生：迟到 start 已复活采样，
+                // 补偿停释；若期间到达了详情绑定则不补偿（连接与任务归详情）
+                if (epoch !== this.startEpoch && !this.detailIds.has(id)) {
+                    await this.teardown(id)
+                    return
                 }
-                await this.ensure(id, this.levelOf(id))
-                if (profileIds.indexOf(id) !== profileIds.length - 1) {
+                if (i < profileIds.length - 1) {
                     await new Promise(resolve => setTimeout(resolve, STAGGER_MS))
                 }
             } catch (error) {
                 this.cardIds.delete(id)
-                this.deps.reportError(id, String(error))
+                if (epoch === this.startEpoch) {
+                    this.deps.reportError(id, String(error))
+                }
             }
         }
     }
@@ -93,9 +102,8 @@ export class MonitorOrchestrator {
             if (this.detailIds.has(id)) {
                 continue
             }
-            this.cancelRetry(id)
-            await this.deps.stop(id)
-            this.deps.release(id, consumerId(id))
+            // 单台停释失败不得中断其余档案的清理（否则残留绑定与泄漏连接）
+            await this.teardown(id)
         }
     }
 
@@ -111,7 +119,7 @@ export class MonitorOrchestrator {
         this.detailIds.add(profileId)
         this.cancelRetry(profileId)
         try {
-            await this.ensure(profileId, 'full')
+            await this.ensure(profileId)
         } catch (error) {
             this.deps.reportError(profileId, String(error))
         }
@@ -131,15 +139,13 @@ export class MonitorOrchestrator {
         }
         if (this.cardIds.has(profileId)) {
             try {
-                await this.ensure(profileId, 'card')
+                await this.ensure(profileId) // detailIds 已删 → ensure 内求值为 card
             } catch (error) {
                 this.deps.reportError(profileId, String(error))
             }
             return
         }
-        this.cancelRetry(profileId)
-        await this.deps.stop(profileId)
-        this.deps.release(profileId, consumerId(profileId))
+        await this.teardown(profileId)
     }
 
     /**
@@ -151,11 +157,16 @@ export class MonitorOrchestrator {
      *
      */
     onFatal (profileId: string): void {
-        if (!this.cardIds.has(profileId) && !this.detailIds.has(profileId)) {
+        if (!this.isBound(profileId)) {
             return
         }
-        this.deps.reportError(profileId, 'reconnecting')
+        this.deps.reportError(profileId, MONITOR_ERROR_RECONNECTING)
         this.scheduleRetry(profileId)
+    }
+
+    /** 档案仍有任意层（卡片/详情）绑定 */
+    private isBound (profileId: string): boolean {
+        return this.cardIds.has(profileId) || this.detailIds.has(profileId)
     }
 
     /** 当前档案应使用的采样等级（详情绑定优先 full） */
@@ -163,28 +174,63 @@ export class MonitorOrchestrator {
         return this.detailIds.has(profileId) ? 'full' : 'card'
     }
 
-    /** 取连接并启动采样（consumer id 稳定为 monitor:{profileId}，Set 去重） */
-    private async ensure (profileId: string, level: 'card' | 'full'): Promise<void> {
+    /**
+     * 取连接并启动采样（consumer id 稳定为 monitor:{profileId}，Set 去重）。
+     * 等级在 acquire 之后求值：错峰/重试窗口内到达的 bindDetail 不会被迟到的
+     * 卡片级 start 降级。start 失败立即补偿 release，防泄漏无人停止的消费者。
+     */
+    private async ensure (profileId: string): Promise<void> {
         const sshId = await this.deps.acquire(profileId, consumerId(profileId))
-        await this.deps.start(profileId, sshId, level)
+        try {
+            await this.deps.start(profileId, sshId, this.levelOf(profileId))
+        } catch (error) {
+            this.deps.release(profileId, consumerId(profileId))
+            throw error
+        }
+    }
+
+    /** 停任务并释放消费者；stop 失败也必须 release（否则 headless 连接永不进宽限期） */
+    private async teardown (profileId: string): Promise<void> {
+        this.cancelRetry(profileId)
+        try {
+            await this.deps.stop(profileId)
+        } catch (error) {
+            this.deps.reportError(profileId, String(error))
+        } finally {
+            this.deps.release(profileId, consumerId(profileId))
+        }
     }
 
     /** 按退避序列安排一次重连 */
     private scheduleRetry (profileId: string): void {
-        const state = this.retries.get(profileId) ?? { timer: null, attempt: 0 }
-        if (state.timer !== null) {
+        const state = this.retries.get(profileId) ?? { timer: null, attempt: 0, running: false }
+        if (state.timer !== null || state.running) {
             return
         }
         const delay = RETRY_DELAYS_MS[Math.min(state.attempt, RETRY_DELAYS_MS.length - 1)]!
         state.timer = setTimeout(() => {
             state.timer = null
+            state.running = true
             void (async () => {
+                // 需在 running 复位后再排下一轮（scheduleRetry 的在跑守卫会拒绝在跑期间的
+                // 重排），故用标志延后到 finally 之后
+                let reschedule = false
                 try {
                     this.deps.release(profileId, consumerId(profileId))
-                    await this.ensure(profileId, this.levelOf(profileId))
-                    this.retries.delete(profileId) // 成功即重置退避
+                    await this.ensure(profileId)
+                    if (this.isBound(profileId)) {
+                        this.retries.delete(profileId) // 成功且仍绑定：重置退避
+                    } else {
+                        // ensure 的 await 期间绑定被解除：迟到 start 已复活采样，补偿停释
+                        await this.teardown(profileId)
+                    }
                 } catch {
                     state.attempt += 1
+                    reschedule = this.isBound(profileId) // 已解绑则放弃，不复活连接
+                } finally {
+                    state.running = false
+                }
+                if (reschedule) {
                     this.scheduleRetry(profileId)
                 }
             })()

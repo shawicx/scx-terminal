@@ -10,6 +10,9 @@ import { type MonitorEventPayload, type MonitorSample } from '@/services/monitor
 /** 环形缓冲上限（full 级 2s ≈ 5 分钟窗口） */
 export const MAX_SAMPLES = 150
 
+/** 「平台不支持」终态哨兵：applyUnsupported 写入、UI 据此映射文案，两侧必须同源 */
+export const MONITOR_ERROR_UNSUPPORTED = 'unsupported'
+
 export const useMonitorStore = defineStore('monitor', {
     state: () => ({
         latest: {} as Record<string, MonitorSample>,
@@ -30,22 +33,29 @@ export const useMonitorStore = defineStore('monitor', {
                 return
             }
             this.initialized = true
-            await listen<MonitorEventPayload>('monitor-sample', event => {
-                const { profileId, sample } = event.payload
-                if (profileId && sample) {
-                    this.apply(profileId, sample)
-                }
-            })
-            await listen<MonitorEventPayload>('monitor-sample-error', event => {
-                if (event.payload.profileId) {
-                    this.applyError(event.payload.profileId, event.payload.message ?? '')
-                }
-            })
-            await listen<MonitorEventPayload>('monitor-unsupported', event => {
-                if (event.payload.profileId) {
-                    this.applyUnsupported(event.payload.profileId)
-                }
-            })
+            try {
+                await listen<MonitorEventPayload>('monitor-sample', event => {
+                    const { profileId, sample } = event.payload
+                    if (profileId && sample) {
+                        this.apply(profileId, sample)
+                    }
+                })
+                await listen<MonitorEventPayload>('monitor-sample-error', event => {
+                    if (event.payload.profileId) {
+                        this.applyError(event.payload.profileId, event.payload.message ?? '')
+                    }
+                })
+                await listen<MonitorEventPayload>('monitor-unsupported', event => {
+                    if (event.payload.profileId) {
+                        this.applyUnsupported(event.payload.profileId)
+                    }
+                })
+            } catch (error) {
+                // 订阅失败回退标记：半初始化的 store 会因幂等短路永远错过事件，
+                // 复位让下次挂载可重试（App.vue 处为 void 调用，不捕获会变 unhandled rejection）
+                this.initialized = false
+                console.error('[monitor] event subscribe failed:', error)
+            }
         },
         /**
          * @description 应用一份样本：写 latest、追加环形缓冲（溢出丢最旧）、清除错误态
@@ -96,7 +106,7 @@ export const useMonitorStore = defineStore('monitor', {
          *
          */
         applyUnsupported (profileId: string): void {
-            this.errors[profileId] = 'unsupported'
+            this.errors[profileId] = MONITOR_ERROR_UNSUPPORTED
         },
         /**
          * @description 清除档案全部监控状态

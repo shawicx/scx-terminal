@@ -14,7 +14,6 @@ import Dialog from '@/components/ui/Dialog.vue'
 import { writeClipboardText } from '@/lib/frontendContext'
 import { formatBytes } from '@/lib/sftpTransferMath'
 import {
-    breadcrumbSegments,
     joinPanePath,
     parentPanePath,
     sortPaneEntries,
@@ -22,6 +21,7 @@ import {
     type SortDir,
     type SortKey,
 } from '@/lib/sftpPane'
+import { usePaneNavigation } from './usePaneNavigation'
 
 /** 远端文件操作注入（local 侧不传） */
 export interface PaneOps {
@@ -54,86 +54,22 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const rootEl = ref<HTMLElement>()
 
-// ---- 导航状态：路径 / 历史（前进后退） / 加载 ----
-const path = ref('')
-const entries = ref<PaneEntry[]>([])
-const loading = ref(false)
-const error = ref('')
-const history = ref<string[]>([])
-const historyIndex = ref(-1)
-let loadSeq = 0
+// ---- 选择状态（导航成功后清空；声明提前供导航回调引用） ----
+const selected = ref(new Set<string>())
+const anchorPath = ref<string | null>(null)
 
-/** 面包屑分段（根 + 每级目录） */
-const crumbs = computed(() => breadcrumbSegments(path.value || props.homePath || '/'))
-
-/**
- * @description 加载目录：序号防串（快速导航时旧响应不得覆盖新目录）
- * @param dir 目录绝对路径
- * @param push 是否压入导航历史（后退/前进不压）
- * @returns Promise<void>
- *
- */
-async function loadDir (dir: string, push = true): Promise<void> {
-    const seq = ++loadSeq
-    loading.value = true
-    error.value = ''
-    try {
-        const list = await props.lister(dir)
-        if (seq !== loadSeq) {
-            return
-        }
-        entries.value = list
-        path.value = dir
+const {
+    path, entries, loading, error, crumbs, canGoBack, canGoForward, loadDir,
+    navigate, goHome, goBack, goForward, refresh,
+} = usePaneNavigation({
+    lister: dir => props.lister(dir),
+    homePath: () => props.homePath,
+    onPathChange: dir => emit('pathChange', dir),
+    onDirectoryChanged: () => {
         selected.value.clear()
         anchorPath.value = null
-        if (push) {
-            history.value = [...history.value.slice(0, historyIndex.value + 1), dir]
-            historyIndex.value = history.value.length - 1
-        }
-        emit('pathChange', dir)
-    } catch (e) {
-        if (seq !== loadSeq) {
-            return
-        }
-        error.value = String(e instanceof Error ? e.message : e)
-    } finally {
-        if (seq === loadSeq) {
-            loading.value = false
-        }
-    }
-}
-
-function navigate (dir: string): void {
-    if (dir !== path.value || error.value) {
-        void loadDir(dir)
-    } else {
-        void loadDir(dir, false)
-    }
-}
-
-function goHome (): void {
-    if (props.homePath) {
-        navigate(props.homePath)
-    }
-}
-
-function goBack (): void {
-    if (historyIndex.value > 0) {
-        historyIndex.value -= 1
-        void loadDir(history.value[historyIndex.value]!, false)
-    }
-}
-
-function goForward (): void {
-    if (historyIndex.value < history.value.length - 1) {
-        historyIndex.value += 1
-        void loadDir(history.value[historyIndex.value]!, false)
-    }
-}
-
-function refresh (): void {
-    void loadDir(path.value, false)
-}
+    },
+})
 
 // ---- 面包屑编辑：点击路径区转输入框，Enter 跳转 / Esc 取消 ----
 const editing = ref(false)
@@ -189,8 +125,6 @@ function sortIndicator (key: SortKey): string {
 }
 
 // ---- 选择（单击 / ⌘ 单击 / ⇃ 范围） ----
-const selected = ref(new Set<string>())
-const anchorPath = ref<string | null>(null)
 let suppressClick = false
 
 function onRowClick (entry: PaneEntry, event: MouseEvent): void {
@@ -418,10 +352,10 @@ defineExpose({
             <Button variant="ghost" size="icon" class="h-7 w-7" :title="t('sftp.home')" :disabled="!props.homePath" @click="goHome">
                 <Home :size="14" />
             </Button>
-            <Button variant="ghost" size="icon" class="h-7 w-7" :title="t('sftp.back')" :disabled="historyIndex <= 0" @click="goBack">
+            <Button variant="ghost" size="icon" class="h-7 w-7" :title="t('sftp.back')" :disabled="!canGoBack" @click="goBack">
                 <ChevronLeft :size="14" />
             </Button>
-            <Button variant="ghost" size="icon" class="h-7 w-7" :title="t('sftp.forward')" :disabled="historyIndex >= history.length - 1" @click="goForward">
+            <Button variant="ghost" size="icon" class="h-7 w-7" :title="t('sftp.forward')" :disabled="!canGoForward" @click="goForward">
                 <ChevronRight :size="14" />
             </Button>
             <Button variant="ghost" size="icon" class="h-7 w-7" :title="t('sftp.refresh')" @click="refresh">
@@ -537,269 +471,4 @@ defineExpose({
 export default { name: 'SftpBrowserPane' }
 </script>
 
-<style scoped>
-.sftp-pane {
-    position: relative;
-    flex: 1 1 0;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    background: var(--color-background);
-}
-
-.sftp-pane + .sftp-pane {
-    border-left: 1px solid var(--color-border);
-}
-
-.sftp-pane.disabled {
-    pointer-events: none;
-    opacity: 0.55;
-}
-
-/* 拖拽落点高亮（父组件拖拽会话驱动） */
-.sftp-pane.drop-active {
-    box-shadow: inset 0 0 0 2px var(--color-ring);
-}
-
-.pane-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding: 6px 8px;
-    border-bottom: 1px solid var(--color-border);
-}
-
-.pane-path {
-    flex: 1 1 0;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 1px;
-    height: 26px;
-    padding: 0 6px;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    overflow: hidden;
-    cursor: text;
-    transition: border-color 0.15s ease;
-}
-
-.pane-path:hover {
-    border-color: var(--color-input);
-}
-
-.crumb {
-    border: none;
-    padding: 0 2px;
-    background: transparent;
-    color: var(--color-muted-foreground);
-    font-size: 12px;
-    font-family: var(--font-mono);
-    white-space: nowrap;
-    cursor: pointer;
-    transition: color 0.25s ease;
-}
-
-.crumb:hover {
-    color: var(--color-foreground);
-    text-decoration: underline;
-}
-
-.crumb.last {
-    color: var(--color-foreground);
-    font-weight: 600;
-}
-
-.crumb-sep {
-    color: var(--color-muted-foreground);
-    font-size: 11px;
-    flex-shrink: 0;
-}
-
-.pane-path-input {
-    flex: 1 1 0;
-    min-width: 0;
-    height: 26px;
-    padding: 0 8px;
-    border: 1px solid var(--color-ring);
-    border-radius: 6px;
-    background: transparent;
-    color: var(--color-foreground);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    outline: none;
-    box-shadow: 0 0 0 1px var(--color-ring);
-}
-
-.pane-header-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 10px;
-    border-bottom: 1px solid var(--color-border);
-    user-select: none;
-}
-
-.col {
-    border: none;
-    padding: 0;
-    background: transparent;
-    color: var(--color-muted-foreground);
-    font-size: 11px;
-    cursor: pointer;
-    transition: color 0.25s ease;
-}
-
-.col:hover {
-    color: var(--color-foreground);
-}
-
-.sort-ind {
-    display: inline-block;
-    width: 12px;
-    margin-left: 2px;
-    text-align: center;
-}
-
-.col-name {
-    flex: 1 1 0;
-    min-width: 0;
-    text-align: left;
-}
-
-.col-size {
-    width: 64px;
-    text-align: right;
-}
-
-.col-time {
-    width: 118px;
-    text-align: right;
-}
-
-.pane-error {
-    margin: 0;
-    padding: 6px 10px;
-    font-size: 12px;
-    color: var(--color-destructive);
-    border-bottom: 1px solid var(--color-border);
-    word-break: break-all;
-}
-
-.pane-list {
-    flex: 1 1 0;
-    min-height: 0;
-    overflow-y: auto;
-}
-
-.pane-hint {
-    margin: 0;
-    padding: 16px 10px;
-    text-align: center;
-    font-size: 12px;
-    color: var(--color-muted-foreground);
-}
-
-.pane-entry {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 10px;
-    font-size: 12px;
-    cursor: pointer;
-    user-select: none;
-    transition: background-color 0.15s ease;
-}
-
-.pane-entry:hover {
-    background: var(--color-accent);
-}
-
-.pane-entry.selected {
-    background: color-mix(in oklch, var(--color-primary) 14%, transparent);
-}
-
-.pane-entry.drop-target {
-    outline: 1px solid var(--color-ring);
-    outline-offset: -1px;
-    background: color-mix(in oklch, var(--color-primary) 10%, transparent);
-}
-
-.entry-icon {
-    flex-shrink: 0;
-    color: var(--color-muted-foreground);
-}
-
-.entry-icon.dir {
-    color: var(--color-primary);
-}
-
-.entry-name {
-    flex: 1 1 0;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.entry-meta {
-    flex-shrink: 0;
-    font-size: 11px;
-    color: var(--color-muted-foreground);
-    font-variant-numeric: tabular-nums;
-}
-
-.entry-size {
-    width: 56px;
-    text-align: right;
-}
-
-.entry-time {
-    width: 112px;
-    text-align: right;
-}
-
-.pane-status {
-    padding: 2px 10px;
-    border-top: 1px solid var(--color-border);
-    font-size: 11px;
-    color: var(--color-muted-foreground);
-}
-
-.pane-disabled-overlay {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    color: var(--color-muted-foreground);
-    background: color-mix(in oklch, var(--color-background) 60%, transparent);
-}
-
-.pane-prompt-input {
-    width: 100%;
-    box-sizing: border-box;
-    height: 32px;
-    padding: 0 10px;
-    border: 1px solid var(--color-input);
-    border-radius: 6px;
-    background: transparent;
-    color: var(--color-foreground);
-    font-family: var(--font-mono);
-    font-size: 13px;
-    outline: none;
-}
-
-.pane-prompt-input:focus {
-    border-color: var(--color-ring);
-    box-shadow: 0 0 0 1px var(--color-ring);
-}
-
-.pane-prompt-error {
-    margin: 8px 0 0;
-    font-size: 12px;
-    color: var(--color-destructive);
-    word-break: break-all;
-}
-</style>
+<style scoped src="./SftpBrowserPane.css"></style>

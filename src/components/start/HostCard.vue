@@ -10,7 +10,8 @@ import { Activity, ArrowLeftRight, ArrowUpDown, Pencil } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import type { SshProfile } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
-import { useMonitorStore } from '@/stores/monitor'
+import { useMonitorStore, MONITOR_ERROR_UNSUPPORTED } from '@/stores/monitor'
+import { MONITOR_ERROR_RECONNECTING } from '@/lib/monitorOrchestrator'
 
 const props = defineProps<{
     profile: SshProfile
@@ -31,11 +32,11 @@ const latest = computed(() => monitor.latest[props.profile.id] ?? null)
 /** 指标错误态：'unsupported'/'reconnecting' 哨兵透传，其余非空归并为 'error' */
 const metricError = computed(() => {
     const err = monitor.errors[props.profile.id]
-    return err === 'unsupported' || err === 'reconnecting' ? err : (err ? 'error' : '')
+    return err === MONITOR_ERROR_UNSUPPORTED || err === MONITOR_ERROR_RECONNECTING ? err : (err ? 'error' : '')
 })
 /** 指标错误态提示标题：重连中单独文案，其余为指标不可用 */
 const metricErrorTitle = computed(() =>
-    metricError.value === 'reconnecting' ? t('monitor.recovering') : t('monitor.metricUnavailable'))
+    metricError.value === MONITOR_ERROR_RECONNECTING ? t('monitor.recovering') : t('monitor.metricUnavailable'))
 </script>
 
 <template>

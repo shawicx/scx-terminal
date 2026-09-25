@@ -1,0 +1,274 @@
+/* top 模式：不引入额外盒子，tabs-region 直接参与 title-bar 的 flex 布局 */
+.tab-strip--inline {
+    display: contents;
+}
+
+/* bottom 模式：独立标签条（含底色与上描边，方向翻转），高度与 top 模式标题栏一致 */
+.tab-strip--bottom {
+    display: flex;
+    align-items: flex-start;
+    height: 42px;
+    flex-shrink: 0;
+    background: var(--color-card);
+    border-top: 1px solid var(--color-border);
+    user-select: none;
+}
+
+.tabs-region {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    padding: 0 4px;
+    max-width: 70%;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+}
+
+.tabs-region::-webkit-scrollbar {
+    display: none;
+}
+
+.tab-strip--bottom .tabs-region {
+    align-items: flex-start;
+}
+
+.tab-header {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    height: 32px;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    font-size: 13px;
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    position: relative;
+    /* 定宽（默认即最小宽度），标题超长省略：标题随 shell/目录上报变化时不引起标签宽度抖动；激活态 200px 见 .tab-header.active */
+    width: 160px;
+    min-width: 160px;
+    /* min-width 必须与 width 同帧过渡：激活时 min-width 先行跳变会压制 width 动画，
+       造成「变宽瞬跳、变窄平滑」的不对称 */
+    transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease, width 0.25s ease, min-width 0.25s ease;
+}
+
+/* 激活标签与内容区连通：背景取内容区底色，侧/顶描边 + 下探 1px 盖住标题栏底边线；加宽至 200px 突出当前标签 */
+.tab-header.active {
+    height: 33px;
+    margin-bottom: -1px;
+    width: 200px;
+    min-width: 200px;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    border-color: var(--color-border);
+}
+
+.tab-header:not(.active):hover {
+    background: color-mix(in oklch, var(--color-accent) 60%, transparent);
+}
+
+/* 标签颜色标记：整卡浅着色（替代原 8px 圆点），激活/悬停态保留着色底 */
+.tab-header.color-marked {
+    background: color-mix(in oklch, var(--tab-mark) 18%, transparent);
+}
+
+.tab-header.color-marked.active {
+    background: color-mix(in oklch, var(--tab-mark) 22%, var(--color-background));
+}
+
+.tab-header.color-marked:not(.active):hover {
+    background: color-mix(in oklch, var(--tab-mark) 18%, var(--color-accent));
+}
+
+.tab-header.drag-over {
+    box-shadow: inset 2px 0 0 var(--color-primary);
+}
+
+/* bottom 模式：圆角/去边方向/激活上探全部翻转 */
+.tab-strip--bottom .tab-header {
+    border-bottom: 1px solid transparent;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+}
+
+.tab-strip--bottom .tab-header.active {
+    margin-top: -1px;
+    margin-bottom: 0;
+}
+
+/* 文本列 + 关闭列的两列布局：标题占满剩余宽度（超长省略），× 恒定右列对齐 */
+.tab-title {
+    flex: 1 1 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    text-align: left;
+}
+
+.tab-color-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+/* 响铃未读标记：右上角小圆点，绝对定位不占 flex 布局宽度（标签定宽硬约束） */
+.tab-alert-dot {
+    position: absolute;
+    top: 3px;
+    right: 4px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-primary);
+    pointer-events: none;
+}
+
+.tab-rename {
+    width: 110px;
+    min-width: 0;
+    padding: 0 4px;
+    border: 1px solid var(--color-ring);
+    border-radius: 4px;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-size: 13px;
+    outline: none;
+}
+
+.tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    opacity: 0;
+    cursor: pointer;
+    transition: opacity 0.25s ease, background-color 0.25s ease;
+    flex-shrink: 0;
+}
+
+.tab-header:hover .tab-close,
+.tab-header.active .tab-close {
+    opacity: 0.7;
+}
+
+.tab-close:hover {
+    opacity: 1 !important;
+    background: color-mix(in oklch, var(--color-foreground) 15%, transparent);
+}
+
+.new-tab-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    /* 对齐标签行而非标题栏几何中心：标签贴底（顶模式约 8..41px，中心 ~24.5），按钮
+       居中于标签带才与标签文字一线；标题栏中心（21px）会让按钮浮高于标签行 */
+    align-self: flex-end;
+    margin-bottom: 3px;
+    flex-shrink: 0;
+    margin-left: 2px;
+    margin-right: 2px;
+    border: none;
+    border-radius: 6px;
+    /* 未溢出时随流排布（紧跟最后一个标签）；标签溢出后吸附标签区右缘，
+       实底背景盖住从下方滚过的标签 */
+    position: sticky;
+    right: 0;
+    background: var(--color-card);
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* bottom 模式镜像：标签贴顶，按钮对齐标签带上缘而非顶死 */
+.tab-strip--bottom .new-tab-button {
+    align-self: flex-start;
+    margin-top: 3px;
+    margin-bottom: 0;
+}
+
+.new-tab-button:hover {
+    background: var(--color-accent);
+    color: var(--color-accent-foreground);
+}
+
+.drag-area {
+    flex: 1;
+}
+
+/* 分组头 chip：胶囊形、内容自适应宽（非标签元素，不适用 160px 定宽约束） */
+.group-chip {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
+    height: 28px;
+    align-self: center;
+    margin-left: 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-card);
+    font-size: 13px;
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0;
+    user-select: none;
+    transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+.group-chip:hover {
+    background: color-mix(in oklch, var(--color-accent) 60%, transparent);
+}
+
+.group-chip.drag-over {
+    border-color: var(--color-primary);
+    color: var(--color-foreground);
+}
+
+.chip-chevron {
+    flex-shrink: 0;
+    transition: transform 0.25s ease;
+}
+
+.chip-chevron.collapsed {
+    transform: rotate(-90deg);
+}
+
+.chip-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 120px;
+}
+
+.chip-count {
+    color: var(--color-muted-foreground);
+    font-variant-numeric: tabular-nums;
+}
+
+/* 成员标签的组色归属线：绝对定位不占布局宽（定宽硬约束），与 drag-over 的 inset 阴影互不冲突 */
+.tab-group-bar {
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    border-radius: 1px;
+    pointer-events: none;
+}
