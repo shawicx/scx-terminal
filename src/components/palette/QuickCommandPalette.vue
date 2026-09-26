@@ -16,6 +16,7 @@ const tabs = useTabsStore()
 const query = ref('')
 const selectedIndex = ref(0)
 const inputEl = ref<HTMLInputElement>()
+const listEl = ref<HTMLDivElement>()
 /** 填参态下正在编辑的命令；null = 选择态 */
 const editing = ref<QuickCommand | null>(null)
 const paramValues = ref<Record<string, string>>({})
@@ -60,7 +61,19 @@ const visibleItems = computed(() => visibleSections.value.flatMap(section => sec
 
 watch(visibleItems, () => {
     selectedIndex.value = 0
+    scrollToSelected()
 })
+
+/**
+ * @description 滚动列表使选中项可见（键盘切换、过滤重置或填参返回后选中项可能在视口外）
+ * @returns void
+ *
+ */
+function scrollToSelected (): void {
+    requestAnimationFrame(() => {
+        listEl.value?.querySelector('.palette-item.selected')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+}
 
 const editingParams = computed(() =>
     editing.value ? parseQuickCommandParams(editing.value.command) : [])
@@ -142,9 +155,11 @@ function onInputKeydown (event: KeyboardEvent): void {
     } else if (event.key === 'ArrowDown') {
         event.preventDefault()
         selectedIndex.value = Math.min(selectedIndex.value + 1, visibleItems.value.length - 1)
+        scrollToSelected()
     } else if (event.key === 'ArrowUp') {
         event.preventDefault()
         selectedIndex.value = Math.max(selectedIndex.value - 1, 0)
+        scrollToSelected()
     } else if (event.key === 'Enter') {
         event.preventDefault()
         pick(selectedIndex.value)
@@ -167,6 +182,7 @@ function onParamKeydown (event: KeyboardEvent): void {
             const index = visibleItems.value.findIndex(item => item.quickCommand.id === target.id)
             if (index >= 0) {
                 selectedIndex.value = index
+                scrollToSelected()
             }
         }
     } else if (event.key === 'Enter') {
@@ -202,7 +218,7 @@ watch(quickCommandPaletteOpen, value => {
                         :placeholder="t('settings.quickCommandSearchPlaceholder')"
                         @keydown="onInputKeydown"
                     />
-                    <div class="palette-list">
+                    <div ref="listEl" class="palette-list">
                         <template v-for="section in visibleSections" :key="section.title ?? '__ungrouped'">
                             <div v-if="section.title" class="palette-section-title">{{ section.title }}</div>
                             <button

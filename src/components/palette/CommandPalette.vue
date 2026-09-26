@@ -14,6 +14,7 @@ const config = useConfigStore()
 const query = ref('')
 const selectedIndex = ref(0)
 const inputEl = ref<HTMLInputElement>()
+const listEl = ref<HTMLDivElement>()
 
 interface PaletteItem {
     id: string
@@ -40,7 +41,19 @@ const items = computed<PaletteItem[]>(() => {
 
 watch(items, () => {
     selectedIndex.value = 0
+    scrollToSelected()
 })
+
+/**
+ * @description 滚动列表使选中项可见（键盘切换或过滤重置后选中项可能在视口外）
+ * @returns void
+ *
+ */
+function scrollToSelected (): void {
+    requestAnimationFrame(() => {
+        listEl.value?.querySelector('.palette-item.selected')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+}
 
 function open (): void {
     paletteOpen.value = true
@@ -70,9 +83,11 @@ function onInputKeydown (event: KeyboardEvent): void {
     } else if (event.key === 'ArrowDown') {
         event.preventDefault()
         selectedIndex.value = Math.min(selectedIndex.value + 1, items.value.length - 1)
+        scrollToSelected()
     } else if (event.key === 'ArrowUp') {
         event.preventDefault()
         selectedIndex.value = Math.max(selectedIndex.value - 1, 0)
+        scrollToSelected()
     } else if (event.key === 'Enter') {
         event.preventDefault()
         pick(selectedIndex.value)
@@ -106,7 +121,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', close))
                     :placeholder="t('palette.placeholder')"
                     @keydown="onInputKeydown"
                 />
-                <div class="palette-list">
+                <div ref="listEl" class="palette-list">
                     <button
                         v-for="(item, index) in items"
                         :key="item.id"
