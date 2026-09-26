@@ -237,7 +237,6 @@ export function useCommands () {
         register({
             id: 'open-quick-commands', group: 'app', hotkeyId: 'quick-commands-palette',
             label: () => t('commands.quickCommands'),
-            enabled: () => !!terminalTabApi.current,
             handler: () => openQuickCommandPalette(),
         })
         register({

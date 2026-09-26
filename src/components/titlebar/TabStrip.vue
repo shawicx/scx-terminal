@@ -1,19 +1,18 @@
 <script setup lang="ts">
 /**
  * @description 标签条：分组头 chip（折叠/拖拽入组/右键菜单）+ 标签列表（右键菜单/行内
- *              重命名/颜色标记/拖拽归组排序）+「+」档案下拉（继承活动标签分组）。
- *              top 模式内嵌 TitleBar（display:contents 不引入额外盒子），bottom 模式
- *              独立成条（圆角/描边/激活下探方向全部翻转），由 App.vue 挂在内容区下方。
+ *              重命名/颜色标记/拖拽归组排序）+「+」直接按默认档案开新标签（其他档案
+ *              走连接中心）。top 模式内嵌 TitleBar（display:contents 不引入额外盒子），
+ *              bottom 模式独立成条（圆角/描边/激活下探方向全部翻转），由 App.vue 挂在
+ *              内容区下方。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ChevronDown, Plus, X } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useTabsStore, type Tab } from '@/stores/tabs'
-import { useConfigStore, defaultFirstProfiles, type LocalProfile, type SshProfile, type TabGroup } from '@/stores/config'
+import { useConfigStore, type TabGroup } from '@/stores/config'
 import { terminalTabApi } from '@/services/terminalTabsApi'
-import { groupQuickCommandSections } from '@/lib/quickCommands'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
-import DropdownMenu from '@/components/ui/DropdownMenu.vue'
 import { getTabStripWheelDelta, resolveActiveTabScrollLeft } from './tabStripLayout'
 import { activeAfterCollapse, displaySequence, groupOf } from './tabGroupLayout'
 import { useTabDnd } from './useTabDnd'
@@ -21,9 +20,6 @@ import { TAB_COLORS } from '@/lib/tabColors'
 
 /** 「+」按钮占用的横向空间（宽 26 + 左右边距各 2 + flex 间隙 2），滚动活动标签到可见区时右侧需让开 */
 const NEW_TAB_BUTTON_RESERVE = 32
-
-/** 「+」菜单「连接中心」首项的哨兵 key（与档案 id 区分） */
-const START_TAB_MENU_KEY = '__open_start__'
 
 withDefaults(defineProps<{
     /** 标签条位置：top = 内嵌标题栏（默认），bottom = 独立成条置于内容区下方 */
@@ -117,44 +113,15 @@ const {
 } = useTabDnd({ store, regionEl: tabsRegionEl, onDropComplete: () => void nextTick(scrollActiveTabIntoView) })
 
 /**
- * @description 「+」按钮的档案菜单项：固定首项为连接中心，随后本地档案在前（默认档案
- *              置顶、带标记），分隔线后按分组排列 SSH 档案（默认分组在前，其余按组名排序，
- *              组内保持配置顺序）
- * @returns ContextMenuItemSpec[] 菜单项列表
- *
- */
-const newTabMenuItems = computed<ContextMenuItemSpec[]>(() => {
-    const locals: ContextMenuItemSpec[] = defaultFirstProfiles(config.store.profiles)
-        .filter((profile): profile is LocalProfile => profile.type === 'local')
-        .map(profile => ({
-            key: profile.id,
-            label: profile.isDefault ? `${profile.name} · ${t('tab.defaultProfile')}` : profile.name,
-        }))
-    const sshItems: ContextMenuItemSpec[] = groupQuickCommandSections(
-        config.store.profiles.filter((profile): profile is SshProfile => profile.type === 'ssh'),
-        config.store.sshGroups,
-    ).flatMap(section => section.items.map(profile => ({ key: profile.id, label: profile.name })))
-    const startItem: ContextMenuItemSpec = { key: START_TAB_MENU_KEY, label: t('start.tabTitle') }
-    const localItems = locals.map((item, index) => index === 0 ? { ...item, separatorBefore: true } : item)
-    const separatedSshItems = sshItems.map((item, index) => index === 0 ? { ...item, separatorBefore: true } : item)
-    return [startItem, ...localItems, ...separatedSshItems]
-})
-
-/**
- * @description 处理「+」档案菜单选择：取活动窗格 cwd 后按档案开新标签（继承当前目录与
- *              活动标签的分组归属）
- * @param key 档案 id
+ * @description 「+」按钮：取活动窗格 cwd 后按默认档案直接开新标签（继承当前目录与
+ *              活动标签的分组归属）；选择其他档案走连接中心
  * @returns void
  *
  */
-function onNewTabMenuSelect (key: string): void {
-    if (key === START_TAB_MENU_KEY) {
-        store.openStartTab()
-        return
-    }
+function onNewTabClick (): void {
     void (async () => {
         const cwd = await terminalTabApi.current?.getActivePaneCwd() ?? null
-        store.openTerminalTab(key, cwd, store.activeTab?.groupId)
+        store.openTerminalTab(undefined, cwd, store.activeTab?.groupId)
     })()
 }
 
@@ -435,11 +402,9 @@ function onAuxClick (id: string, event: MouseEvent) {
             </template>
 
             <!-- 「+」随标签排布：未溢出时紧跟最后一个标签，溢出后 sticky 吸附标签区右缘 -->
-            <DropdownMenu :items="newTabMenuItems" @select="onNewTabMenuSelect">
-                <button class="new-tab-button" :title="t('commands.newTab')">
-                    <Plus :size="16" />
-                </button>
-            </DropdownMenu>
+            <button class="new-tab-button" :title="t('commands.newTab')" @click="onNewTabClick">
+                <Plus :size="16" />
+            </button>
         </div>
 
         <!-- 条尾余白拖拽区（双击缩放交给 Tauri 原生 drag-region） -->

@@ -70,6 +70,13 @@
     background: var(--color-accent);
 }
 
+/* 无活动终端标签（如在连接中心/设置页唤起）时命令无处发送，条目禁用灰显 */
+.palette-item:disabled {
+    color: var(--color-muted-foreground);
+    opacity: 0.45;
+    cursor: default;
+}
+
 .palette-item-hotkey {
     color: var(--color-muted-foreground);
     font-size: 11px;

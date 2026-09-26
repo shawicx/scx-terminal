@@ -114,12 +114,16 @@ function send (quickCommand: QuickCommand): void {
 }
 
 /**
- * @description 选中一条命令：有占位参数则进填参态，否则直接发送
+ * @description 选中一条命令：无活动终端标签时忽略（条目已灰显）；有占位参数则进填参态，
+ *              否则直接发送
  * @param index 过滤后扁平列表中的索引
  * @returns void
  *
  */
 function pick (index: number): void {
+    if (!terminalTabApi.current) {
+        return
+    }
     const item = visibleItems.value[index]
     if (!item) {
         return
@@ -205,7 +209,8 @@ watch(quickCommandPaletteOpen, value => {
                                 v-for="item in section.items"
                                 :key="item.quickCommand.id"
                                 class="palette-item"
-                                :class="{ selected: item.flatIndex === selectedIndex }"
+                                :class="{ selected: item.flatIndex === selectedIndex && terminalTabApi.current }"
+                                :disabled="!terminalTabApi.current"
                                 @click="pick(item.flatIndex)"
                                 @mousemove="selectedIndex = item.flatIndex"
                             >
