@@ -215,7 +215,7 @@ function recentLabel (ts: number): string {
                 :class="{ sel: domain === 'ssh' && selectedGroup === view.id }"
                 @click="domain = 'ssh'; selectedGroup = view.id"
             >
-                <span class="nav-name">{{ view.name }}</span>
+                <span class="nav-name nav-group-name">{{ view.name }}</span>
                 <span class="nav-count">{{ view.profiles.length }}</span>
             </button>
             <button class="manage-link" @click="tabs.openSettingsTab('ssh')">
@@ -239,7 +239,7 @@ function recentLabel (ts: number): string {
                     :class="{ sel: domain === 'local' && selectedLocalGroup === group.id }"
                     @click="domain = 'local'; selectedLocalGroup = group.id"
                 >
-                    <span class="nav-name">{{ group.name }}</span>
+                    <span class="nav-name nav-group-name">{{ group.name }}</span>
                     <span class="nav-count">{{ localGroupCounts[group.id] ?? 0 }}</span>
                 </button>
                 <button class="manage-link" @click="tabs.openSettingsTab('profiles')">

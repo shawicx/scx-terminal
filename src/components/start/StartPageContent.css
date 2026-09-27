@@ -61,6 +61,8 @@
     opacity: 1;
 }
 .nav-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 分组名与设置页手风琴一致：全大写（shell 名等小写来源归一） */
+.nav-group-name { text-transform: uppercase; letter-spacing: 0.04em; }
 .nav-count { color: var(--color-muted-foreground); font-size: 11px; flex: none; }
 .manage-link {
     display: flex;

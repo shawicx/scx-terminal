@@ -6,6 +6,7 @@ src-tauri/gen/schemas/
 *.tsbuildinfo
 .DS_Store
 .idea/
+.qoder/
 *.code-workspace
 .zcode/
 docs/superpowers
