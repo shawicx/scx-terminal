@@ -24,6 +24,7 @@ import AboutPage from '@/components/settings/pages/AboutPage.vue'
 import type { SettingsPageId } from '@/stores/tabs'
 import { dismissConfirm, runConfirmed, useConfirmState } from '@/components/settings/useConfirmAction'
 import { useGroupNameDialog } from '@/components/settings/useGroupNameDialog'
+import { pageEnter, pageLeave } from '@/lib/motion'
 
 const { t } = useI18n()
 
@@ -66,7 +67,7 @@ const { groupNameDialog, groupNameDialogTitle, commitGroupNameDialog } = useGrou
         </aside>
 
         <div class="settings-content">
-            <Transition name="page-fade" mode="out-in">
+            <Transition :css="false" mode="out-in" @enter="pageEnter" @leave="pageLeave">
             <LocalProfilesPage v-if="page === 'profiles'" key="profiles" />
             <SshPage v-else-if="page === 'ssh'" key="ssh" />
             <QuickCommandsPage v-else-if="page === 'quickCommands'" key="quickCommands" />

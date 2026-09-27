@@ -5,7 +5,7 @@
               config store 的 monitor section；采样绑定生命周期归 TerminalTabContent。
 -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Activity, PanelRightClose } from 'lucide-vue-next'
 import { useMonitorStore, MONITOR_ERROR_UNSUPPORTED } from '@/stores/monitor'
@@ -13,6 +13,7 @@ import { MONITOR_ERROR_RECONNECTING } from '@/lib/monitorOrchestrator'
 import { useConfigStore, type SshProfile } from '@/stores/config'
 import { connectionSources, connectionStates } from '@/services/sshConnections'
 import MetricChart from '@/components/monitor/MetricChart.vue'
+import { gsap, prefersReducedMotion, MOTION_EASE } from '@/lib/motion'
 
 const props = defineProps<{ profileId: string }>()
 
@@ -20,13 +21,36 @@ const { t } = useI18n()
 const config = useConfigStore()
 const monitor = useMonitorStore()
 
-const profile = computed<SshProfile | undefined>(() =>
-    config.store.profiles.find((p): p is SshProfile => p.id === props.profileId && p.type === 'ssh'))
+const chartsEl = ref<HTMLDivElement>()
 
 const open = computed(() => config.store.monitor.open === true)
 const width = computed(() => config.store.monitor.width)
 
 const latest = computed(() => monitor.latest[props.profileId] ?? null)
+
+// 侧栏展开（或展开态下首批样本到达）时图表卡 stagger 浮现（v-show 常驻不重挂，需主动触发）
+watch([open, latest], ([isOpen, has]) => {
+    if (!(isOpen && has) || prefersReducedMotion()) {
+        return
+    }
+    void nextTick(() => {
+        const cards = chartsEl.value?.querySelectorAll('.metric-chart')
+        if (cards?.length) {
+            gsap.from(cards, {
+                opacity: 0,
+                y: 10,
+                duration: 0.3,
+                stagger: 0.06,
+                ease: MOTION_EASE.move,
+                clearProps: 'all',
+            })
+        }
+    })
+})
+
+const profile = computed<SshProfile | undefined>(() =>
+    config.store.profiles.find((p): p is SshProfile => p.id === props.profileId && p.type === 'ssh'))
+
 const errorState = computed(() => monitor.errors[props.profileId] ?? '')
 const series = computed(() => monitor.samples[props.profileId] ?? [])
 const cpuSeries = computed(() => series.value.map(s => s.cpuPercent))
@@ -205,7 +229,7 @@ function fmtUptime (seconds: number): string {
                     <div v-else-if="errorState" class="monitor-banner">{{ t('monitor.samplingError') }}：{{ errorState }}</div>
                     <div v-else-if="!latest" class="monitor-banner">{{ t('monitor.waiting') }}</div>
 
-                    <div v-if="latest" class="monitor-charts">
+                    <div v-if="latest" ref="chartsEl" class="monitor-charts">
                         <MetricChart :label="t('monitor.cpu')" :values="cpuSeries" color="var(--color-primary)" :max="100" />
                         <MetricChart :label="t('monitor.memory')" :values="memSeries" color="oklch(0.72 0.14 250)" :max="100" />
                         <MetricChart :label="`${t('monitor.network')} ${t('monitor.rx')}`" :values="rxSeries" color="oklch(0.75 0.14 165)" :format="fmtRate" />

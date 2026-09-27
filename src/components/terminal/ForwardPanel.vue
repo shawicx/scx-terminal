@@ -16,6 +16,7 @@ import {
 } from '@/lib/portForwarding'
 import { useTabsStore } from '@/stores/tabs'
 import type { SshProfile } from '@/stores/config'
+import { panelEnter } from '@/lib/motion'
 
 const props = defineProps<{
     /** 所属窗格的 SSH 会话 id（SshProxy.getID） */
@@ -144,7 +145,12 @@ async function onAddSubmit (rule: PortForwarding): Promise<void> {
     }
 }
 
+const panelEl = ref<HTMLDivElement>()
+
 onMounted(() => {
+    if (panelEl.value) {
+        panelEnter(panelEl.value, { from: 'right', overshoot: true })
+    }
     void init()
 })
 
@@ -155,7 +161,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div class="forward-panel">
+    <div ref="panelEl" class="forward-panel">
         <div class="forward-toolbar">
             <ArrowRightLeft :size="14" class="forward-title-icon" />
             <span class="forward-title">{{ t('forward.title') }}</span>
@@ -255,24 +261,6 @@ export default { name: 'ForwardPanel' }
     flex-direction: column;
     background: var(--color-background);
     border-left: 1px solid var(--color-border);
-    animation: 0.125s cubic-bezier(0, 0, 0.2, 1) forwardSlideIn;
-}
-
-@keyframes forwardSlideIn {
-    from {
-        transform: translateX(24px);
-        opacity: 0;
-    }
-    to {
-        transform: translateX(0);
-        opacity: 1;
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .forward-panel {
-        animation: none;
-    }
 }
 
 .forward-toolbar {

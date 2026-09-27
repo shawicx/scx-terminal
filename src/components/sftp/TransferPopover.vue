@@ -4,7 +4,7 @@
                 transfers store（订阅 Rust `sftp-transfers-changed` 全量快照）。
 -->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowDownToLine, ArrowUpFromLine, Ban, Check, FolderSearch, X } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
@@ -12,9 +12,23 @@ import { useTransfersStore } from '@/stores/transfers'
 import { cancelTransfer, clearTransfers, type TransferSnapshot } from '@/services/sftp'
 import { transferCenterOpen } from '@/services/transferCenter'
 import { etaSeconds, formatBytes, formatEta, formatSpeed } from '@/lib/sftpTransferMath'
+import { panelEnter } from '@/lib/motion'
 
 const { t } = useI18n()
 const store = useTransfersStore()
+
+const popoverEl = ref<HTMLDivElement>()
+
+// 打开时从右下角弹性浮入（关闭仍瞬卸，保持轻量）
+watch(transferCenterOpen, open => {
+    if (open) {
+        void nextTick(() => {
+            if (popoverEl.value) {
+                panelEnter(popoverEl.value, { from: 'bottom', overshoot: true })
+            }
+        })
+    }
+})
 
 const rows = computed(() => store.transfers)
 
@@ -82,7 +96,7 @@ function etaLabel (transfer: TransferSnapshot): string {
 <template>
     <Teleport to="body">
         <div v-if="transferCenterOpen" class="transfer-backdrop" @mousedown.self="close">
-            <div class="transfer-popover">
+            <div ref="popoverEl" class="transfer-popover">
                 <div class="transfer-header">
                     <span class="transfer-title">{{ t('transfer.title') }}</span>
                     <span v-if="activeCount > 0" class="transfer-active-count">{{ t('transfer.activeCount', { count: activeCount }) }}</span>
@@ -164,18 +178,6 @@ export default { name: 'TransferPopover' }
     color: var(--color-popover-foreground);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
     overflow: hidden;
-    animation: 0.15s cubic-bezier(0, 0, 0.2, 1) transferIn;
-}
-
-@keyframes transferIn {
-    from {
-        opacity: 0;
-        transform: translateY(8px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
 }
 
 @media (prefers-reduced-motion: reduce) {

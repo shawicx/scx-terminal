@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConfigStore } from '@/stores/config'
 import { useCommands, paletteOpen } from '@/services/commands'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { formatKeystrokeForDisplay } from '@/lib/hotkeys/hotkeys'
 import { fuzzyMatch } from '@/lib/utils/fuzzy'
+import { overlayEnter, overlayExit, moveHighlight } from '@/lib/motion'
 
 const { t } = useI18n()
 const { sortedCommands } = useCommands()
@@ -15,6 +16,10 @@ const query = ref('')
 const selectedIndex = ref(0)
 const inputEl = ref<HTMLInputElement>()
 const listEl = ref<HTMLDivElement>()
+const backdropEl = ref<HTMLDivElement>()
+const panelEl = ref<HTMLDivElement>()
+const highlightEl = ref<HTMLDivElement>()
+let exitTween: ReturnType<typeof overlayExit> | null = null
 
 interface PaletteItem {
     id: string
@@ -57,16 +62,67 @@ function scrollToSelected (): void {
 
 function open (): void {
     paletteOpen.value = true
+    exitTween?.kill()
+    exitTween = null
     hotkeys.disable()
     setTimeout(() => inputEl.value?.focus())
+    void nextTick(() => {
+        const backdrop = backdropEl.value
+        const panel = panelEl.value
+        if (!backdrop || !panel) {
+            return
+        }
+        const items = [...listEl.value?.querySelectorAll('.palette-item') ?? []] as HTMLElement[]
+        overlayEnter(backdrop, panel, items)
+        positionHighlight(false)
+    })
 }
 
 function close (): void {
     // 热键恢复统一由 watch(paletteOpen → false) 负责：close 与 watch 各 enable 一次
     // 会让 disabledLevel 计数每轮开-关净减 1，归零判断失效后热键永久不可用
+    if (exitTween) {
+        return
+    }
+    const backdrop = backdropEl.value
+    const panel = panelEl.value
+    if (!backdrop || !panel) {
+        finishClose()
+        return
+    }
+    exitTween = overlayExit(backdrop, panel)
+    void exitTween.then(() => {
+        exitTween = null
+        finishClose()
+    })
+}
+
+function finishClose (): void {
     paletteOpen.value = false
     query.value = ''
 }
+
+/**
+ * @description 液态高亮滑块就位：移动到当前选中条目（无选中/空列表时隐藏）
+ * @param animate false 时瞬时就位（首帧定位用）
+ * @returns void
+ *
+ */
+function positionHighlight (animate = true): void {
+    const pill = highlightEl.value
+    const target = listEl.value?.querySelector('.palette-item.selected') as HTMLElement | null
+    if (!pill) {
+        return
+    }
+    pill.style.visibility = target ? 'visible' : 'hidden'
+    if (target) {
+        moveHighlight(pill, target, animate)
+    }
+}
+
+watch([selectedIndex, items], () => {
+    positionHighlight()
+}, { flush: 'post' })
 
 function pick (index: number): void {
     const item = items.value[index]
@@ -112,8 +168,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', close))
 
 <template>
     <Teleport to="body">
-        <div v-if="paletteOpen" class="palette-backdrop" @mousedown.self="close">
-            <div class="palette">
+        <div v-if="paletteOpen" ref="backdropEl" class="palette-backdrop" @mousedown.self="close">
+            <div ref="panelEl" class="palette">
                 <input
                     ref="inputEl"
                     v-model="query"
@@ -122,6 +178,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', close))
                     @keydown="onInputKeydown"
                 />
                 <div ref="listEl" class="palette-list">
+                    <div ref="highlightEl" class="palette-highlight" aria-hidden="true"></div>
                     <button
                         v-for="(item, index) in items"
                         :key="item.id"

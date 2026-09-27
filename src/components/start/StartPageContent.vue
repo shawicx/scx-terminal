@@ -10,6 +10,7 @@ import { useI18n } from 'vue-i18n'
 import { Search, Server, Settings, SquareTerminal } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import HostCard from '@/components/start/HostCard.vue'
+import { pageEnter, pageLeave } from '@/lib/motion'
 import { buildGroupViews, buildLocalSections, filterGroupViews, filterLocalSections, recentEntries, relativeTimeBucket } from '@/lib/startPage'
 import { startCardMonitoring, stopCardMonitoring } from '@/services/monitor'
 import { connectionErrors, connectionStates, type ProfileConnectionStatus } from '@/services/sshConnections'
@@ -285,8 +286,8 @@ function recentLabel (ts: number): string {
                     <span class="recent-time">{{ recentLabel(entry.ts) }}</span>
                 </button>
             </div>
-            <!-- 分组切换过渡：key 绑定域 + 选中组，搜索过滤不触发重挂载 -->
-            <Transition name="page-fade" mode="out-in">
+            <!-- 分组切换过渡：key 绑定域 + 选中组，搜索过滤不触发重挂载；进场卡片 stagger 浮现 -->
+            <Transition :css="false" mode="out-in" @enter="(el: Element, done: () => void) => pageEnter(el, done, '.local-card, .host-card')" @leave="pageLeave">
                 <div v-if="domain === 'local'" :key="`local-${selectedLocalGroup}`" class="group-views">
                     <p v-if="visibleLocalSections.length === 0" class="empty-hint">{{ t('start.noMatch') }}</p>
                     <section v-for="section in visibleLocalSections" :key="section.group?.id ?? '__ungrouped'" class="group-section">

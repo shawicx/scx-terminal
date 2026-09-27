@@ -4,7 +4,8 @@
                 自绘实现（与 CommandPalette 同思路），不引入 reka-ui dialog。
 -->
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { overlayEnter } from '@/lib/motion'
 
 const props = defineProps<{
     /** 标题 */
@@ -17,6 +18,9 @@ const emit = defineEmits<{
     (e: 'cancel'): void
 }>()
 
+const overlayEl = ref<HTMLDivElement>()
+const panelEl = ref<HTMLDivElement>()
+
 function onKeydown (event: KeyboardEvent): void {
     if (event.key === 'Escape') {
         event.preventDefault()
@@ -26,6 +30,11 @@ function onKeydown (event: KeyboardEvent): void {
 
 onMounted(() => {
     document.addEventListener('keydown', onKeydown, true)
+    void nextTick(() => {
+        if (overlayEl.value && panelEl.value) {
+            overlayEnter(overlayEl.value, panelEl.value)
+        }
+    })
 })
 
 onBeforeUnmount(() => {
@@ -35,8 +44,8 @@ onBeforeUnmount(() => {
 
 <template>
     <Teleport to="body">
-        <div class="dialog-overlay" @mousedown.self="emit('cancel')">
-            <div class="dialog-panel" :style="props.width ? { width: `${props.width}px` } : undefined" role="dialog" :aria-label="props.title">
+        <div ref="overlayEl" class="dialog-overlay" @mousedown.self="emit('cancel')">
+            <div ref="panelEl" class="dialog-panel" :style="props.width ? { width: `${props.width}px` } : undefined" role="dialog" :aria-label="props.title">
                 <h3 class="dialog-title">{{ props.title }}</h3>
                 <div class="dialog-body">
                     <slot />
@@ -58,7 +67,6 @@ onBeforeUnmount(() => {
     align-items: center;
     justify-content: center;
     background: rgba(0, 0, 0, 0.4);
-    animation: 0.125s ease-out dialogFadeIn;
 }
 
 .dialog-panel {
@@ -69,7 +77,6 @@ onBeforeUnmount(() => {
     background: var(--color-popover);
     color: var(--color-popover-foreground);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    animation: 0.125s cubic-bezier(0, 0, 0.2, 1) dialogZoomIn;
 }
 
 .dialog-title {
@@ -88,25 +95,5 @@ onBeforeUnmount(() => {
     justify-content: flex-end;
     gap: 8px;
     margin-top: 14px;
-}
-
-@keyframes dialogFadeIn {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
-}
-
-@keyframes dialogZoomIn {
-    from {
-        transform: scale(0.96);
-        opacity: 0.4;
-    }
-    to {
-        transform: scale(1);
-        opacity: 1;
-    }
 }
 </style>

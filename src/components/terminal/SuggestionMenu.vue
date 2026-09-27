@@ -3,10 +3,11 @@
  * @description 终端建议菜单：光标下方的 overlay 列表（历史/快捷命令/路径），受控组件——
  *              状态与键盘全部由 SuggestionsController 持有，组件只渲染；空间不足时向上翻转。
  */
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Folder, History as HistoryIcon, Star } from 'lucide-vue-next'
 import type { Suggestion } from '@/lib/suggestions/types'
+import { panelEnter } from '@/lib/motion'
 
 const props = defineProps<{
     items: Suggestion[]
@@ -22,6 +23,19 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+const menuEl = ref<HTMLDivElement>()
+
+// 仅在菜单从无到有浮现时入场（打字过滤不重播，保持跟手）
+watch(() => props.items.length, (length, previous) => {
+    if (length > 0 && previous === 0) {
+        void nextTick(() => {
+            if (menuEl.value) {
+                panelEnter(menuEl.value, { from: 'bottom' })
+            }
+        })
+    }
+})
 
 const ROW_HEIGHT = 26
 const MAX_VISIBLE_ROWS = 8
@@ -51,7 +65,7 @@ function iconFor (kind: Suggestion['kind']) {
 </script>
 
 <template>
-    <div v-if="items.length" class="suggestion-menu" :style="menuStyle">
+    <div v-if="items.length" ref="menuEl" class="suggestion-menu" :style="menuStyle">
         <div
             v-for="(item, index) in items"
             :key="`${item.kind}:${item.label}:${index}`"
@@ -83,7 +97,6 @@ function iconFor (kind: Suggestion['kind']) {
     max-height: 224px;
     overflow-y: auto;
     font-size: 12px;
-    animation: 0.1s cubic-bezier(0, 0, 0.2, 1) searchFadeIn;
 }
 
 .suggestion-item {

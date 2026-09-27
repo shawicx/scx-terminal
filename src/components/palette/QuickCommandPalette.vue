@@ -8,6 +8,7 @@ import { closeQuickCommandPalette, pendingQuickCommandId, quickCommandPaletteOpe
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { fuzzyMatch } from '@/lib/utils/fuzzy'
 import { groupQuickCommandSections, parseQuickCommandParams, previewQuickCommand, renderQuickCommand } from '@/lib/quickCommands'
+import { overlayEnter, overlayExit, moveHighlight } from '@/lib/motion'
 
 const { t } = useI18n()
 const config = useConfigStore()
@@ -17,6 +18,10 @@ const query = ref('')
 const selectedIndex = ref(0)
 const inputEl = ref<HTMLInputElement>()
 const listEl = ref<HTMLDivElement>()
+const backdropEl = ref<HTMLDivElement>()
+const panelEl = ref<HTMLDivElement>()
+const highlightEl = ref<HTMLDivElement>()
+let exitTween: ReturnType<typeof overlayExit> | null = null
 /** 填参态下正在编辑的命令；null = 选择态 */
 const editing = ref<QuickCommand | null>(null)
 const paramValues = ref<Record<string, string>>({})
@@ -80,6 +85,8 @@ const editingParams = computed(() =>
 
 function open (): void {
     hotkeys.disable()
+    exitTween?.kill()
+    exitTween = null
     const pending = config.store.quickCommands.find(qc => qc.id === pendingQuickCommandId.value)
     pendingQuickCommandId.value = null
     if (pending) {
@@ -87,15 +94,64 @@ function open (): void {
     } else {
         void nextTick(() => inputEl.value?.focus())
     }
+    void nextTick(() => {
+        const backdrop = backdropEl.value
+        const panel = panelEl.value
+        if (!backdrop || !panel) {
+            return
+        }
+        const items = [...listEl.value?.querySelectorAll('.palette-item') ?? []] as HTMLElement[]
+        overlayEnter(backdrop, panel, items)
+        positionHighlight(false)
+    })
 }
 
 function close (): void {
     // 热键恢复统一由 watch(quickCommandPaletteOpen → false) 负责（双 enable 会使计数器失衡）
+    if (exitTween) {
+        return
+    }
+    const backdrop = backdropEl.value
+    const panel = panelEl.value
+    if (!backdrop || !panel) {
+        finishClose()
+        return
+    }
+    exitTween = overlayExit(backdrop, panel)
+    void exitTween.then(() => {
+        exitTween = null
+        finishClose()
+    })
+}
+
+function finishClose (): void {
     closeQuickCommandPalette()
     query.value = ''
     editing.value = null
     paramValues.value = {}
 }
+
+/**
+ * @description 液态高亮滑块就位：移动到当前选中条目（无选中/空列表/填参态隐藏）
+ * @param animate false 时瞬时就位（首帧定位用）
+ * @returns void
+ *
+ */
+function positionHighlight (animate = true): void {
+    const pill = highlightEl.value
+    const target = listEl.value?.querySelector('.palette-item.selected') as HTMLElement | null
+    if (!pill) {
+        return
+    }
+    pill.style.visibility = target ? 'visible' : 'hidden'
+    if (target) {
+        moveHighlight(pill, target, animate)
+    }
+}
+
+watch([selectedIndex, visibleItems], () => {
+    positionHighlight()
+}, { flush: 'post' })
 
 /**
  * @description 进入填参态：记录命令并初始化参数值（全部置空），聚焦第一个输入框
@@ -113,30 +169,51 @@ function enterFillParams (quickCommand: QuickCommand): void {
 }
 
 /**
- * @description 渲染模板并向当前活动窗格发送（无活动窗格时静默跳过），随后关闭选择器
+ * @description 渲染模板并向活动窗格发送（无活动终端标签时先打开默认终端再发送），随后关闭选择器
  * @param quickCommand 目标命令
- * @returns void
+ * @returns Promise<void>
  *
- * @example send(quickCommand)
+ * @example void send(quickCommand)
  *
  */
-function send (quickCommand: QuickCommand): void {
+async function send (quickCommand: QuickCommand): Promise<void> {
     const rendered = renderQuickCommand(quickCommand.command, paramValues.value)
-    terminalTabApi.current?.sendTextToActivePane(rendered, quickCommand.autoRun)
     close()
+    if (!await ensureTerminalTab()) {
+        return
+    }
+    terminalTabApi.current?.sendTextToActivePane(rendered, quickCommand.autoRun)
 }
 
 /**
- * @description 选中一条命令：无活动终端标签时忽略（条目已灰显）；有占位参数则进填参态，
- *              否则直接发送
+ * @description 确保有活动终端标签可接收命令：无则打开默认终端并等待注册
+ *              （连接中心/设置页等非终端标签场景直接可用），注册后再等
+ *              新窗格会话启动完成，避免写入丢失
+ * @returns Promise<boolean> 是否就绪
+ *
+ */
+async function ensureTerminalTab (): Promise<boolean> {
+    if (terminalTabApi.current) {
+        return true
+    }
+    tabs.openTerminalTab()
+    for (let i = 0; i < 80 && !terminalTabApi.current; i++) {
+        await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    if (!terminalTabApi.current) {
+        return false
+    }
+    await new Promise(resolve => setTimeout(resolve, 400))
+    return true
+}
+
+/**
+ * @description 选中一条命令：有占位参数则进填参态，否则关闭选择器并直接发送
  * @param index 过滤后扁平列表中的索引
  * @returns void
  *
  */
 function pick (index: number): void {
-    if (!terminalTabApi.current) {
-        return
-    }
     const item = visibleItems.value[index]
     if (!item) {
         return
@@ -144,7 +221,7 @@ function pick (index: number): void {
     if (parseQuickCommandParams(item.quickCommand.command).length) {
         enterFillParams(item.quickCommand)
     } else {
-        send(item.quickCommand)
+        void send(item.quickCommand)
     }
 }
 
@@ -188,7 +265,7 @@ function onParamKeydown (event: KeyboardEvent): void {
     } else if (event.key === 'Enter') {
         event.preventDefault()
         if (editing.value) {
-            send(editing.value)
+            void send(editing.value)
         }
     } else if (event.key.toLowerCase() === 'r' && (event.metaKey || event.ctrlKey) && event.shiftKey) {
         // toggle closed with the same combo that opened it
@@ -208,8 +285,8 @@ watch(quickCommandPaletteOpen, value => {
 
 <template>
     <Teleport to="body">
-        <div v-if="quickCommandPaletteOpen" class="palette-backdrop" @mousedown.self="close">
-            <div class="palette">
+        <div v-if="quickCommandPaletteOpen" ref="backdropEl" class="palette-backdrop" @mousedown.self="close">
+            <div ref="panelEl" class="palette">
                 <template v-if="!editing">
                     <input
                         ref="inputEl"
@@ -219,14 +296,14 @@ watch(quickCommandPaletteOpen, value => {
                         @keydown="onInputKeydown"
                     />
                     <div ref="listEl" class="palette-list">
+                        <div ref="highlightEl" class="palette-highlight" aria-hidden="true"></div>
                         <template v-for="section in visibleSections" :key="section.title ?? '__ungrouped'">
                             <div v-if="section.title" class="palette-section-title">{{ section.title }}</div>
                             <button
                                 v-for="item in section.items"
                                 :key="item.quickCommand.id"
                                 class="palette-item"
-                                :class="{ selected: item.flatIndex === selectedIndex && terminalTabApi.current }"
-                                :disabled="!terminalTabApi.current"
+                                :class="{ selected: item.flatIndex === selectedIndex }"
                                 @click="pick(item.flatIndex)"
                                 @mousemove="selectedIndex = item.flatIndex"
                             >
