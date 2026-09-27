@@ -133,7 +133,9 @@ export function pageLeave (el: Element, done: () => void): void {
 }
 
 /**
- * @description 液态高亮滑块移动：把滑块补间到目标条目的位置与高度（条目间流动滑移）
+ * @description 液态高亮滑块移动：把滑块补间到目标条目的位置与尺寸（条目间流动滑移）。
+ *              同时补间 x/y：横向分段条（页签）沿 x 滑移，纵向列表（命令面板）
+ *              offsetLeft 恒 0 不受影响。
  * @param pill 高亮滑块元素（absolute 定位于列表容器内）
  * @param target 目标条目元素（offsetParent 必须是列表容器）
  * @param animate false 时瞬时就位（首帧定位/过滤重排用）
@@ -143,13 +145,14 @@ export function pageLeave (el: Element, done: () => void): void {
  *
  */
 export function moveHighlight (pill: HTMLElement, target: HTMLElement, animate = true): void {
+    const x = target.offsetLeft
     const y = target.offsetTop
     const height = target.offsetHeight
     const width = target.offsetWidth
     if (animate) {
-        gsap.to(pill, { y, height, width, duration: 0.2, ease: MOTION_EASE.move })
+        gsap.to(pill, { x, y, height, width, duration: 0.2, ease: MOTION_EASE.move })
     } else {
-        gsap.set(pill, { y, height, width })
+        gsap.set(pill, { x, y, height, width })
     }
 }
 

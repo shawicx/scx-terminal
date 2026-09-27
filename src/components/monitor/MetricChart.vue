@@ -3,6 +3,8 @@
               store 环形缓冲负责），当前值叠加在右上角；null 按 0 绘制。
               GSAP：采样更新经数值插值补间（曲线连续流动、当前值滚动、
               y 轴自适应缩放平滑）；首次出线自左向右画出；每次采样面积轻微脉动。
+              视觉：纵向渐变面积 + 细线 sparkline，可选 sub 副信息行（如内存
+              已用/总量），渐变 id 按实例唯一避免多图串色。
 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
@@ -23,13 +25,19 @@ const props = withDefaults(defineProps<{
     unit?: string
     /** 当前值自定义格式化（如网络速率自动单位）；提供时优先于 unit 拼接 */
     format?: (v: number) => string
+    /** 副信息行（图下小字，如内存已用/总量） */
+    sub?: string
 }>(), {
     color: 'var(--color-primary)',
     height: 120,
     max: undefined,
     unit: '%',
     format: undefined,
+    sub: undefined,
 })
+
+/** 实例唯一渐变 id：多图共存时各引用自己的 defs */
+const uid = `metric-chart-grad-${Math.random().toString(36).slice(2, 9)}`
 
 /** 展示序列：采样到达时从当前展示值向新值补间（曲线流动的载体）；null 按 0 绘制（原语义） */
 const displayValues = ref<number[]>(props.values.map(v => v ?? 0))
@@ -137,7 +145,7 @@ function drawLineOnce (): void {
 }
 
 /**
- * @description 采样脉动：面积透明度轻微起伏后回落（保持克制）
+ * @description 采样脉动：渐变面积整体透明度轻微起伏后回落（保持克制）
  * @returns void
  *
  */
@@ -147,8 +155,8 @@ function pulseArea (): void {
         return
     }
     gsap.fromTo(area,
-        { opacity: 0.18 },
-        { opacity: 0.26, duration: 0.2, yoyo: true, repeat: 1, ease: 'power1.inOut', clearProps: 'opacity' })
+        { opacity: 0.72 },
+        { opacity: 1, duration: 0.2, yoyo: true, repeat: 1, ease: 'power1.inOut', clearProps: 'opacity' })
 }
 
 watch(() => !!points.value, has => {
@@ -175,10 +183,17 @@ onBeforeUnmount(() => {
             preserveAspectRatio="none"
             :style="{ height: height + 'px' }"
         >
+            <defs>
+                <linearGradient :id="uid" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" :style="{ stopColor: color, stopOpacity: 0.32 }" />
+                    <stop offset="100%" :style="{ stopColor: color, stopOpacity: 0.02 }" />
+                </linearGradient>
+            </defs>
             <line v-for="g in [25, 50, 75]" :key="g" class="grid" x1="0" :y1="g" x2="100" :y2="g" />
-            <path v-if="areaPath" ref="areaEl" class="area" :d="areaPath" :style="{ fill: color }" />
+            <path v-if="areaPath" ref="areaEl" class="area" :d="areaPath" :fill="`url(#${uid})`" />
             <polyline v-if="points" ref="lineEl" class="line" :points="points" :style="{ stroke: color }" />
         </svg>
+        <div v-if="sub" class="metric-chart-sub">{{ sub }}</div>
     </div>
 </template>
 
@@ -187,7 +202,7 @@ onBeforeUnmount(() => {
     background: var(--color-card);
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
-    padding: 8px 10px 6px;
+    padding: 8px 10px 7px;
     position: relative;
 }
 .metric-chart-head {
@@ -198,27 +213,43 @@ onBeforeUnmount(() => {
 }
 .metric-chart-label {
     color: var(--color-muted-foreground);
-    font-size: 11px;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
 }
 .metric-chart-value {
     font-family: var(--font-mono);
     font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    margin-left: 8px;
 }
 .metric-chart-svg {
     display: block;
     width: 100%;
 }
 .grid {
+    opacity: 0.55;
     stroke: var(--color-border);
     stroke-width: 0.4;
     vector-effect: non-scaling-stroke;
 }
 .area {
-    opacity: 0.18;
+    opacity: 1;
 }
 .line {
     fill: none;
     stroke-width: 1.5;
     vector-effect: non-scaling-stroke;
+}
+.metric-chart-sub {
+    color: var(--color-muted-foreground);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    margin-top: 4px;
+    text-align: right;
 }
 </style>
