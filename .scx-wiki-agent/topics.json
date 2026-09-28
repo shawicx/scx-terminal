@@ -1,0 +1,20 @@
+[
+  {
+    "id": "frontends-middleware-services",
+    "title": "frontends · middleware · services 跨模块协作",
+    "files": [
+      "src/services/sshConnections.ts",
+      "src/lib/suggestions/promptTracker.ts",
+      "src/services/hotkeys.ts",
+      "src/lib/middleware/oscProcessing.ts",
+      "src/lib/frontends/xterm/renderer.ts",
+      "src/services/pathCompletion.ts",
+      "src/lib/frontends/xterm/support.ts",
+      "src/lib/middleware/inputProcessing.ts",
+      "src/lib/middleware/middleware.ts",
+      "src/lib/sessions/sshSession.ts",
+      "src/lib/sessions/localSession.ts",
+      "src/lib/frontends/xterm/resize.ts"
+    ]
+  }
+]
