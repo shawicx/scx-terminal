@@ -171,6 +171,8 @@ export const panels = {
         rename: 'Rename',
         close: 'Close tab',
         closeOthers: 'Close other tabs',
+        scrollLeft: 'Scroll tabs left',
+        scrollRight: 'Scroll tabs right',
         bellBody: 'Terminal bell',
         defaultProfile: 'Default',
         moveToGroup: 'Move to group',

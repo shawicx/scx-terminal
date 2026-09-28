@@ -171,6 +171,8 @@ export const panels = {
         rename: '重命名',
         close: '关闭标签页',
         closeOthers: '关闭其他标签页',
+        scrollLeft: '向左滚动标签',
+        scrollRight: '向右滚动标签',
         bellBody: '终端响铃',
         defaultProfile: '默认',
         moveToGroup: '移入分组',

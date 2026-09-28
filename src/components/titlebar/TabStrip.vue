@@ -7,13 +7,18 @@
  *              内容区下方。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ChevronDown, Plus, X } from 'lucide-vue-next'
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, X } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useTabsStore, type Tab } from '@/stores/tabs'
 import { useConfigStore, type TabGroup } from '@/stores/config'
 import { terminalTabApi } from '@/services/terminalTabsApi'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
-import { getTabStripWheelDelta, resolveActiveTabScrollLeft } from './tabStripLayout'
+import {
+    getTabStripWheelDelta,
+    resolveActiveTabScrollLeft,
+    resolveArrowScrollTarget,
+    resolveTabOverflowState,
+} from './tabStripLayout'
 import { activeAfterCollapse, displaySequence, groupOf } from './tabGroupLayout'
 import { useTabDnd } from './useTabDnd'
 import { TAB_COLORS } from '@/lib/tabColors'
@@ -31,6 +36,52 @@ const store = useTabsStore()
 const config = useConfigStore()
 
 const tabsRegionEl = ref<HTMLElement>()
+
+/** 左侧还有被裁切的标签（左箭头与左缘渐隐的显隐依据） */
+const canScrollLeft = ref(false)
+/** 右侧还有被裁切的标签（右箭头与右缘渐隐的显隐依据） */
+const canScrollRight = ref(false)
+/** 标签区宽度观察器：箭头按钮占位/释放会改变区域宽度，需随之重算溢出态 */
+let regionResizeObserver: ResizeObserver | undefined
+
+/**
+ * @description 依据滚动区实时度量刷新溢出方向状态（箭头与渐隐显隐的唯一来源）
+ * @returns void
+ *
+ */
+function updateOverflowState (): void {
+    const region = tabsRegionEl.value
+    if (!region) {
+        return
+    }
+    const state = resolveTabOverflowState({
+        scrollLeft: region.scrollLeft,
+        viewportWidth: region.clientWidth,
+        scrollWidth: region.scrollWidth,
+    })
+    canScrollLeft.value = state.canScrollLeft
+    canScrollRight.value = state.canScrollRight
+}
+
+/**
+ * @description 箭头按钮点击滚动：按 0.75 视口步长平滑滚动（resolveArrowScrollTarget 钳制边界）
+ * @param direction 1 = 向右（后续标签），-1 = 向左（之前的标签）
+ * @returns void
+ *
+ */
+function scrollTabsBy (direction: 1 | -1): void {
+    const region = tabsRegionEl.value
+    if (!region) {
+        return
+    }
+    const target = resolveArrowScrollTarget({
+        direction,
+        scrollLeft: region.scrollLeft,
+        step: Math.round(region.clientWidth * 0.75),
+        maxScrollLeft: region.scrollWidth - region.clientWidth,
+    })
+    region.scrollTo({ left: target, behavior: 'smooth' })
+}
 
 /** 展示序列（模板唯一渲染源）：组 chip 按定义序在前，未分组标签在后；折叠组成员隐藏（spec：折叠行为 = 成员隐藏） */
 const displayItems = computed(() =>
@@ -61,6 +112,7 @@ function onTabsWheel (event: WheelEvent): void {
 
     event.preventDefault()
     region.scrollLeft += delta
+    updateOverflowState()
 }
 
 /**
@@ -82,7 +134,7 @@ function scrollActiveTabIntoView (): void {
 
     const regionRect = region.getBoundingClientRect()
     const tabRect = tab.getBoundingClientRect()
-    region.scrollLeft = resolveActiveTabScrollLeft({
+    const target = resolveActiveTabScrollLeft({
         scrollLeft: region.scrollLeft,
         viewportWidth: region.clientWidth,
         tabStart: tabRect.left - regionRect.left + region.scrollLeft,
@@ -90,21 +142,39 @@ function scrollActiveTabIntoView (): void {
         padding: 4,
         rightReserve: region.scrollWidth > region.clientWidth ? NEW_TAB_BUTTON_RESERVE : 0,
     })
+    // 平滑滚入：切换标签时视口跟随移动而非瞬跳；滚轮路径不受影响（直改 scrollLeft 保持即时响应）
+    if (target !== region.scrollLeft) {
+        region.scrollTo({ left: target, behavior: 'smooth' })
+    }
 }
 
 watch(() => [store.activeId, store.tabs.length] as const, () => {
     void nextTick(scrollActiveTabIntoView)
 })
 
+// 标签增删/分组折叠改变内容总宽，重算箭头与渐隐显隐
+watch(displayItems, () => {
+    void nextTick(updateOverflowState)
+})
+
 onMounted(() => {
     scrollActiveTabIntoView()
+    updateOverflowState()
     window.addEventListener('resize', scrollActiveTabIntoView)
+    window.addEventListener('resize', updateOverflowState)
     tabsRegionEl.value?.addEventListener('wheel', onTabsWheel, { passive: false })
+    tabsRegionEl.value?.addEventListener('scroll', updateOverflowState)
+    regionResizeObserver = new ResizeObserver(() => updateOverflowState())
+    regionResizeObserver.observe(tabsRegionEl.value!)
 })
 
 onBeforeUnmount(() => {
     window.removeEventListener('resize', scrollActiveTabIntoView)
+    window.removeEventListener('resize', updateOverflowState)
     tabsRegionEl.value?.removeEventListener('wheel', onTabsWheel)
+    tabsRegionEl.value?.removeEventListener('scroll', updateOverflowState)
+    regionResizeObserver?.disconnect()
+    regionResizeObserver = undefined
 })
 
 const {
@@ -311,13 +381,24 @@ function onAuxClick (id: string, event: MouseEvent) {
 
 <template>
     <div class="tab-strip" :class="position === 'bottom' ? 'tab-strip--bottom' : 'tab-strip--inline'">
-        <div
-            ref="tabsRegionEl"
-            class="tabs-region"
-            data-tauri-drag-region
-            @dragover.prevent
-            @drop="onRegionDrop"
-        >
+        <!-- 滚动区包装：承载箭头按钮（在流内，位于标签区两侧，不遮挡 sticky「+」）与边缘渐隐遮罩 -->
+        <div class="tabs-region-wrap" :class="{ 'overflow-left': canScrollLeft, 'overflow-right': canScrollRight }">
+            <button
+                v-if="canScrollLeft"
+                class="tab-scroll-arrow"
+                :title="t('tab.scrollLeft')"
+                :aria-label="t('tab.scrollLeft')"
+                @click="scrollTabsBy(-1)"
+            >
+                <ChevronLeft :size="14" />
+            </button>
+            <div
+                ref="tabsRegionEl"
+                class="tabs-region"
+                data-tauri-drag-region
+                @dragover.prevent
+                @drop="onRegionDrop"
+            >
             <template v-for="item in displayItems" :key="item.kind === 'chip' ? `chip-${item.group.id}` : item.tab.id">
                 <!-- 分组头 chip：非标签元素，不受标签定宽约束；点击折叠/展开，拖入即归组 -->
                 <ContextMenu
@@ -404,6 +485,17 @@ function onAuxClick (id: string, event: MouseEvent) {
             <!-- 「+」随标签排布：未溢出时紧跟最后一个标签，溢出后 sticky 吸附标签区右缘 -->
             <button class="new-tab-button" :title="t('commands.newTab')" @click="onNewTabClick">
                 <Plus :size="16" />
+            </button>
+            </div>
+
+            <button
+                v-if="canScrollRight"
+                class="tab-scroll-arrow"
+                :title="t('tab.scrollRight')"
+                :aria-label="t('tab.scrollRight')"
+                @click="scrollTabsBy(1)"
+            >
+                <ChevronRight :size="14" />
             </button>
         </div>
 

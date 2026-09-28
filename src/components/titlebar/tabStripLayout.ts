@@ -10,6 +10,51 @@ export interface TabWheelDeltaInput {
     viewportWidth: number
 }
 
+export interface TabOverflowStateInput {
+    scrollLeft: number
+    viewportWidth: number
+    scrollWidth: number
+}
+
+export interface ArrowScrollInput {
+    /** 滚动方向：1 = 向右（看后续标签），-1 = 向左（看之前的标签） */
+    direction: 1 | -1
+    scrollLeft: number
+    /** 单次箭头点击的滚动步长（像素） */
+    step: number
+    /** 最大可滚动位置（scrollWidth - viewportWidth） */
+    maxScrollLeft: number
+}
+
+/**
+ * @description 判定标签栏溢出方向（左/右箭头与边缘渐隐的显隐依据）；亚像素误差容差 1px
+ * @param input 滚动位置、视口宽度与内容总宽
+ * @returns { canScrollLeft, canScrollRight } 两个方向是否还可滚动
+ *
+ * @example resolveTabOverflowState({ scrollLeft: 0, viewportWidth: 800, scrollWidth: 1200 }) // => { canScrollLeft: false, canScrollRight: true }
+ *
+ */
+export function resolveTabOverflowState (input: TabOverflowStateInput): { canScrollLeft: boolean, canScrollRight: boolean } {
+    const overflowed = input.scrollWidth > input.viewportWidth + 1
+    return {
+        canScrollLeft: overflowed && input.scrollLeft > 1,
+        canScrollRight: overflowed && input.scrollLeft < input.scrollWidth - input.viewportWidth - 1,
+    }
+}
+
+/**
+ * @description 计算箭头按钮点击后的目标滚动位置（按步长推进并钳制到 [0, max]）
+ * @param input 方向、当前滚动位置、步长与最大可滚动位置
+ * @returns number 应滚动到的 scrollLeft
+ *
+ * @example resolveArrowScrollTarget({ direction: 1, scrollLeft: 0, step: 600, maxScrollLeft: 400 }) // => 400
+ *
+ */
+export function resolveArrowScrollTarget (input: ArrowScrollInput): number {
+    const raw = input.scrollLeft + input.direction * input.step
+    return Math.min(Math.max(raw, 0), Math.max(input.maxScrollLeft, 0))
+}
+
 export interface ActiveTabScrollInput {
     scrollLeft: number
     viewportWidth: number

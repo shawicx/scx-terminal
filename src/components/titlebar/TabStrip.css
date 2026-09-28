@@ -14,12 +14,57 @@
     user-select: none;
 }
 
+/* 滚动区包装：top 模式下作为 title-bar 的 flex 子项参与布局（原 tabs-region 的 max-width 职责上移至此）；
+   相对定位用于承载两侧渐隐遮罩；箭头按钮在流内紧贴标签区两侧，不遮挡 sticky「+」 */
+.tabs-region-wrap {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    min-width: 0;
+    max-width: 70%;
+}
+
+/* 两侧渐隐遮罩：溢出方向提示「下方还有被裁切的标签」，与箭头显隐同步；不拦截鼠标（title hover 仍可用） */
+.tabs-region-wrap::before,
+.tabs-region-wrap::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 28px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    z-index: 1;
+}
+
+.tabs-region-wrap::before {
+    /* 偏移一个箭头宽度，从箭头右缘开始渐隐（箭头 20px，见 .tab-scroll-arrow） */
+    left: 20px;
+    background: linear-gradient(to right, var(--color-card), transparent);
+}
+
+.tabs-region-wrap::after {
+    right: 20px;
+    background: linear-gradient(to left, var(--color-card), transparent);
+}
+
+.tabs-region-wrap.overflow-left::before,
+.tabs-region-wrap.overflow-right::after {
+    opacity: 1;
+}
+
+/* bottom 模式镜像：标签贴顶 */
+.tab-strip--bottom .tabs-region-wrap {
+    align-items: flex-start;
+}
+
 .tabs-region {
     display: flex;
     align-items: flex-end;
     gap: 2px;
     padding: 0 4px;
-    max-width: 70%;
+    flex: 1 1 auto;
     min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
@@ -33,6 +78,37 @@
 
 .tab-strip--bottom .tabs-region {
     align-items: flex-start;
+}
+
+/* 溢出滚动箭头：对齐标签带（与「+」同款几何），点击平滑滚动 0.75 视口 */
+.tab-scroll-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 28px;
+    align-self: flex-end;
+    margin-bottom: 3px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 6px;
+    background: var(--color-card);
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    z-index: 2;
+    transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+.tab-scroll-arrow:hover {
+    background: var(--color-accent);
+    color: var(--color-accent-foreground);
+}
+
+/* bottom 模式镜像：对齐标签带上缘 */
+.tab-strip--bottom .tab-scroll-arrow {
+    align-self: flex-start;
+    margin-top: 3px;
+    margin-bottom: 0;
 }
 
 .tab-header {
@@ -49,20 +125,20 @@
     color: var(--color-muted-foreground);
     cursor: pointer;
     position: relative;
-    /* 定宽（默认即最小宽度），标题超长省略：标题随 shell/目录上报变化时不引起标签宽度抖动；激活态 200px 见 .tab-header.active */
-    width: 160px;
-    min-width: 160px;
-    /* min-width 必须与 width 同帧过渡：激活时 min-width 先行跳变会压制 width 动画，
-       造成「变宽瞬跳、变窄平滑」的不对称 */
-    transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease, width 0.25s ease, min-width 0.25s ease;
+    /* 弹性收缩（Chrome/Edge 标签模式）：基准宽 160px（标题超长省略），空间不足时随标签数增多
+       平滑收缩，触底 120px 后才进入横向滚动——把「滚动」尽量推迟到标签真正放不下为止；
+       基准宽不随标题变化，保留标题抖动免疫。激活态基准 200px 见 .tab-header.active */
+    flex: 0 1 160px;
+    min-width: 120px;
+    /* 只过渡 flex-basis：min-width 恒定，激活态宽度变化单帧动画即可对称过渡 */
+    transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease, flex-basis 0.25s ease;
 }
 
-/* 激活标签与内容区连通：背景取内容区底色，侧/顶描边 + 下探 1px 盖住标题栏底边线；加宽至 200px 突出当前标签 */
+/* 激活标签与内容区连通：背景取内容区底色，侧/顶描边 + 下探 1px 盖住标题栏底边线；加宽基准 200px 突出当前标签 */
 .tab-header.active {
     height: 33px;
     margin-bottom: -1px;
-    width: 200px;
-    min-width: 200px;
+    flex-basis: 200px;
     background: var(--color-background);
     color: var(--color-foreground);
     border-color: var(--color-border);
@@ -191,6 +267,8 @@
     background: var(--color-card);
     color: var(--color-muted-foreground);
     cursor: pointer;
+    /* 抬到渐隐遮罩（z-index:1）之上，sticky 吸附时不被右缘遮罩盖住 */
+    z-index: 2;
     transition: background-color 0.25s ease, color 0.25s ease;
 }
 
