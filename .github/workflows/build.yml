@@ -136,9 +136,11 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          # releaseId 与 tagName 不能同时传入：前者直接指定 release，后者会让
+          # action 尝试按 tag 查找/创建 release，曾导致已发布 release 变成 untagged-*；
+          # tag 关联已由前置 Create draft release 的 tag_name 决定
           releaseId: ${{ needs.changelog.outputs.release_id }}
           releaseBody: ${{ needs.changelog.outputs.release_notes }}
-          tagName: ${{ github.ref_name }}
           args: ${{ matrix.args }}
 
   # 全平台产物就绪后才把 draft 转正式发布；部分失败时 draft 保留，re-run all jobs 即可重新走完整流程
