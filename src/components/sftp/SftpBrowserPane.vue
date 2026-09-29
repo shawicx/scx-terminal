@@ -363,7 +363,8 @@ defineExpose({
             </Button>
             <div v-if="!editing" class="pane-path" :title="path" @click="startEdit">
                 <template v-for="(crumb, index) in crumbs" :key="crumb.path">
-                    <span v-if="index > 0" class="crumb-sep">/</span>
+                    <!-- 根节点本身显示 /，之后首个目录不再额外拼接分隔符，避免渲染成 //Users -->
+                    <span v-if="index > 1" class="crumb-sep">/</span>
                     <button class="crumb" :class="{ last: index === crumbs.length - 1 }" @click.stop="navigate(crumb.path)">
                         {{ crumb.label }}
                     </button>
