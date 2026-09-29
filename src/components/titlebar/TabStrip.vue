@@ -1,13 +1,12 @@
 <script setup lang="ts">
 /**
  * @description 标签条：分组头 chip（折叠/拖拽入组/右键菜单）+ 标签列表（右键菜单/行内
- *              重命名/颜色标记/拖拽归组排序）+「+」直接按默认档案开新标签（其他档案
- *              走连接中心）。top 模式内嵌 TitleBar（display:contents 不引入额外盒子），
- *              bottom 模式独立成条（圆角/描边/激活下探方向全部翻转），由 App.vue 挂在
- *              内容区下方。
+ *              重命名/颜色标记/拖拽归组排序）+ 切换器/「+」入口。top 模式内嵌 TitleBar
+ *              （display:contents 不引入额外盒子），bottom 模式独立成条（圆角/描边/
+ *              激活下探方向全部翻转），由 App.vue 挂在内容区下方。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ChevronDown, ChevronLeft, ChevronRight, Plus, X } from 'lucide-vue-next'
+import { ChevronDown, List, Plus, X } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useTabsStore, type Tab } from '@/stores/tabs'
 import { useConfigStore, type TabGroup } from '@/stores/config'
@@ -16,15 +15,15 @@ import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMe
 import {
     getTabStripWheelDelta,
     resolveActiveTabScrollLeft,
-    resolveArrowScrollTarget,
     resolveTabOverflowState,
 } from './tabStripLayout'
 import { activeAfterCollapse, displaySequence, groupOf } from './tabGroupLayout'
 import { useTabDnd } from './useTabDnd'
 import { TAB_COLORS } from '@/lib/tabColors'
+import { openTabSwitcher } from '@/services/tabSwitcher'
 
-/** 「+」按钮占用的横向空间（宽 26 + 左右边距各 2 + flex 间隙 2），滚动活动标签到可见区时右侧需让开 */
-const NEW_TAB_BUTTON_RESERVE = 32
+/** 标签条右侧 sticky 操作区宽度（切换器 + 新建标签），滚动活动标签到可见区时右侧需让开 */
+const TAB_STRIP_ACTIONS_RESERVE = 66
 
 withDefaults(defineProps<{
     /** 标签条位置：top = 内嵌标题栏（默认），bottom = 独立成条置于内容区下方 */
@@ -37,15 +36,15 @@ const config = useConfigStore()
 
 const tabsRegionEl = ref<HTMLElement>()
 
-/** 左侧还有被裁切的标签（左箭头与左缘渐隐的显隐依据） */
+/** 左侧还有被裁切的标签（左缘渐隐的显隐依据） */
 const canScrollLeft = ref(false)
-/** 右侧还有被裁切的标签（右箭头与右缘渐隐的显隐依据） */
+/** 右侧还有被裁切的标签（右缘渐隐的显隐依据） */
 const canScrollRight = ref(false)
-/** 标签区宽度观察器：箭头按钮占位/释放会改变区域宽度，需随之重算溢出态 */
+/** 标签区宽度观察器：容器尺寸变化后需重算溢出态 */
 let regionResizeObserver: ResizeObserver | undefined
 
 /**
- * @description 依据滚动区实时度量刷新溢出方向状态（箭头与渐隐显隐的唯一来源）
+ * @description 依据滚动区实时度量刷新溢出方向状态（渐隐显隐的唯一来源）
  * @returns void
  *
  */
@@ -61,26 +60,6 @@ function updateOverflowState (): void {
     })
     canScrollLeft.value = state.canScrollLeft
     canScrollRight.value = state.canScrollRight
-}
-
-/**
- * @description 箭头按钮点击滚动：按 0.75 视口步长平滑滚动（resolveArrowScrollTarget 钳制边界）
- * @param direction 1 = 向右（后续标签），-1 = 向左（之前的标签）
- * @returns void
- *
- */
-function scrollTabsBy (direction: 1 | -1): void {
-    const region = tabsRegionEl.value
-    if (!region) {
-        return
-    }
-    const target = resolveArrowScrollTarget({
-        direction,
-        scrollLeft: region.scrollLeft,
-        step: Math.round(region.clientWidth * 0.75),
-        maxScrollLeft: region.scrollWidth - region.clientWidth,
-    })
-    region.scrollTo({ left: target, behavior: 'smooth' })
 }
 
 /** 展示序列（模板唯一渲染源）：组 chip 按定义序在前，未分组标签在后；折叠组成员隐藏（spec：折叠行为 = 成员隐藏） */
@@ -140,7 +119,7 @@ function scrollActiveTabIntoView (): void {
         tabStart: tabRect.left - regionRect.left + region.scrollLeft,
         tabEnd: tabRect.right - regionRect.left + region.scrollLeft,
         padding: 4,
-        rightReserve: region.scrollWidth > region.clientWidth ? NEW_TAB_BUTTON_RESERVE : 0,
+        rightReserve: region.scrollWidth > region.clientWidth ? TAB_STRIP_ACTIONS_RESERVE : 0,
     })
     // 平滑滚入：切换标签时视口跟随移动而非瞬跳；滚轮路径不受影响（直改 scrollLeft 保持即时响应）
     if (target !== region.scrollLeft) {
@@ -152,7 +131,7 @@ watch(() => [store.activeId, store.tabs.length] as const, () => {
     void nextTick(scrollActiveTabIntoView)
 })
 
-// 标签增删/分组折叠改变内容总宽，重算箭头与渐隐显隐
+// 标签增删/分组折叠改变内容总宽，重算渐隐显隐
 watch(displayItems, () => {
     void nextTick(updateOverflowState)
 })
@@ -381,17 +360,8 @@ function onAuxClick (id: string, event: MouseEvent) {
 
 <template>
     <div class="tab-strip" :class="position === 'bottom' ? 'tab-strip--bottom' : 'tab-strip--inline'">
-        <!-- 滚动区包装：承载箭头按钮（在流内，位于标签区两侧，不遮挡 sticky「+」）与边缘渐隐遮罩 -->
+        <!-- 滚动区包装：承载边缘渐隐遮罩 -->
         <div class="tabs-region-wrap" :class="{ 'overflow-left': canScrollLeft, 'overflow-right': canScrollRight }">
-            <button
-                v-if="canScrollLeft"
-                class="tab-scroll-arrow"
-                :title="t('tab.scrollLeft')"
-                :aria-label="t('tab.scrollLeft')"
-                @click="scrollTabsBy(-1)"
-            >
-                <ChevronLeft :size="14" />
-            </button>
             <div
                 ref="tabsRegionEl"
                 class="tabs-region"
@@ -482,21 +452,22 @@ function onAuxClick (id: string, event: MouseEvent) {
                 </ContextMenu>
             </template>
 
-            <!-- 「+」随标签排布：未溢出时紧跟最后一个标签，溢出后 sticky 吸附标签区右缘 -->
-            <button class="new-tab-button" :title="t('commands.newTab')" @click="onNewTabClick">
-                <Plus :size="16" />
-            </button>
+            <!-- 切换器 +「+」随标签排布：未溢出时紧跟最后一个标签，溢出后整组吸附右缘 -->
+            <div class="tab-strip-actions">
+                <button
+                    class="tab-switcher-button"
+                    :title="t('commands.tabSwitcher')"
+                    :aria-label="t('commands.tabSwitcher')"
+                    @click="openTabSwitcher"
+                >
+                    <List :size="15" />
+                </button>
+                <button class="new-tab-button" :title="t('commands.newTab')" @click="onNewTabClick">
+                    <Plus :size="16" />
+                </button>
+            </div>
             </div>
 
-            <button
-                v-if="canScrollRight"
-                class="tab-scroll-arrow"
-                :title="t('tab.scrollRight')"
-                :aria-label="t('tab.scrollRight')"
-                @click="scrollTabsBy(1)"
-            >
-                <ChevronRight :size="14" />
-            </button>
         </div>
 
         <!-- 条尾余白拖拽区（双击缩放交给 Tauri 原生 drag-region） -->

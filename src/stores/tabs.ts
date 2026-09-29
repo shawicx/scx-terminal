@@ -35,6 +35,8 @@ export const useTabsStore = defineStore('tabs', {
     state: () => ({
         tabs: [] as Tab[],
         activeId: null as string | null,
+        /** 标签最近使用顺序（新→旧；非持久化，仅当前应用会话内有效） */
+        recentIds: [] as string[],
         /** 后台标签的响铃未读标记（tabId → true；非持久化，切换/关闭标签时清除） */
         alerts: {} as Record<string, true>,
     }),
@@ -76,7 +78,7 @@ export const useTabsStore = defineStore('tabs', {
                 ...(group ? { groupId: group.id } : {}),
             }
             this.tabs.push(tab)
-            this.activeId = tab.id
+            this.activate(tab.id)
             return tab
         },
         /**
@@ -91,7 +93,7 @@ export const useTabsStore = defineStore('tabs', {
         openSettingsTab (initialPage?: SettingsPageId): Tab {
             const existing = this.tabs.find(t => t.type === 'settings')
             if (existing) {
-                this.activeId = existing.id
+                this.activate(existing.id)
                 return existing
             }
             const tab: Tab = {
@@ -101,7 +103,7 @@ export const useTabsStore = defineStore('tabs', {
                 ...(initialPage ? { initialPage } : {}),
             }
             this.tabs.push(tab)
-            this.activeId = tab.id
+            this.activate(tab.id)
             return tab
         },
         /**
@@ -122,7 +124,7 @@ export const useTabsStore = defineStore('tabs', {
                 profileId,
             }
             this.tabs.push(tab)
-            this.activeId = tab.id
+            this.activate(tab.id)
             return tab
         },
         /**
@@ -136,7 +138,7 @@ export const useTabsStore = defineStore('tabs', {
         openForwardingTab (): Tab {
             const existing = this.tabs.find(t => t.type === 'forwarding')
             if (existing) {
-                this.activeId = existing.id
+                this.activate(existing.id)
                 return existing
             }
             const tab: Tab = {
@@ -145,7 +147,7 @@ export const useTabsStore = defineStore('tabs', {
                 title: '',
             }
             this.tabs.push(tab)
-            this.activeId = tab.id
+            this.activate(tab.id)
             return tab
         },
         /**
@@ -159,7 +161,7 @@ export const useTabsStore = defineStore('tabs', {
         openStartTab (): Tab {
             const existing = this.tabs.find(t => t.type === 'start')
             if (existing) {
-                this.activeId = existing.id
+                this.activate(existing.id)
                 return existing
             }
             const tab: Tab = {
@@ -168,7 +170,7 @@ export const useTabsStore = defineStore('tabs', {
                 title: '',
             }
             this.tabs.push(tab)
-            this.activeId = tab.id
+            this.activate(tab.id)
             return tab
         },
         /**
@@ -186,7 +188,7 @@ export const useTabsStore = defineStore('tabs', {
             let tab: Tab
             if (existing) {
                 tab = existing
-                this.activeId = existing.id
+                this.activate(existing.id)
             } else {
                 tab = this.openTerminalTab(profileId)
             }
@@ -213,11 +215,13 @@ export const useTabsStore = defineStore('tabs', {
             }
             this.tabs.splice(index, 1)
             delete this.alerts[id]
+            this.recentIds = this.recentIds.filter(recentId => recentId !== id && this.tabs.some(tab => tab.id === recentId))
             if (this.activeId === id) {
-                this.activeId = neighborId
-                // 接替激活的邻居已进入视野，其未读标记一并清除
+                // 接替激活的邻居已进入视野；activate 会同步清理未读与 MRU
                 if (neighborId) {
-                    delete this.alerts[neighborId]
+                    this.activate(neighborId)
+                } else {
+                    this.activeId = null
                 }
             }
             if (this.tabs.length === 0) {
@@ -225,10 +229,22 @@ export const useTabsStore = defineStore('tabs', {
                 this.openStartTab()
             }
         },
+        /**
+         * @description 激活标签并记录最近使用顺序；无效 id 被忽略，未知 MRU 引用会同步清理
+         * @param id 标签 id
+         * @returns void
+         *
+         * @example activate('tab-1')
+         *
+         */
         activate (id: string) {
             if (this.tabs.some(t => t.id === id)) {
                 this.activeId = id
                 delete this.alerts[id]
+                this.recentIds = [
+                    id,
+                    ...this.recentIds.filter(recentId => recentId !== id && this.tabs.some(tab => tab.id === recentId)),
+                ]
             }
         },
         /**
@@ -331,7 +347,7 @@ export const useTabsStore = defineStore('tabs', {
                 }
             }
             if (first) {
-                this.activeId = first.id
+                this.activate(first.id)
             }
             return first !== null
         },
@@ -393,7 +409,8 @@ export const useTabsStore = defineStore('tabs', {
             this.tabs = [keep]
             // 被关标签的未读标记随标签消亡；保留标签随即激活，标记同步清除
             this.alerts = {}
-            this.activeId = id
+            this.recentIds = [id]
+            this.activate(id)
         },
     },
 })

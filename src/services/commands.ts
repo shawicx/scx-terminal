@@ -4,10 +4,12 @@ import { useTabsStore } from '@/stores/tabs'
 import { useConfigStore, type QuickCommand, type TerminalProfile } from '@/stores/config'
 import { terminalTabApi } from './terminalTabsApi'
 import { openQuickCommandPalette } from './quickCommandPalette'
+import { openTabSwitcher } from './tabSwitcher'
 import { hotkeys } from './hotkeysSingleton'
 import { defaultDarkColorScheme, defaultLightColorScheme } from '@/lib/colorSchemes'
 import { writeClipboardText } from '@/lib/frontendContext'
 import { parseQuickCommandParams, previewQuickCommand } from '@/lib/quickCommands'
+import { cycleVisibleTabId } from '@/components/titlebar/tabGroupLayout'
 
 export interface Command {
     id: string
@@ -113,6 +115,12 @@ export function useCommands () {
             handler: () => (paletteOpen.value = true),
         })
         register({
+            id: 'tab-switcher', group: 'tab', hotkeyId: 'tab-switcher',
+            label: () => t('commands.tabSwitcher'),
+            handler: () => openTabSwitcher(),
+            enabled: () => tabs.tabs.length > 0,
+        })
+        register({
             id: 'new-tab', group: 'tab', hotkeyId: 'new-tab',
             label: () => t('commands.newTab'),
             handler: () => void openNewTerminalTabWithCwd(),
@@ -131,23 +139,23 @@ export function useCommands () {
             id: 'next-tab', group: 'tab', hotkeyId: 'next-tab',
             label: () => t('commands.nextTab'),
             handler: () => {
-                const index = tabs.tabs.findIndex(tab => tab.id === tabs.activeId)
-                if (index >= 0 && tabs.tabs.length > 1) {
-                    tabs.activate(tabs.tabs[(index + 1) % tabs.tabs.length]!.id)
+                const nextId = cycleVisibleTabId(tabs.tabs, config.store.tabGroups, tabs.activeId, 1)
+                if (nextId) {
+                    tabs.activate(nextId)
                 }
             },
-            enabled: () => tabs.tabs.length > 1,
+            enabled: () => cycleVisibleTabId(tabs.tabs, config.store.tabGroups, tabs.activeId, 1) !== null,
         })
         register({
             id: 'prev-tab', group: 'tab', hotkeyId: 'prev-tab',
             label: () => t('commands.prevTab'),
             handler: () => {
-                const index = tabs.tabs.findIndex(tab => tab.id === tabs.activeId)
-                if (index >= 0 && tabs.tabs.length > 1) {
-                    tabs.activate(tabs.tabs[(index - 1 + tabs.tabs.length) % tabs.tabs.length]!.id)
+                const nextId = cycleVisibleTabId(tabs.tabs, config.store.tabGroups, tabs.activeId, -1)
+                if (nextId) {
+                    tabs.activate(nextId)
                 }
             },
-            enabled: () => tabs.tabs.length > 1,
+            enabled: () => cycleVisibleTabId(tabs.tabs, config.store.tabGroups, tabs.activeId, -1) !== null,
         })
         register({
             id: 'split-right', group: 'terminal', hotkeyId: 'split-right',

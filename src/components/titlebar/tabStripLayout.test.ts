@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
     getTabStripWheelDelta,
     resolveActiveTabScrollLeft,
-    resolveArrowScrollTarget,
     resolveTabOverflowState,
 } from './tabStripLayout'
 
@@ -75,17 +74,5 @@ describe('tab strip overflow state', () => {
             .toEqual({ canScrollLeft: true, canScrollRight: true })
         expect(resolveTabOverflowState({ scrollLeft: 400, viewportWidth: 800, scrollWidth: 1200 }))
             .toEqual({ canScrollLeft: true, canScrollRight: false })
-    })
-})
-
-describe('arrow scroll target', () => {
-    it('scrolls by the given step forward and backward', () => {
-        expect(resolveArrowScrollTarget({ direction: 1, scrollLeft: 100, step: 600, maxScrollLeft: 2000 })).toBe(700)
-        expect(resolveArrowScrollTarget({ direction: -1, scrollLeft: 700, step: 600, maxScrollLeft: 2000 })).toBe(100)
-    })
-
-    it('clamps the target within [0, maxScrollLeft]', () => {
-        expect(resolveArrowScrollTarget({ direction: 1, scrollLeft: 0, step: 600, maxScrollLeft: 400 })).toBe(400)
-        expect(resolveArrowScrollTarget({ direction: -1, scrollLeft: 100, step: 600, maxScrollLeft: 400 })).toBe(0)
     })
 })

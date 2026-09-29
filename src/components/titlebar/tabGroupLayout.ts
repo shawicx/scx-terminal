@@ -72,6 +72,52 @@ export function visibleNeighborId (tabs: Tab[], groups: TabGroup[], tabId: strin
 }
 
 /**
+ * @description 计算标签条当前真正可见的标签 id 序列（折叠组成员隐藏，不参与键盘切换）
+ * @param tabs 标签数组
+ * @param groups 分组定义（读 collapsed 态）
+ * @returns string[] 展示序可见标签 id
+ *
+ * @example visibleTabIds(tabs, groups) // ['work-1', 'loose']
+ *
+ */
+export function visibleTabIds (tabs: Tab[], groups: TabGroup[]): string[] {
+    const collapsedGroupIds = new Set(groups.filter(group => group.collapsed).map(group => group.id))
+    return displaySequence(tabs, groups)
+        .filter((item): item is { kind: 'tab', tab: Tab } => item.kind === 'tab')
+        .filter(item => !collapsedGroupIds.has(item.tab.groupId ?? ''))
+        .map(item => item.tab.id)
+}
+
+/**
+ * @description 在可见标签展示序中取环形邻居：next/prev 快捷键的分组感知实现；
+ *              活动标签藏在折叠组时回退首个可见标签
+ * @param tabs 标签数组
+ * @param groups 分组定义
+ * @param activeId 当前活动标签 id
+ * @param direction 1 = 下一个，-1 = 上一个
+ * @returns string | null 可切换标签 id；可见标签少于两个时返回 null
+ *
+ * @example cycleVisibleTabId(tabs, groups, 'work-1', 1)
+ *
+ */
+export function cycleVisibleTabId (
+    tabs: Tab[],
+    groups: TabGroup[],
+    activeId: string | null,
+    direction: 1 | -1,
+): string | null {
+    const ids = visibleTabIds(tabs, groups)
+    if (ids.length < 2) {
+        return null
+    }
+    const index = ids.indexOf(activeId ?? '')
+    if (index === -1) {
+        return ids[0] ?? null
+    }
+    return ids[(index + direction + ids.length) % ids.length] ?? null
+}
+
+/**
  * @description 折叠某组后的激活标签：活动标签在该组内时切到组外最近可见标签（先右后左），
  *              全无候选则保持原激活；活动标签不在该组时原样返回
  * @param tabs 标签数组

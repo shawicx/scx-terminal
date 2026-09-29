@@ -14,6 +14,7 @@ import CredentialDialog from '@/components/terminal/CredentialDialog.vue'
 import TransferPopover from '@/components/sftp/TransferPopover.vue'
 import CommandPalette from '@/components/palette/CommandPalette.vue'
 import QuickCommandPalette from '@/components/palette/QuickCommandPalette.vue'
+import TabSwitcher from '@/components/titlebar/TabSwitcher.vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useConfigStore } from '@/stores/config'
 import { useTransfersStore } from '@/stores/transfers'
@@ -159,6 +160,7 @@ watch(() => config.store.terminal.fontSize, size => {
         <TabStrip v-if="tabBarBottom" position="bottom" />
         <CommandPalette />
         <QuickCommandPalette />
+        <TabSwitcher />
         <TransferPopover />
         <HostKeyDialog
             v-if="pendingHostKey"

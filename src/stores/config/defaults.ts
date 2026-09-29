@@ -246,6 +246,7 @@ export function defaultHotkeys (): HotkeysConfig {
     if (mac) {
         return {
             'command-palette': [['⌘-Shift-P']],
+            'tab-switcher': [['⌘-Shift-A']],
             'new-tab': [['⌘-T']],
             'close-tab': [['⌘-W']],
             'next-tab': [['⌘-Shift-]']],
@@ -268,6 +269,7 @@ export function defaultHotkeys (): HotkeysConfig {
     }
     return {
         'command-palette': [['Ctrl-Shift-P']],
+        'tab-switcher': [['Ctrl-Shift-A']],
         'new-tab': [['Ctrl-Shift-T']],
         'close-tab': [['Ctrl-Shift-W']],
         'next-tab': [['Ctrl-Shift-]']],

@@ -122,6 +122,7 @@ export const panels = {
 
     commands: {
         commandPalette: 'Show command palette',
+        tabSwitcher: 'Switch tabs',
         newTab: 'New tab',
         closeTab: 'Close tab',
         nextTab: 'Next tab',
@@ -155,6 +156,17 @@ export const panels = {
         noResults: 'No matching commands',
     },
 
+    tabSwitcher: {
+        title: 'Switch tabs',
+        placeholder: 'Search title, group, or type…',
+        noResults: 'No matching tabs',
+        allGroups: 'All',
+        ungrouped: 'Ungrouped',
+        current: 'Current',
+        collapsed: 'Collapsed',
+        keyboardHint: '↑↓ Select · ↵ Switch · ⎋ Cancel',
+    },
+
     search: {
         placeholder: 'Find…',
         noResults: 'No results',
@@ -168,11 +180,12 @@ export const panels = {
     tab: {
         terminal: 'Terminal',
         settings: 'Settings',
+        sftp: 'SFTP',
+        forwarding: 'Port forwarding',
+        start: 'Start',
         rename: 'Rename',
         close: 'Close tab',
         closeOthers: 'Close other tabs',
-        scrollLeft: 'Scroll tabs left',
-        scrollRight: 'Scroll tabs right',
         bellBody: 'Terminal bell',
         defaultProfile: 'Default',
         moveToGroup: 'Move to group',

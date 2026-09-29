@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { activeAfterCollapse, displaySequence, resolveDrop, visibleNeighborId } from './tabGroupLayout'
+import {
+    activeAfterCollapse,
+    cycleVisibleTabId,
+    displaySequence,
+    resolveDrop,
+    visibleNeighborId,
+} from './tabGroupLayout'
 import type { Tab } from '@/stores/tabs'
 import type { TabGroup } from '@/stores/config'
 
@@ -41,6 +47,31 @@ describe('visibleNeighborId', () => {
         const groups = [group('a', { collapsed: true })]
         const tabs = [tab('a1', 'a'), tab('1'), tab('a2', 'a')]
         expect(visibleNeighborId(tabs, groups, '1')).toBeNull()
+    })
+})
+
+describe('cycleVisibleTabId', () => {
+    it('cycles forward and backward through the rendered display sequence with wrap-around', () => {
+        const groups = [group('a')]
+        const tabs = [tab('u1'), tab('a1', 'a'), tab('a2', 'a'), tab('u2')]
+        expect(cycleVisibleTabId(tabs, groups, 'a1', 1)).toBe('a2')
+        expect(cycleVisibleTabId(tabs, groups, 'a2', 1)).toBe('u1')
+        expect(cycleVisibleTabId(tabs, groups, 'u2', 1)).toBe('a1')
+        expect(cycleVisibleTabId(tabs, groups, 'u1', 1)).toBe('u2')
+        expect(cycleVisibleTabId(tabs, groups, 'u1', -1)).toBe('a2')
+    })
+
+    it('skips collapsed group members and falls back to the first visible tab for a hidden active tab', () => {
+        const groups = [group('a', { collapsed: true })]
+        const tabs = [tab('u1'), tab('a1', 'a'), tab('u2')]
+        expect(cycleVisibleTabId(tabs, groups, 'u1', 1)).toBe('u2')
+        expect(cycleVisibleTabId(tabs, groups, 'u2', -1)).toBe('u1')
+        expect(cycleVisibleTabId(tabs, groups, 'a1', 1)).toBe('u1')
+    })
+
+    it('returns null when fewer than two tabs are visible', () => {
+        expect(cycleVisibleTabId([tab('1')], [], '1', 1)).toBeNull()
+        expect(cycleVisibleTabId([tab('a1', 'a')], [group('a', { collapsed: true })], 'a1', 1)).toBeNull()
     })
 })
 

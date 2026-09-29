@@ -139,6 +139,33 @@ describe('tabs store', () => {
         expect(store.alerts[t2.id]).toBe(true)
     })
 
+    it('tracks MRU order when opening, activating, restoring, and closing tabs', () => {
+        const config = useConfigStore()
+        config.store.profiles = [localProfile({ id: 'local-1', isDefault: true })]
+        config.store.tabGroups = [{ id: 'g1', name: 'work', persistTabs: true }]
+        const store = useTabsStore()
+        const t1 = store.openTerminalTab('local-1', null, 'g1')
+        const t2 = store.openTerminalTab('local-1', null, 'g1')
+        const t3 = store.openTerminalTab('local-1', null, 'g1')
+        store.activate(t1.id)
+        store.activate(t3.id)
+        expect(store.recentIds).toEqual([t3.id, t1.id, t2.id])
+
+        store.closeTab(t1.id)
+        expect(store.recentIds).toEqual([t3.id, t2.id])
+
+        setActivePinia(createPinia())
+        const restoredConfig = useConfigStore()
+        restoredConfig.store.profiles = [localProfile({ id: 'local-1', isDefault: true })]
+        restoredConfig.store.tabGroups = [{ id: 'g1', name: 'work', persistTabs: true }]
+        const restored = useTabsStore()
+        restored.restoreSession({
+            version: 1,
+            entries: [{ groupId: 'g1', tabs: [{ profileId: 'local-1' }, {}] }],
+        })
+        expect(restored.recentIds).toEqual([restored.tabs[0]!.id, restored.tabs[1]!.id])
+    })
+
     it('closing a tab drops its alert and clears the newly activated neighbor', () => {
         const store = useTabsStore()
         const t1 = store.openTerminalTab()

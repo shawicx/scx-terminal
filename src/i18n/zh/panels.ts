@@ -122,6 +122,7 @@ export const panels = {
 
     commands: {
         commandPalette: '打开命令面板',
+        tabSwitcher: '切换标签页',
         newTab: '新建标签页',
         closeTab: '关闭标签页',
         nextTab: '下一个标签页',
@@ -155,6 +156,17 @@ export const panels = {
         noResults: '没有匹配的命令',
     },
 
+    tabSwitcher: {
+        title: '切换标签页',
+        placeholder: '搜索标题、分组或类型…',
+        noResults: '没有匹配的标签页',
+        allGroups: '全部',
+        ungrouped: '未分组',
+        current: '当前',
+        collapsed: '已折叠',
+        keyboardHint: '↑↓ 选择 · ↵ 切换 · ⎋ 取消',
+    },
+
     search: {
         placeholder: '搜索…',
         noResults: '无结果',
@@ -168,11 +180,12 @@ export const panels = {
     tab: {
         terminal: '终端',
         settings: '设置',
+        sftp: 'SFTP',
+        forwarding: '端口转发',
+        start: '连接中心',
         rename: '重命名',
         close: '关闭标签页',
         closeOthers: '关闭其他标签页',
-        scrollLeft: '向左滚动标签',
-        scrollRight: '向右滚动标签',
         bellBody: '终端响铃',
         defaultProfile: '默认',
         moveToGroup: '移入分组',

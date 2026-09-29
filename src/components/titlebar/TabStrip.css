@@ -15,7 +15,7 @@
 }
 
 /* 滚动区包装：top 模式下作为 title-bar 的 flex 子项参与布局（原 tabs-region 的 max-width 职责上移至此）；
-   相对定位用于承载两侧渐隐遮罩；箭头按钮在流内紧贴标签区两侧，不遮挡 sticky「+」 */
+   相对定位用于承载两侧渐隐遮罩 */
 .tabs-region-wrap {
     position: relative;
     display: flex;
@@ -24,7 +24,7 @@
     max-width: 70%;
 }
 
-/* 两侧渐隐遮罩：溢出方向提示「下方还有被裁切的标签」，与箭头显隐同步；不拦截鼠标（title hover 仍可用） */
+/* 两侧渐隐遮罩：溢出方向提示「旁边还有被裁切的标签」；不拦截鼠标（title hover 仍可用） */
 .tabs-region-wrap::before,
 .tabs-region-wrap::after {
     content: '';
@@ -39,13 +39,12 @@
 }
 
 .tabs-region-wrap::before {
-    /* 偏移一个箭头宽度，从箭头右缘开始渐隐（箭头 20px，见 .tab-scroll-arrow） */
-    left: 20px;
+    left: 0;
     background: linear-gradient(to right, var(--color-card), transparent);
 }
 
 .tabs-region-wrap::after {
-    right: 20px;
+    right: 0;
     background: linear-gradient(to left, var(--color-card), transparent);
 }
 
@@ -78,37 +77,6 @@
 
 .tab-strip--bottom .tabs-region {
     align-items: flex-start;
-}
-
-/* 溢出滚动箭头：对齐标签带（与「+」同款几何），点击平滑滚动 0.75 视口 */
-.tab-scroll-arrow {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 28px;
-    align-self: flex-end;
-    margin-bottom: 3px;
-    flex-shrink: 0;
-    border: none;
-    border-radius: 6px;
-    background: var(--color-card);
-    color: var(--color-muted-foreground);
-    cursor: pointer;
-    z-index: 2;
-    transition: background-color 0.25s ease, color 0.25s ease;
-}
-
-.tab-scroll-arrow:hover {
-    background: var(--color-accent);
-    color: var(--color-accent-foreground);
-}
-
-/* bottom 模式镜像：对齐标签带上缘 */
-.tab-strip--bottom .tab-scroll-arrow {
-    align-self: flex-start;
-    margin-top: 3px;
-    margin-bottom: 0;
 }
 
 .tab-header {
@@ -245,6 +213,29 @@
     background: color-mix(in oklch, var(--color-foreground) 15%, transparent);
 }
 
+.tab-strip-actions {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    margin-bottom: 3px;
+    margin-left: 2px;
+    padding-right: 2px;
+    flex-shrink: 0;
+    /* 溢出后整组吸附标签区右缘，实底背景盖住从下方滚过的标签 */
+    position: sticky;
+    right: 0;
+    background: var(--color-card);
+    z-index: 2;
+}
+
+/* bottom 模式镜像：操作区对齐标签带上缘 */
+.tab-strip--bottom .tab-strip-actions {
+    align-items: flex-start;
+    margin-top: 3px;
+    margin-bottom: 0;
+}
+
+.tab-switcher-button,
 .new-tab-button {
     display: inline-flex;
     align-items: center;
@@ -253,32 +244,16 @@
     height: 28px;
     /* 对齐标签行而非标题栏几何中心：标签贴底（顶模式约 8..41px，中心 ~24.5），按钮
        居中于标签带才与标签文字一线；标题栏中心（21px）会让按钮浮高于标签行 */
-    align-self: flex-end;
-    margin-bottom: 3px;
     flex-shrink: 0;
-    margin-left: 2px;
-    margin-right: 2px;
     border: none;
     border-radius: 6px;
-    /* 未溢出时随流排布（紧跟最后一个标签）；标签溢出后吸附标签区右缘，
-       实底背景盖住从下方滚过的标签 */
-    position: sticky;
-    right: 0;
-    background: var(--color-card);
+    background: transparent;
     color: var(--color-muted-foreground);
     cursor: pointer;
-    /* 抬到渐隐遮罩（z-index:1）之上，sticky 吸附时不被右缘遮罩盖住 */
-    z-index: 2;
     transition: background-color 0.25s ease, color 0.25s ease;
 }
 
-/* bottom 模式镜像：标签贴顶，按钮对齐标签带上缘而非顶死 */
-.tab-strip--bottom .new-tab-button {
-    align-self: flex-start;
-    margin-top: 3px;
-    margin-bottom: 0;
-}
-
+.tab-switcher-button:hover,
 .new-tab-button:hover {
     background: var(--color-accent);
     color: var(--color-accent-foreground);
