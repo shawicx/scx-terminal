@@ -72,16 +72,16 @@ describe('groupQuickCommandSections', () => {
         { id: 'd', groupId: 'missing' },
     ]
 
-    it('未分组置顶无标题，分组按组名排序', () => {
+    it('未分组置顶无标题，分组按传入顺序排序', () => {
         const sections = groupQuickCommandSections(commands, groups)
-        expect(sections.map(s => s.title)).toEqual([null, 'Alpha', 'Zeta'])
+        expect(sections.map(s => s.title)).toEqual([null, 'Zeta', 'Alpha'])
         expect(sections[0]!.items.map(i => i.id)).toEqual(['c'])
-        expect(sections[1]!.items.map(i => i.id)).toEqual(['a'])
+        expect(sections[1]!.items.map(i => i.id)).toEqual(['b'])
     })
 
     it('保留空分组（渲染层自行隐藏）', () => {
         const sections = groupQuickCommandSections([], groups)
-        expect(sections.map(s => s.title)).toEqual(['Alpha', 'Zeta'])
+        expect(sections.map(s => s.title)).toEqual(['Zeta', 'Alpha'])
         expect(sections[0]!.items).toEqual([])
     })
 

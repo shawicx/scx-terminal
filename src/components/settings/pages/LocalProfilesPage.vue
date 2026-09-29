@@ -14,7 +14,7 @@ import Switch from '@/components/ui/Switch.vue'
 import Select from '@/components/ui/Select.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import GroupAccordion, { type AccordionSection } from '@/components/settings/GroupAccordion.vue'
-import { useConfigStore, defaultFirstProfiles, defaultShellCommand, groupLocalProfiles, type LocalProfile, type LocalProfileSection } from '@/stores/config'
+import { useConfigStore, defaultFirstProfiles, defaultShellCommand, groupLocalProfiles, reorderGroups, type LocalProfile, type LocalProfileSection } from '@/stores/config'
 import { builtinColorSchemes } from '@/lib/colorSchemes'
 import { confirmAction } from '@/components/settings/useConfirmAction'
 import { openCreateLocalGroup, openRenameLocalGroup } from '@/components/settings/useGroupNameDialog'
@@ -51,6 +51,7 @@ const localAccordionSections = computed<AccordionSection<LocalProfileSection>[]>
         count: section.profiles.length,
         ...(section.group?.builtin ? { badge: t('settings.localDefaultGroupBadge') } : {}),
         manageable: !!section.group && !section.group.builtin,
+        sortable: !!section.group,
         data: section,
     })))
 
@@ -158,6 +159,22 @@ function deleteLocalGroup (id: string): void {
 }
 
 /**
+ * @description 手动排序本地终端分组（含内置 shell 分组；未分组虚拟段固定置顶）
+ * @param sourceKey 被移动分组 id
+ * @param targetKey 放置目标分组 id
+ * @returns void
+ *
+ * @example reorderLocalGroups('lg1', 'localgroup-zsh')
+ *
+ */
+function reorderLocalGroups (sourceKey: string, targetKey: string): void {
+    if (sourceKey === LOCAL_UNGROUPED_KEY || targetKey === LOCAL_UNGROUPED_KEY) {
+        return
+    }
+    store.localGroups = reorderGroups(store.localGroups, sourceKey, targetKey)
+}
+
+/**
  * @description 删除本地档案分组（经确认弹窗；组内档案降级未分组；默认分组锁定不可达）
  * @param id 分组 id
  * @returns void
@@ -251,8 +268,11 @@ function confirmDeleteProfile (profile: LocalProfile): void {
                 :preferred-key="selectedLocalSectionKey"
                 :rename-title="t('settings.localRenameGroup')"
                 :delete-title="t('settings.localDeleteGroup')"
+                :move-up-title="t('settings.groupMoveUp')"
+                :move-down-title="t('settings.groupMoveDown')"
                 @rename="openRenameLocalGroup"
                 @delete="confirmDeleteLocalGroup"
+                @reorder="reorderLocalGroups"
             >
                 <template #default="{ data }">
                     <button

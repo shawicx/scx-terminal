@@ -82,8 +82,8 @@ pub(super) fn quick_command_group_update_internal(state: &ConfigState, group: &Q
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let changed = tx
         .execute(
-            "UPDATE quick_command_groups SET name = ?1 WHERE id = ?2",
-            rusqlite::params![group.name, group.id],
+            "UPDATE quick_command_groups SET name = ?1, sort_order = ?2 WHERE id = ?3",
+            rusqlite::params![group.name, group.sort_order, group.id],
         )
         .map_err(|e| format!("failed to update quick command group {}: {e}", group.id))?;
     if changed == 0 {

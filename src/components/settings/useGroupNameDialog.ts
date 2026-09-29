@@ -6,7 +6,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { nanoid } from 'nanoid'
-import { useConfigStore } from '@/stores/config'
+import { nextGroupSortOrder, useConfigStore } from '@/stores/config'
 import { ref } from 'vue'
 
 type GroupNameDialogKind = 'ssh-create' | 'ssh-rename' | 'qc-create' | 'qc-rename' | 'local-create' | 'local-rename'
@@ -60,11 +60,11 @@ export function useGroupNameDialog () {
         }
         groupNameDialog.value = null
         if (dialog.kind === 'ssh-create') {
-            store.sshGroups.push({ id: `sshgroup-${nanoid(6)}`, name })
+            store.sshGroups.push({ id: `sshgroup-${nanoid(6)}`, name, sortOrder: nextGroupSortOrder(store.sshGroups) })
         } else if (dialog.kind === 'qc-create') {
-            store.quickCommandGroups.push({ id: `qcgroup-${nanoid(6)}`, name })
+            store.quickCommandGroups.push({ id: `qcgroup-${nanoid(6)}`, name, sortOrder: nextGroupSortOrder(store.quickCommandGroups) })
         } else if (dialog.kind === 'local-create') {
-            store.localGroups.push({ id: `localgroup-${nanoid(6)}`, name, builtin: false })
+            store.localGroups.push({ id: `localgroup-${nanoid(6)}`, name, builtin: false, sortOrder: nextGroupSortOrder(store.localGroups) })
         } else if (dialog.kind === 'ssh-rename') {
             const group = store.sshGroups.find(g => g.id === dialog.groupId)
             if (group) {

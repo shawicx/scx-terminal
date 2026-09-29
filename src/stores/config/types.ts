@@ -57,12 +57,16 @@ export interface LocalGroup {
     name: string
     /** 系统默认分组（/etc/shells 生成）：不可删除、不可重命名 */
     builtin: boolean
+    /** 手动排序号（SQLite sort_order；加载按该值升序） */
+    sortOrder: number
 }
 
 /** SSH 档案分组（管理用实体，SSH 档案以 groupId 单选引用；无引用 = 默认分组） */
 export interface SshGroup {
     id: string
     name: string
+    /** 手动排序号（SQLite sort_order；加载按该值升序） */
+    sortOrder: number
 }
 
 /** 标签分组（管理用实体，标签页以 groupId 引用；persistTabs 控制会话恢复是否还原组内标签） */
@@ -80,6 +84,8 @@ export interface TabGroup {
 export interface QuickCommandGroup {
     id: string
     name: string
+    /** 手动排序号（SQLite sort_order；加载按该值升序） */
+    sortOrder: number
 }
 
 /** 快捷命令：command 支持 {{参数}} 占位符（Warp Workflow 式），autoRun 控制写入后是否补换行执行 */

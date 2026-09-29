@@ -209,13 +209,13 @@ describe('config store diff-flush integration', () => {
         }
         config.store.profiles.push(profile)
         config.store.profiles[0]!.name = 'bash'
-        config.store.quickCommandGroups.push({ id: 'g1', name: 'ops' })
+        config.store.quickCommandGroups.push({ id: 'g1', name: 'ops', sortOrder: 0 })
         config.store.quickCommands.push({ id: 'q1', name: 'ls', command: 'ls', groupId: 'g1', autoRun: false })
         await new Promise(resolve => setTimeout(resolve, 700))
 
         expect(mockInvoke).toHaveBeenCalledWith('profile_create', { profile: expect.objectContaining({ id: 'p2' }) })
         expect(mockInvoke).toHaveBeenCalledWith('profile_update', { profile: expect.objectContaining({ id: 'p1', name: 'bash' }) })
-        expect(mockInvoke).toHaveBeenCalledWith('quick_command_group_create', { group: { id: 'g1', name: 'ops' } })
+        expect(mockInvoke).toHaveBeenCalledWith('quick_command_group_create', { group: { id: 'g1', name: 'ops', sortOrder: 0 } })
         expect(mockInvoke).toHaveBeenCalledWith('quick_command_create', { command: expect.objectContaining({ id: 'q1', groupId: 'g1' }) })
 
         // 删除组 → 组删除命令（Rust 端级联降级）；删档案 → delete 命令
@@ -239,10 +239,10 @@ describe('config store diff-flush integration', () => {
         expect(config.store.profiles).toHaveLength(1)
 
         // 建组 + 把 SSH 档案归组：分组 create 与档案 update 都要落库
-        config.store.sshGroups.push({ id: 'sg1', name: 'prod' })
+        config.store.sshGroups.push({ id: 'sg1', name: 'prod', sortOrder: 0 })
         ;(config.store.profiles[0] as SshProfile).groupId = 'sg1'
         await new Promise(resolve => setTimeout(resolve, 700))
-        expect(mockInvoke).toHaveBeenCalledWith('ssh_group_create', { group: { id: 'sg1', name: 'prod' } })
+        expect(mockInvoke).toHaveBeenCalledWith('ssh_group_create', { group: { id: 'sg1', name: 'prod', sortOrder: 0 } })
         expect(mockInvoke).toHaveBeenCalledWith('profile_update', { profile: expect.objectContaining({ id: 's1', groupId: 'sg1' }) })
 
         // 删组：组删除命令 + 前端级联把档案降级默认分组（再触发一条 profile_update）
@@ -305,17 +305,17 @@ describe('config store diff-flush integration', () => {
         expect(config.store.profiles).toHaveLength(1)
 
         // 建默认组 + 归组：分组 create 与档案 update 都要落库
-        config.store.localGroups.push({ id: 'localgroup-zsh', name: 'zsh', builtin: true })
+        config.store.localGroups.push({ id: 'localgroup-zsh', name: 'zsh', builtin: true, sortOrder: 0 })
         ;(config.store.profiles[0] as LocalProfile).groupId = 'localgroup-zsh'
         await new Promise(resolve => setTimeout(resolve, 700))
-        expect(mockInvoke).toHaveBeenCalledWith('local_group_create', { group: { id: 'localgroup-zsh', name: 'zsh', builtin: true } })
+        expect(mockInvoke).toHaveBeenCalledWith('local_group_create', { group: { id: 'localgroup-zsh', name: 'zsh', builtin: true, sortOrder: 0 } })
         expect(mockInvoke).toHaveBeenCalledWith('profile_update', { profile: expect.objectContaining({ id: 'local-zsh-Ab3xY9', groupId: 'localgroup-zsh' }) })
 
         // 建自定义组 + 把档案移入：分组 create 与档案 update 都要落库
-        config.store.localGroups.push({ id: 'lg1', name: '工作', builtin: false })
+        config.store.localGroups.push({ id: 'lg1', name: '工作', builtin: false, sortOrder: 1 })
         ;(config.store.profiles[0] as LocalProfile).groupId = 'lg1'
         await new Promise(resolve => setTimeout(resolve, 700))
-        expect(mockInvoke).toHaveBeenCalledWith('local_group_create', { group: { id: 'lg1', name: '工作', builtin: false } })
+        expect(mockInvoke).toHaveBeenCalledWith('local_group_create', { group: { id: 'lg1', name: '工作', builtin: false, sortOrder: 1 } })
         expect(db.profiles.get('local-zsh-Ab3xY9')).toMatchObject({ groupId: 'lg1' })
 
         // 删自定义组：组删除命令 + 前端级联把档案降级未分组（再触发一条 profile_update）
@@ -345,14 +345,14 @@ describe('config store diff-flush integration', () => {
         const config = useConfigStore()
         await config.load()
 
-        expect(config.store.localGroups).toEqual([{ id: 'localgroup-zsh', name: 'zsh', builtin: true }])
+        expect(config.store.localGroups).toEqual([{ id: 'localgroup-zsh', name: 'zsh', builtin: true, sortOrder: 0 }])
         const [migrated, custom] = config.store.profiles as LocalProfile[]
         expect(migrated).toMatchObject({ id: 'local-zsh-Ab3xY9', builtin: true, groupId: 'localgroup-zsh' })
         expect(custom).toMatchObject({ id: 'local-Zz1x2Y3w', builtin: false })
 
         // 迁移结果落库（防抖 flush 后）
         await new Promise(resolve => setTimeout(resolve, 700))
-        expect(mockInvoke).toHaveBeenCalledWith('local_group_create', { group: { id: 'localgroup-zsh', name: 'zsh', builtin: true } })
+        expect(mockInvoke).toHaveBeenCalledWith('local_group_create', { group: { id: 'localgroup-zsh', name: 'zsh', builtin: true, sortOrder: 0 } })
         expect(db.localGroups.has('localgroup-zsh')).toBe(true)
         expect(db.profiles.get('local-zsh-Ab3xY9')).toMatchObject({ builtin: true, groupId: 'localgroup-zsh' })
     })

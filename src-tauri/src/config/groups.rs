@@ -58,8 +58,8 @@ pub(super) fn local_group_update_internal(state: &ConfigState, group: &LocalGrou
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let changed = tx
         .execute(
-            "UPDATE local_groups SET name = ?1, is_default = ?2 WHERE id = ?3",
-            rusqlite::params![group.name, group.is_default as i64, group.id],
+            "UPDATE local_groups SET name = ?1, is_default = ?2, sort_order = ?3 WHERE id = ?4",
+            rusqlite::params![group.name, group.is_default as i64, group.sort_order, group.id],
         )
         .map_err(|e| format!("failed to update local group {}: {e}", group.id))?;
     if changed == 0 {
@@ -102,8 +102,8 @@ pub(super) fn ssh_group_update_internal(state: &ConfigState, group: &SshGroupRec
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let changed = tx
         .execute(
-            "UPDATE ssh_groups SET name = ?1 WHERE id = ?2",
-            rusqlite::params![group.name, group.id],
+            "UPDATE ssh_groups SET name = ?1, sort_order = ?2 WHERE id = ?3",
+            rusqlite::params![group.name, group.sort_order, group.id],
         )
         .map_err(|e| format!("failed to update ssh group {}: {e}", group.id))?;
     if changed == 0 {

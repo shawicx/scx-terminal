@@ -198,7 +198,7 @@ fn quick_command_crud_round_trip() {
 #[test]
 fn group_delete_cascades_ungroup() {
     let state = temp_state("qc-group");
-    quick_command_group_create_internal(&state, &QuickCommandGroupRecord { id: "g1".into(), name: "ops".into() }).unwrap();
+    quick_command_group_create_internal(&state, &QuickCommandGroupRecord { id: "g1".into(), name: "ops".into(), sort_order: 0 }).unwrap();
     quick_command_create_internal(&state, &command_json("c1", "list", Some("g1"))).unwrap();
     quick_command_create_internal(&state, &command_json("c2", "free", None)).unwrap();
 
@@ -214,19 +214,19 @@ fn group_crud_round_trip() {
     let state = temp_state("qc-group-crud");
     quick_command_group_create_internal(
         &state,
-        &QuickCommandGroupRecord { id: "g1".into(), name: "ops".into() },
+        &QuickCommandGroupRecord { id: "g1".into(), name: "ops".into(), sort_order: 0 },
     )
     .unwrap();
     quick_command_group_update_internal(
         &state,
-        &QuickCommandGroupRecord { id: "g1".into(), name: "运维".into() },
+        &QuickCommandGroupRecord { id: "g1".into(), name: "运维".into(), sort_order: 0 },
     )
     .unwrap();
     let snapshot = load_internal(&state).unwrap().unwrap();
     assert_eq!(snapshot.quick_command_groups[0].name, "运维");
     assert!(quick_command_group_update_internal(
         &state,
-        &QuickCommandGroupRecord { id: "ghost".into(), name: "x".into() }
+        &QuickCommandGroupRecord { id: "ghost".into(), name: "x".into(), sort_order: 0 }
     )
     .is_err());
     quick_command_group_delete_internal(&state, "g1").unwrap();
@@ -234,17 +234,86 @@ fn group_crud_round_trip() {
 }
 
 #[test]
+fn group_sort_order_updates_round_trip() {
+    let state = temp_state("group-sort-order");
+    {
+        let conn = state.lock_conn();
+        conn.execute(
+            "INSERT INTO quick_command_groups (id, name, sort_order) VALUES ('q1', 'alpha', 1), ('q2', 'zeta', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO ssh_groups (id, name, sort_order) VALUES ('s1', '生产', 1), ('s2', '测试', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO local_groups (id, name, is_default, sort_order) VALUES ('l1', 'zsh', 1, 1), ('l2', '工作', 0, 0)",
+            [],
+        )
+        .unwrap();
+        mark_initialized(&conn).unwrap();
+    }
+
+    let quick_group: QuickCommandGroupRecord = serde_json::from_value(serde_json::json!({
+        "id": "q1", "name": "alpha", "sortOrder": 0
+    }))
+    .unwrap();
+    quick_command_group_update_internal(&state, &quick_group).unwrap();
+    let quick_group_two: QuickCommandGroupRecord = serde_json::from_value(serde_json::json!({
+        "id": "q2", "name": "zeta", "sortOrder": 1
+    }))
+    .unwrap();
+    quick_command_group_update_internal(&state, &quick_group_two).unwrap();
+    let ssh_group: SshGroupRecord = serde_json::from_value(serde_json::json!({
+        "id": "s1", "name": "生产", "sortOrder": 0
+    }))
+    .unwrap();
+    ssh_group_update_internal(&state, &ssh_group).unwrap();
+    let ssh_group_two: SshGroupRecord = serde_json::from_value(serde_json::json!({
+        "id": "s2", "name": "测试", "sortOrder": 1
+    }))
+    .unwrap();
+    ssh_group_update_internal(&state, &ssh_group_two).unwrap();
+    let local_group: LocalGroupRecord = serde_json::from_value(serde_json::json!({
+        "id": "l1", "name": "zsh", "isDefault": true, "sortOrder": 0
+    }))
+    .unwrap();
+    local_group_update_internal(&state, &local_group).unwrap();
+    let local_group_two: LocalGroupRecord = serde_json::from_value(serde_json::json!({
+        "id": "l2", "name": "工作", "isDefault": false, "sortOrder": 1
+    }))
+    .unwrap();
+    local_group_update_internal(&state, &local_group_two).unwrap();
+
+    let snapshot = load_internal(&state).unwrap().unwrap();
+    assert_eq!(
+        snapshot.quick_command_groups.iter().map(|group| (&group.id, group.sort_order)).collect::<Vec<_>>(),
+        vec![(&"q1".to_string(), 0), (&"q2".to_string(), 1)]
+    );
+    assert_eq!(
+        snapshot.ssh_groups.iter().map(|group| (&group.id, group.sort_order)).collect::<Vec<_>>(),
+        vec![(&"s1".to_string(), 0), (&"s2".to_string(), 1)]
+    );
+    assert_eq!(
+        snapshot.local_groups.iter().map(|group| (&group.id, group.sort_order)).collect::<Vec<_>>(),
+        vec![(&"l1".to_string(), 0), (&"l2".to_string(), 1)]
+    );
+}
+
+#[test]
 fn ssh_group_crud_round_trip() {
     let state = temp_state("ssh-group");
-    ssh_group_create_internal(&state, &SshGroupRecord { id: "sg1".into(), name: "生产".into() }).unwrap();
-    ssh_group_create_internal(&state, &SshGroupRecord { id: "sg2".into(), name: "测试".into() }).unwrap();
-    ssh_group_update_internal(&state, &SshGroupRecord { id: "sg1".into(), name: "prod".into() }).unwrap();
+    ssh_group_create_internal(&state, &SshGroupRecord { id: "sg1".into(), name: "生产".into(), sort_order: 0 }).unwrap();
+    ssh_group_create_internal(&state, &SshGroupRecord { id: "sg2".into(), name: "测试".into(), sort_order: 1 }).unwrap();
+    ssh_group_update_internal(&state, &SshGroupRecord { id: "sg1".into(), name: "prod".into(), sort_order: 0 }).unwrap();
 
     let snapshot = load_internal(&state).unwrap().unwrap();
     assert_eq!(snapshot.ssh_groups.len(), 2);
     assert_eq!(snapshot.ssh_groups[0].name, "prod");
     assert_eq!(snapshot.ssh_groups[1].name, "测试");
-    assert!(ssh_group_update_internal(&state, &SshGroupRecord { id: "ghost".into(), name: "x".into() }).is_err());
+    assert!(ssh_group_update_internal(&state, &SshGroupRecord { id: "ghost".into(), name: "x".into(), sort_order: 0 }).is_err());
 
     ssh_group_delete_internal(&state, "sg1").unwrap();
     ssh_group_delete_internal(&state, "sg1").unwrap(); // 幂等
@@ -256,7 +325,7 @@ fn ssh_group_crud_round_trip() {
 #[test]
 fn ssh_group_delete_cascades_ungroup() {
     let state = temp_state("ssh-group-cascade");
-    ssh_group_create_internal(&state, &SshGroupRecord { id: "sg1".into(), name: "prod".into() }).unwrap();
+    ssh_group_create_internal(&state, &SshGroupRecord { id: "sg1".into(), name: "prod".into(), sort_order: 0 }).unwrap();
     profile_create_internal(&state, &serde_json::json!({
         "id": "s1", "type": "ssh", "name": "web", "host": "h", "port": 22,
         "user": "root", "auth": "auto", "keyId": null, "colorScheme": null,
@@ -288,17 +357,17 @@ fn local_group_crud_round_trip() {
     let state = temp_state("local-group");
     local_group_create_internal(
         &state,
-        &LocalGroupRecord { id: "lg1".into(), name: "zsh".into(), is_default: true },
+        &LocalGroupRecord { id: "lg1".into(), name: "zsh".into(), is_default: true, sort_order: 0 },
     )
     .unwrap();
     local_group_create_internal(
         &state,
-        &LocalGroupRecord { id: "lg2".into(), name: "工作".into(), is_default: false },
+        &LocalGroupRecord { id: "lg2".into(), name: "工作".into(), is_default: false, sort_order: 1 },
     )
     .unwrap();
     local_group_update_internal(
         &state,
-        &LocalGroupRecord { id: "lg1".into(), name: "Zsh".into(), is_default: true },
+        &LocalGroupRecord { id: "lg1".into(), name: "Zsh".into(), is_default: true, sort_order: 0 },
     )
     .unwrap();
 
@@ -309,7 +378,7 @@ fn local_group_crud_round_trip() {
     assert!(!snapshot.local_groups[1].is_default);
     assert!(local_group_update_internal(
         &state,
-        &LocalGroupRecord { id: "ghost".into(), name: "x".into(), is_default: false },
+        &LocalGroupRecord { id: "ghost".into(), name: "x".into(), is_default: false, sort_order: 0 },
     )
     .is_err());
 
@@ -325,7 +394,7 @@ fn local_group_delete_cascades_ungroup() {
     let state = temp_state("local-group-cascade");
     local_group_create_internal(
         &state,
-        &LocalGroupRecord { id: "lg1".into(), name: "zsh".into(), is_default: true },
+        &LocalGroupRecord { id: "lg1".into(), name: "zsh".into(), is_default: true, sort_order: 0 },
     )
     .unwrap();
     profile_create_internal(&state, &serde_json::json!({

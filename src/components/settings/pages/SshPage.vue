@@ -15,7 +15,7 @@ import Select from '@/components/ui/Select.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ProfileForwardingsCard from '@/components/settings/ProfileForwardingsCard.vue'
 import GroupAccordion from '@/components/settings/GroupAccordion.vue'
-import { useConfigStore, type SshProfile } from '@/stores/config'
+import { useConfigStore, reorderGroups, type SshProfile } from '@/stores/config'
 import { useMonitorStore } from '@/stores/monitor'
 import { builtinColorSchemes } from '@/lib/colorSchemes'
 import { groupQuickCommandSections } from '@/lib/quickCommands'
@@ -35,7 +35,7 @@ const selectedSshProfile = computed<SshProfile | null>(() =>
     ?? sshProfiles.value[0]
     ?? null)
 
-/** SSH 左列表分段：默认分组置顶（固定标题、不可改名/删除），其余按组名排序带小节头 */
+/** SSH 左列表分段：默认分组置顶（固定标题、不可改名/删除），其余按手动顺序带小节头 */
 const sshSections = computed(() => {
     const sections = groupQuickCommandSections(sshProfiles.value, store.sshGroups)
         .map(section => section.groupId === null ? { ...section, title: t('settings.sshDefaultGroup') } : section)
@@ -55,6 +55,7 @@ const sshAccordionSections = computed(() => sshSections.value.map(section => ({
     title: section.title ?? t('settings.sshDefaultGroup'),
     count: section.items.length,
     manageable: section.groupId !== null,
+    sortable: section.groupId !== null,
     data: section,
 })))
 
@@ -192,6 +193,22 @@ function deleteSshGroup (id: string): void {
 }
 
 /**
+ * @description 手动排序 SSH 分组（默认分组虚拟段固定置顶）
+ * @param sourceKey 被移动分组 id
+ * @param targetKey 放置目标分组 id
+ * @returns void
+ *
+ * @example reorderSshGroups('sg2', 'sg1')
+ *
+ */
+function reorderSshGroups (sourceKey: string, targetKey: string): void {
+    if (sourceKey === SSH_DEFAULT_KEY || targetKey === SSH_DEFAULT_KEY) {
+        return
+    }
+    store.sshGroups = reorderGroups(store.sshGroups, sourceKey, targetKey)
+}
+
+/**
  * @description 删除 SSH 分组（经确认弹窗；组内档案降级默认分组）
  * @param id 分组 id
  * @returns void
@@ -282,8 +299,11 @@ function confirmDeleteProfile (profile: SshProfile): void {
                 :preferred-key="selectedSshSectionKey"
                 :rename-title="t('settings.sshRenameGroup')"
                 :delete-title="t('settings.sshDeleteGroup')"
+                :move-up-title="t('settings.groupMoveUp')"
+                :move-down-title="t('settings.groupMoveDown')"
                 @rename="openRenameSshGroup"
                 @delete="confirmDeleteSshGroup"
+                @reorder="reorderSshGroups"
             >
                 <template #default="{ data }">
                     <button

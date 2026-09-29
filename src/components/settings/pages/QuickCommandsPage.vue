@@ -13,7 +13,7 @@ import Label from '@/components/ui/Label.vue'
 import Switch from '@/components/ui/Switch.vue'
 import Select from '@/components/ui/Select.vue'
 import GroupAccordion from '@/components/settings/GroupAccordion.vue'
-import { useConfigStore, type QuickCommand } from '@/stores/config'
+import { useConfigStore, reorderGroups, type QuickCommand } from '@/stores/config'
 import { groupQuickCommandSections, parseQuickCommandParams, previewQuickCommand } from '@/lib/quickCommands'
 import { confirmAction } from '@/components/settings/useConfirmAction'
 import { openCreateQuickCommandGroup, openRenameQuickCommandGroup } from '@/components/settings/useGroupNameDialog'
@@ -28,7 +28,7 @@ const selectedQuickCommand = computed(() =>
     ?? store.quickCommands[0]
     ?? null)
 
-/** 左列表分段：未分组置顶无标题，其余按组名排序带小节头 */
+/** 左列表分段：未分组置顶无标题，其余按手动顺序带小节头 */
 const quickCommandSections = computed(() =>
     groupQuickCommandSections(store.quickCommands, store.quickCommandGroups))
 
@@ -41,6 +41,7 @@ const quickCommandAccordionSections = computed(() => quickCommandSections.value.
     title: section.title ?? t('settings.quickCommandUngrouped'),
     count: section.items.length,
     manageable: section.groupId !== null,
+    sortable: section.groupId !== null,
     data: section,
 })))
 
@@ -155,6 +156,22 @@ function deleteQuickCommandGroup (id: string): void {
         }
     }
 }
+
+/**
+ * @description 手动排序快捷命令分组（未分组虚拟段固定置顶）
+ * @param sourceKey 被移动分组 id
+ * @param targetKey 放置目标分组 id
+ * @returns void
+ *
+ * @example reorderQuickCommandGroups('qcgroup-2', 'qcgroup-1')
+ *
+ */
+function reorderQuickCommandGroups (sourceKey: string, targetKey: string): void {
+    if (sourceKey === QUICK_COMMAND_UNGROUPED_KEY || targetKey === QUICK_COMMAND_UNGROUPED_KEY) {
+        return
+    }
+    store.quickCommandGroups = reorderGroups(store.quickCommandGroups, sourceKey, targetKey)
+}
 </script>
 
 <template>
@@ -177,8 +194,11 @@ function deleteQuickCommandGroup (id: string): void {
                 :preferred-key="selectedQuickCommandSectionKey"
                 :rename-title="t('settings.quickCommandRenameGroup')"
                 :delete-title="t('settings.quickCommandDeleteGroup')"
+                :move-up-title="t('settings.groupMoveUp')"
+                :move-down-title="t('settings.groupMoveDown')"
                 @rename="openRenameQuickCommandGroup"
                 @delete="confirmDeleteQuickCommandGroup"
+                @reorder="reorderQuickCommandGroups"
             >
                 <template #default="{ data }">
                     <button

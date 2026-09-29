@@ -92,6 +92,8 @@ export const settings = {
         profileDelete: '删除档案',
         profileCwdLockedHint: '默认档案锁定，始终继承打开位置',
         profileDeleteLockedHint: '默认档案不可删除',
+        groupMoveUp: '上移分组',
+        groupMoveDown: '下移分组',
         localTerminalPage: '本地终端',
         localNewGroup: '新建分组',
         localRenameGroup: '重命名分组',

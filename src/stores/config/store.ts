@@ -10,7 +10,7 @@ import { parse as parseYaml } from 'yaml'
 import { normalizeHotkeysConfig } from '@/lib/hotkeys/hotkeys'
 import { listShells } from '@/services/shells'
 import { sanitizeForwardings } from '@/lib/portForwarding'
-import { deepMerge, defaultConfig, isPlainObject, localGroupsFromShells, migrateLocalGroups, profilesFromShells, upsertRecentEntry } from './defaults'
+import { deepMerge, defaultConfig, isPlainObject, localGroupsFromShells, migrateLocalGroups, normalizeGroupSortOrders, profilesFromShells, upsertRecentEntry } from './defaults'
 import { captureBaseline, commitOp, computeOps, emptyBaseline, runFlushOp } from './flush'
 import type { ConfigSnapshot, ConfigStore, MonitorConfig, RecentsConfig, TerminalProfile } from './types'
 
@@ -57,6 +57,9 @@ export const useConfigStore = defineStore('config', () => {
                     store.recents = userConfig.recents as RecentsConfig
                 }
                 store.hotkeys = normalizeHotkeysConfig(store.hotkeys)
+                store.localGroups = normalizeGroupSortOrders(store.localGroups)
+                store.sshGroups = normalizeGroupSortOrders(store.sshGroups)
+                store.quickCommandGroups = normalizeGroupSortOrders(store.quickCommandGroups)
                 sanitizeProfiles()
                 sanitizeQuickCommands()
             }

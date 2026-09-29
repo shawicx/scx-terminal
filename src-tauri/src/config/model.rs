@@ -26,6 +26,9 @@ pub struct QuickCommandRecord {
 pub struct QuickCommandGroupRecord {
     pub id: String,
     pub name: String,
+    /// 手动排序号（对应 SQLite sort_order）
+    #[serde(default)]
+    pub sort_order: i64,
 }
 
 /// SSH 档案分组记录
@@ -34,6 +37,9 @@ pub struct QuickCommandGroupRecord {
 pub struct SshGroupRecord {
     pub id: String,
     pub name: String,
+    /// 手动排序号（对应 SQLite sort_order）
+    #[serde(default)]
+    pub sort_order: i64,
 }
 
 /// 本地档案分组记录（is_default 标系统默认分组：不可删除、不可重命名，锁定为前端 UI 约束）
@@ -44,6 +50,9 @@ pub struct LocalGroupRecord {
     pub name: String,
     #[serde(default)]
     pub is_default: bool,
+    /// 手动排序号（对应 SQLite sort_order）
+    #[serde(default)]
+    pub sort_order: i64,
 }
 
 /// 标签分组记录（collapsed 为 TabStrip 折叠态，随定义持久化）

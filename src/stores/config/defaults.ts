@@ -87,11 +87,64 @@ export function localGroupIdFor (shellId: string): string {
  *
  */
 export function localGroupsFromShells (shells: Shell[]): LocalGroup[] {
-    return defaultShellFirst(shells).map(shell => ({
+    return defaultShellFirst(shells).map((shell, index) => ({
         id: localGroupIdFor(shell.id),
         name: shell.name,
         builtin: true,
+        sortOrder: index,
     }))
+}
+
+/**
+ * @description 计算分组的下一个排序号：兼容旧数据缺失 sortOrder 时按列表位置兜底
+ * @param groups 现有分组列表
+ * @returns number 追加到末尾使用的排序号
+ *
+ * @example nextGroupSortOrder([{ sortOrder: 3 }]) // 4
+ *
+ */
+export function nextGroupSortOrder<T extends { sortOrder?: number }> (groups: T[]): number {
+    return groups.reduce((max, group, index) => {
+        const sortOrder = Number.isFinite(group.sortOrder) ? group.sortOrder! : index
+        return Math.max(max, sortOrder)
+    }, -1) + 1
+}
+
+/**
+ * @description 归一化分组排序号：旧配置缺 sortOrder 时按列表顺序补齐，避免后续实体更新把顺序写回 0
+ * @param groups 现有分组列表（入参不被修改）
+ * @returns T[] 排序号完整的新分组列表
+ *
+ * @example normalizeGroupSortOrders([{ id: 'a' }, { id: 'b' }])[1].sortOrder // 1
+ *
+ */
+export function normalizeGroupSortOrders<T extends { sortOrder?: number }> (groups: T[]): T[] {
+    if (groups.every(group => Number.isFinite(group.sortOrder))) {
+        return groups
+    }
+    return groups.map((group, index) => ({ ...group, sortOrder: index }))
+}
+
+/**
+ * @description 手动移动分组并归一化排序号：把 source 移到 target 当前位置后重写为 0..n-1
+ * @param groups 现有分组列表（入参不被修改）
+ * @param sourceKey 被移动分组 id
+ * @param targetKey 放置目标分组 id
+ * @returns T[] 移动并归一化后的新分组列表
+ *
+ * @example reorderGroups([{ id: 'a', sortOrder: 0 }, { id: 'b', sortOrder: 1 }], 'b', 'a')[0].id // 'b'
+ *
+ */
+export function reorderGroups<T extends { id: string, sortOrder?: number }> (groups: T[], sourceKey: string, targetKey: string): T[] {
+    const sourceIndex = groups.findIndex(group => group.id === sourceKey)
+    const targetIndex = groups.findIndex(group => group.id === targetKey)
+    if (sourceIndex === -1 || targetIndex === -1 || sourceIndex === targetIndex) {
+        return groups
+    }
+    const next = [...groups]
+    const [moved] = next.splice(sourceIndex, 1)
+    next.splice(targetIndex, 0, moved!)
+    return next.map((group, index) => ({ ...group, sortOrder: index }))
 }
 
 /** shells 排序副本：默认 shell 置顶，其余保持 /etc/shells 顺序（生成分组/迁移共用） */

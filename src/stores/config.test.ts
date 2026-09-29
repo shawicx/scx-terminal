@@ -14,6 +14,8 @@ import {
     localGroupsFromShells,
     migrateLocalGroups,
     groupLocalProfiles,
+    normalizeGroupSortOrders,
+    reorderGroups,
     defaultFirstProfiles,
     fallbackProfile,
     defaultConfig,
@@ -142,8 +144,8 @@ describe('computeOps (entity-level diff flush)', () => {
     it('emits per-entity create/update/delete for profiles, quick commands and groups', () => {
         const config = defaultConfig()
         config.profiles.push(localProfile('p1', 'zsh'))
-        config.quickCommandGroups.push({ id: 'g1', name: 'ops' })
-        config.sshGroups.push({ id: 'sg1', name: 'prod' })
+        config.quickCommandGroups.push({ id: 'g1', name: 'ops', sortOrder: 0 })
+        config.sshGroups.push({ id: 'sg1', name: 'prod', sortOrder: 0 })
         config.quickCommands.push(
             { id: 'q1', name: 'list', command: 'ls', autoRun: false },
             { id: 'q2', name: 'deploy', command: 'deploy', groupId: 'g1', autoRun: true },
@@ -187,6 +189,25 @@ describe('computeOps (entity-level diff flush)', () => {
         expect(ops.map(op => op.kind).sort()).toEqual(['colorSchemeDelete', 'colorSchemeSave'])
         expect(ops.find(op => op.kind === 'colorSchemeDelete')).toMatchObject({ kind: 'colorSchemeDelete', name: 'solar' })
         expect(ops.find(op => op.kind === 'colorSchemeSave')).toMatchObject({ kind: 'colorSchemeSave', name: 'solarized' })
+    })
+
+    it('emits group updates after a manual group reorder', () => {
+        const config = defaultConfig()
+        config.quickCommandGroups.push(
+            { id: 'g1', name: 'Alpha', sortOrder: 0 },
+            { id: 'g2', name: 'Zeta', sortOrder: 1 },
+        )
+        const baseline = captureBaseline(config)
+
+        config.quickCommandGroups = reorderGroups(config.quickCommandGroups, 'g2', 'g1')
+
+        expect(config.quickCommandGroups.map(group => [group.id, group.sortOrder])).toEqual([['g2', 0], ['g1', 1]])
+        const ops = computeOps(config, baseline)
+        expect(ops.map(op => op.kind)).toEqual(['quickCommandGroupUpdate', 'quickCommandGroupUpdate'])
+        expect(ops).toMatchObject([
+            { kind: 'quickCommandGroupUpdate', group: { id: 'g2', sortOrder: 0 } },
+            { kind: 'quickCommandGroupUpdate', group: { id: 'g1', sortOrder: 1 } },
+        ])
     })
 
     it('clears a hotkey whose action vanished from the store', () => {
@@ -284,6 +305,20 @@ describe('profiles from shells', () => {
     })
 })
 
+describe('group sort orders', () => {
+    it('normalizes legacy group records without sortOrder in list order', () => {
+        const groups = [
+            { id: 'g2', name: 'Zeta' },
+            { id: 'g1', name: 'Alpha', sortOrder: 9 },
+        ]
+
+        expect(normalizeGroupSortOrders(groups)).toEqual([
+            { id: 'g2', name: 'Zeta', sortOrder: 0 },
+            { id: 'g1', name: 'Alpha', sortOrder: 1 },
+        ])
+    })
+})
+
 describe('local groups from shells', () => {
     const shells: Shell[] = [
         { id: 'bash', name: 'bash', command: '/bin/bash', args: [], default: false },
@@ -293,8 +328,8 @@ describe('local groups from shells', () => {
     it('creates one builtin group per shell with the default shell first', () => {
         const groups = localGroupsFromShells(shells)
         expect(groups).toHaveLength(2)
-        expect(groups[0]).toEqual({ id: 'localgroup-zsh', name: 'zsh', builtin: true })
-        expect(groups[1]).toEqual({ id: 'localgroup-bash', name: 'bash', builtin: true })
+        expect(groups[0]).toEqual({ id: 'localgroup-zsh', name: 'zsh', builtin: true, sortOrder: 0 })
+        expect(groups[1]).toEqual({ id: 'localgroup-bash', name: 'bash', builtin: true, sortOrder: 1 })
     })
 
     it('generated profiles are builtin and assigned to their shell group', () => {
@@ -356,8 +391,8 @@ describe('migrateLocalGroups', () => {
 
 describe('groupLocalProfiles (settings sections)', () => {
     const groups = [
-        { id: 'localgroup-zsh', name: 'zsh', builtin: true },
-        { id: 'lg-work', name: '工作', builtin: false },
+        { id: 'localgroup-zsh', name: 'zsh', builtin: true, sortOrder: 0 },
+        { id: 'lg-work', name: '工作', builtin: false, sortOrder: 1 },
     ]
 
     /** 本地档案字面量（仅填分段所需字段） */

@@ -19,7 +19,7 @@ function ssh (overrides: Partial<SshProfile> = {}): SshProfile {
 }
 
 function group (id: string, name: string): SshGroup {
-    return { id, name }
+    return { id, name, sortOrder: 0 }
 }
 
 function local (overrides: Partial<LocalProfile> = {}): LocalProfile {
@@ -40,7 +40,7 @@ function local (overrides: Partial<LocalProfile> = {}): LocalProfile {
 }
 
 function localGroup (id: string, name: string, builtin = false): LocalGroup {
-    return { id, name, builtin }
+    return { id, name, builtin, sortOrder: 0 }
 }
 
 describe('buildGroupViews', () => {

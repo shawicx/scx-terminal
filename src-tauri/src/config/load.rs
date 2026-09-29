@@ -73,11 +73,15 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
 
     {
         let mut stmt = conn
-            .prepare("SELECT id, name FROM quick_command_groups ORDER BY sort_order")
+            .prepare("SELECT id, name, sort_order FROM quick_command_groups ORDER BY sort_order")
             .map_err(|e| format!("failed to read quick command groups: {e}"))?;
         let rows = stmt
             .query_map([], |row| {
-                Ok(QuickCommandGroupRecord { id: row.get(0)?, name: row.get(1)? })
+                Ok(QuickCommandGroupRecord {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    sort_order: row.get(2)?,
+                })
             })
             .map_err(|e| format!("failed to read quick command groups: {e}"))?;
         for row in rows {
@@ -105,7 +109,7 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
 
     {
         let mut stmt = conn
-            .prepare("SELECT id, name, is_default FROM local_groups ORDER BY sort_order")
+            .prepare("SELECT id, name, is_default, sort_order FROM local_groups ORDER BY sort_order")
             .map_err(|e| format!("failed to read local groups: {e}"))?;
         let rows = stmt
             .query_map([], |row| {
@@ -113,6 +117,7 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
                     id: row.get(0)?,
                     name: row.get(1)?,
                     is_default: row.get::<_, i64>(2)? != 0,
+                    sort_order: row.get(3)?,
                 })
             })
             .map_err(|e| format!("failed to read local groups: {e}"))?;
@@ -123,10 +128,14 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
 
     {
         let mut stmt = conn
-            .prepare("SELECT id, name FROM ssh_groups ORDER BY sort_order")
+            .prepare("SELECT id, name, sort_order FROM ssh_groups ORDER BY sort_order")
             .map_err(|e| format!("failed to read ssh groups: {e}"))?;
         let rows = stmt
-            .query_map([], |row| Ok(SshGroupRecord { id: row.get(0)?, name: row.get(1)? }))
+            .query_map([], |row| Ok(SshGroupRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                sort_order: row.get(2)?,
+            }))
             .map_err(|e| format!("failed to read ssh groups: {e}"))?;
         for row in rows {
             snapshot.ssh_groups.push(row.map_err(|e| e.to_string())?);

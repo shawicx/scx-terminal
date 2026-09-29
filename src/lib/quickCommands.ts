@@ -60,7 +60,7 @@ export interface QuickCommandSection<T> {
 }
 
 /**
- * @description 把快捷命令按分组整理为分段列表：未分组置顶（无标题），其余按组名排序；空分组保留
+ * @description 把快捷命令按分组整理为分段列表：未分组置顶（无标题），其余按传入分组顺序保留；空分组保留
  * @param quickCommands 快捷命令列表
  * @param groups 分组列表
  * @returns QuickCommandSection<T>[] 分段列表
@@ -85,7 +85,7 @@ export function groupQuickCommandSections<T extends { groupId?: string }> (
     if (ungrouped.length) {
         sections.push({ title: null, groupId: null, items: ungrouped })
     }
-    for (const group of [...groups].sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const group of groups) {
         sections.push({ title: group.name, groupId: group.id, items: byGroup.get(group.id) ?? [] })
     }
     return sections

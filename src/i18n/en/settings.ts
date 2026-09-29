@@ -92,6 +92,8 @@ export const settings = {
         profileDelete: 'Delete profile',
         profileCwdLockedHint: 'Locked on built-in profiles — always inherits the opening location',
         profileDeleteLockedHint: 'Built-in profiles cannot be deleted',
+        groupMoveUp: 'Move group up',
+        groupMoveDown: 'Move group down',
         localTerminalPage: 'Local terminal',
         localNewGroup: 'New group',
         localRenameGroup: 'Rename group',
