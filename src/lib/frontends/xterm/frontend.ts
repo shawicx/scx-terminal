@@ -36,6 +36,8 @@ export class XTermFrontend extends Frontend {
     private zoom = 0
     private resizeScheduler: ResizeScheduler
     private configuredTheme: Partial<ITheme> = {}
+    /** 档案专属配色（attach/configure 下发；null 跟随全局） */
+    private terminalColorScheme: TerminalColorScheme | null = null
     private copyOnSelect = false
     private preventNextOnSelectionChangeEvent = false
     private searchController = new XtermSearchController()
@@ -159,7 +161,7 @@ export class XTermFrontend extends Frontend {
         this.resizeScheduler.schedule()
     }
 
-    async attach (host: HTMLElement, _profile: BaseTerminalProfile): Promise<void> {
+    async attach (host: HTMLElement, profile: BaseTerminalProfile): Promise<void> {
         if (this.disposed) {
             return
         }
@@ -172,8 +174,9 @@ export class XTermFrontend extends Frontend {
             return
         }
 
-        // Just configure the colors to avoid a flash
-        this.configureColors(null)
+        // Just configure the colors to avoid a flash（档案专属配色优先，null 跟随全局）
+        this.terminalColorScheme = profile.terminalColorScheme ?? null
+        this.configureColors(this.terminalColorScheme)
         this.renderer.attach(this.enableWebGL)
 
         // Allow an animation frame
@@ -411,7 +414,7 @@ export class XTermFrontend extends Frontend {
         }
     }
 
-    configure (_profile: BaseTerminalProfile): void {
+    configure (profile: BaseTerminalProfile): void {
         setTimeout(() => {
             if (this.xterm.cols && this.xterm.rows) {
                 this.remeasureFont()
@@ -424,7 +427,8 @@ export class XTermFrontend extends Frontend {
         this.copyOnSelect = applied.copyOnSelect
         this.setFontSize()
 
-        this.configureColors(null)
+        this.terminalColorScheme = profile.terminalColorScheme ?? null
+        this.configureColors(this.terminalColorScheme)
     }
 
     setZoom (zoom: number): void {
