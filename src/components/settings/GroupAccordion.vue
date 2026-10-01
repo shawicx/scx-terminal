@@ -6,6 +6,7 @@
 <script setup lang="ts" generic="T">
 import { ref, watch } from 'vue'
 import { ChevronDown, ChevronRight, ChevronUp, GripVertical, Pencil, X } from 'lucide-vue-next'
+import { findNearestSortableGroup, findSortableGroupAtPoint } from './groupDragSort'
 
 /** 手风琴分段：展示字段 + data 原始载荷（成员列表等，交由插槽消费） */
 export interface AccordionSection<T> {
@@ -42,6 +43,51 @@ const openKey = ref('')
 /** 当前拖拽源 / 高亮落点分组键；空 = 无拖拽态 */
 const dragKey = ref('')
 const dropKey = ref('')
+/** 指针拖拽运行时状态；不用 HTML5 DnD 是因为 Tauri 的原生文件拖放会拦截 dataTransfer */
+let dragSource: AccordionSection<T> | null = null
+let dragPointerTarget: HTMLElement | null = null
+let dragPointerId = -1
+let dragStartX = 0
+let dragStartY = 0
+let dragMoved = false
+let suppressHeaderClick = false
+
+/**
+ * @description 输出分组拖拽调试日志（仅开发模式，便于定位 Tauri/浏览器事件链差异）
+ * @param args 任意调试参数
+ * @returns void
+ *
+ * @example debugGroupDrag('pointerdown', { key: 'g1' })
+ *
+ */
+function debugGroupDrag (...args: unknown[]): void {
+    if (import.meta.env.DEV) {
+        console.info('[group-drag]', ...args)
+    }
+}
+
+/**
+ * @description 解析当前指针的分组落点：命中组头时直接使用；落在组头间空隙时
+ *              回退到几何距离最近的组头（最近头不可排序仍返回 null）
+ * @param clientX 指针 X 坐标
+ * @param clientY 指针 Y 坐标
+ * @returns AccordionSection<T> | null 可排序目标；无有效目标返回 null
+ *
+ * @example findGroupDropTarget(event.clientX, event.clientY)
+ *
+ */
+function findGroupDropTarget (clientX: number, clientY: number): AccordionSection<T> | null {
+    const elements = document.elementsFromPoint(clientX, clientY)
+    const direct = findSortableGroupAtPoint(props.sections, clientX, clientY, () => elements)
+    if (elements.some(element => element.closest('[data-group-key]'))) {
+        return direct
+    }
+    const headers = [...document.querySelectorAll<HTMLElement>('[data-group-key]')].map(element => {
+        const rect = element.getBoundingClientRect()
+        return { key: element.dataset.groupKey!, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    })
+    return findNearestSortableGroup(props.sections, headers, clientX, clientY)
+}
 
 /** 首段是否已自动展开过（仅一次） */
 let autoOpened = false
@@ -81,9 +127,17 @@ function toggleSection (key: string): void {
 function requestReorder (sourceKey: string, targetKey: string): void {
     const source = props.sections.find(section => section.key === sourceKey)
     const target = props.sections.find(section => section.key === targetKey)
+    debugGroupDrag('reorder:request', {
+        sourceKey,
+        targetKey,
+        sourceSortable: source?.sortable,
+        targetSortable: target?.sortable,
+        sections: props.sections.map(section => ({ key: section.key, sortable: section.sortable })),
+    })
     if (!source?.sortable || !target?.sortable || sourceKey === targetKey) {
         return
     }
+    debugGroupDrag('reorder:emit', { sourceKey, targetKey })
     emit('reorder', sourceKey, targetKey)
 }
 
@@ -120,71 +174,142 @@ function moveSection (section: AccordionSection<T>, direction: -1 | 1): void {
 }
 
 /**
- * @description 记录拖拽源分组并写入 DataTransfer（跨组件兜底读取）
+ * @description 以分组手柄为起点启动指针拖拽（Tauri 开启原生拖放时会拦截 HTML5 DnD）
  * @param section 拖拽分段
- * @param event 拖拽事件
+ * @param event 指针按下事件
  * @returns void
  *
- * @example onDragStart(section, event)
+ * @example startGroupDrag(section, event)
  *
  */
-function onDragStart (section: AccordionSection<T>, event: DragEvent): void {
-    if (!section.sortable) {
-        return
-    }
-    dragKey.value = section.key
-    if (event.dataTransfer) {
-        event.dataTransfer.setData('text/plain', section.key)
-        event.dataTransfer.effectAllowed = 'move'
-    }
-}
-
-/**
- * @description 允许拖拽落在真实分组头上并记录落点
- * @param section 落点分段
- * @param event 拖拽事件
- * @returns void
- *
- * @example onDragOver(section, event)
- *
- */
-function onDragOver (section: AccordionSection<T>, event: DragEvent): void {
-    if (!dragKey.value || !section.sortable || section.key === dragKey.value) {
+function startGroupDrag (section: AccordionSection<T>, event: PointerEvent): void {
+    debugGroupDrag('pointerdown', {
+        key: section.key,
+        sortable: section.sortable,
+        button: event.button,
+        isPrimary: event.isPrimary,
+        pointerId: event.pointerId,
+        currentTarget: event.currentTarget instanceof HTMLElement ? event.currentTarget.tagName : null,
+    })
+    if (!section.sortable || event.button !== 0 || !event.isPrimary) {
         return
     }
     event.preventDefault()
-    dropKey.value = section.key
+    const currentTarget = event.currentTarget
+    if (!(currentTarget instanceof HTMLElement)) {
+        return
+    }
+    debugGroupDrag('drag:start', { key: section.key, pointerId: event.pointerId })
+    dragSource = section
+    dragPointerTarget = currentTarget
+    dragPointerId = event.pointerId
+    dragStartX = event.clientX
+    dragStartY = event.clientY
+    currentTarget.setPointerCapture(event.pointerId)
+    window.addEventListener('pointermove', traceGroupDrag)
+    window.addEventListener('pointerup', endGroupDrag)
+    window.addEventListener('pointercancel', endGroupDrag)
 }
 
 /**
- * @description 清除当前分组的高亮落点
- * @param section 落点分段
+ * @description 命中测试当前指针下的目标分组；移动超过阈值后才进入拖拽态
+ * @param event 指针移动事件
  * @returns void
  *
- * @example onDragLeave(section)
+ * @example traceGroupDrag(event)
  *
  */
-function onDragLeave (section: AccordionSection<T>): void {
-    if (dropKey.value === section.key) {
-        dropKey.value = ''
+function traceGroupDrag (event: PointerEvent): void {
+    if (!dragSource || event.pointerId !== dragPointerId) {
+        return
+    }
+    if (!dragMoved && Math.hypot(event.clientX - dragStartX, event.clientY - dragStartY) < 4) {
+        return
+    }
+    dragMoved = true
+    dragKey.value = dragSource.key
+    const target = findGroupDropTarget(event.clientX, event.clientY)
+    debugGroupDrag('drag:hit-test', {
+        sourceKey: dragSource.key,
+        targetKey: target?.key ?? null,
+        targetSortable: target?.sortable ?? null,
+    })
+    dropKey.value = target && target.key !== dragSource.key ? target.key : ''
+}
+
+/**
+ * @description 结束指针拖拽：有效落点时上抛排序请求，随后释放捕获并清理拖拽态
+ * @param event 指针抬起/取消事件
+ * @returns void
+ *
+ * @example endGroupDrag(event)
+ *
+ */
+function endGroupDrag (event: PointerEvent): void {
+    if (!dragSource || event.pointerId !== dragPointerId) {
+        return
+    }
+    const source = dragSource
+    // cleanup 会重置 dragMoved；提交判定必须先保存快照
+    const moved = dragMoved
+    const target = moved ? findGroupDropTarget(event.clientX, event.clientY) : null
+    debugGroupDrag('pointerup', {
+        sourceKey: source.key,
+        moved: dragMoved,
+        targetKey: target?.key ?? null,
+        x: event.clientX,
+        y: event.clientY,
+    })
+    cleanupGroupDrag()
+    if (moved) {
+        // 拖拽结束后的合成 click 不应再触发展开/收起
+        suppressHeaderClick = true
+        window.setTimeout(() => {
+            suppressHeaderClick = false
+        })
+        if (target && target.key !== source.key) {
+            requestReorder(source.key, target.key)
+        }
+    } else {
+        debugGroupDrag('drag:ignored-below-threshold', { key: source.key })
     }
 }
 
 /**
- * @description 完成拖拽排序并清理临时拖拽状态
- * @param section 落点分段
- * @param event 拖拽事件
+ * @description 清理指针捕获、窗口监听与临时拖拽状态
  * @returns void
  *
- * @example onDrop(section, event)
+ * @example cleanupGroupDrag()
  *
  */
-function onDrop (section: AccordionSection<T>, event: DragEvent): void {
-    event.preventDefault()
-    const sourceKey = dragKey.value || event.dataTransfer?.getData('text/plain') || ''
-    requestReorder(sourceKey, section.key)
+function cleanupGroupDrag (): void {
+    if (dragPointerTarget?.hasPointerCapture(dragPointerId)) {
+        dragPointerTarget.releasePointerCapture(dragPointerId)
+    }
+    window.removeEventListener('pointermove', traceGroupDrag)
+    window.removeEventListener('pointerup', endGroupDrag)
+    window.removeEventListener('pointercancel', endGroupDrag)
+    dragSource = null
+    dragPointerTarget = null
+    dragPointerId = -1
+    dragMoved = false
     dragKey.value = ''
     dropKey.value = ''
+}
+
+/**
+ * @description 分组头点击入口：指针拖拽结束后的合成点击会被忽略
+ * @param section 目标分段
+ * @returns void
+ *
+ * @example onHeaderClick(section)
+ *
+ */
+function onHeaderClick (section: AccordionSection<T>): void {
+    if (suppressHeaderClick) {
+        return
+    }
+    toggleSection(section.key)
 }
 
 </script>
@@ -193,21 +318,26 @@ function onDrop (section: AccordionSection<T>, event: DragEvent): void {
     <template v-for="section in props.sections" :key="section.key">
         <div
             class="group-header"
-            :class="{ 'drop-target': !!section.sortable && dropKey === section.key && dragKey !== section.key }"
-            :draggable="!!section.sortable"
-            @click="toggleSection(section.key)"
-            @dragstart="onDragStart(section, $event)"
-            @dragover="onDragOver(section, $event)"
-            @dragleave="onDragLeave(section)"
-            @drop="onDrop(section, $event)"
-            @dragend="dragKey = ''; dropKey = ''"
+            :class="{
+                'drop-target': !!section.sortable && dropKey === section.key && dragKey !== section.key,
+                dragging: dragKey === section.key,
+            }"
+            :data-group-key="section.key"
+            @click="onHeaderClick(section)"
         >
             <ChevronRight :size="14" class="group-chevron" :class="{ open: openKey === section.key }" />
             <span class="group-name">{{ section.title }}</span>
             <span v-if="section.count !== undefined" class="group-count">{{ section.count }}</span>
             <span v-if="section.badge" class="group-badge">{{ section.badge }}</span>
             <span v-if="section.manageable || section.sortable" class="group-actions" @click.stop>
-                <GripVertical v-if="section.sortable" :size="12" class="group-action-grip" aria-hidden="true" />
+                <span
+                    v-if="section.sortable"
+                    class="group-action-grip"
+                    aria-hidden="true"
+                    @pointerdown="startGroupDrag(section, $event)"
+                >
+                    <GripVertical :size="12" />
+                </span>
                 <button
                     v-if="section.sortable"
                     type="button"
@@ -273,6 +403,11 @@ function onDrop (section: AccordionSection<T>, event: DragEvent): void {
     box-shadow: inset 0 0 0 1px var(--color-ring);
 }
 
+.group-header.dragging {
+    cursor: grabbing;
+    opacity: 0.65;
+}
+
 .group-chevron {
     flex: none;
     color: var(--color-muted-foreground);
@@ -317,6 +452,7 @@ function onDrop (section: AccordionSection<T>, event: DragEvent): void {
 /* 隐藏但保留占位避免行高变化；悬停组头时浮现（对齐 SettingsView 原 qc-group-actions） */
 .group-actions {
     display: inline-flex;
+    align-items: center;
     gap: 2px;
     flex-shrink: 0;
     margin-left: auto;
@@ -362,9 +498,14 @@ function onDrop (section: AccordionSection<T>, event: DragEvent): void {
 
 .group-action-grip {
     display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
     flex: none;
     color: var(--color-muted-foreground);
     cursor: grab;
+    touch-action: none;
 }
 
 /* 收展过渡：grid 行高 0fr↔1fr 平滑动画（无需 JS 量高）；收起时内容淡出且
