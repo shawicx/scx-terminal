@@ -179,6 +179,7 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                 <Label>{{ t('settings.debugMode') }}</Label>
                 <Switch v-model="store.advanced.debugEnabled" />
             </div>
+            <p class="hint">{{ t('settings.debugModeHint') }}</p>
             <div class="settings-card-row">
                 <Label>{{ t('settings.logDir') }}</Label>
                 <div class="about-config">
@@ -196,7 +197,6 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                 </Button>
             </div>
         </div>
-        <p class="hint">{{ t('settings.debugModeHint') }}</p>
     </div>
 
     <Dialog v-if="pendingUpdate" :title="t('settings.updateAvailableTitle')" :width="440" @cancel="pendingUpdate = null">
@@ -216,6 +216,12 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
 </template>
 
 <style scoped>
+/* 调试说明内嵌卡片：对齐行内边距 */
+.settings-card .hint {
+    padding: 0 16px;
+    margin: 0 0 12px;
+}
+
 /* 关于页：应用图标 + 名称 + 版本居中展示 */
 .about-hero {
     display: flex;
