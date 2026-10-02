@@ -228,6 +228,14 @@ function reorderQuickCommandGroups (sourceKey: string, targetKey: string): void 
                         <Input v-model="selectedQuickCommand.name" class="w-60" />
                     </div>
                     <div class="settings-card-row">
+                        <Label>{{ t('settings.quickCommandDescription') }}</Label>
+                        <Input
+                            v-model="selectedQuickCommand.description"
+                            class="w-60"
+                            :placeholder="t('settings.quickCommandDescriptionPlaceholder')"
+                        />
+                    </div>
+                    <div class="settings-card-row">
                         <Label>{{ t('settings.quickCommandGroupLabel') }}</Label>
                         <Select v-model="quickCommandGroupModel" :options="quickCommandGroupOptions" class="w-60" />
                     </div>

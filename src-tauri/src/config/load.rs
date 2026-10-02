@@ -73,7 +73,7 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
 
     {
         let mut stmt = conn
-            .prepare("SELECT id, name, sort_order FROM quick_command_groups ORDER BY sort_order")
+            .prepare("SELECT id, name, sort_order, description FROM quick_command_groups ORDER BY sort_order")
             .map_err(|e| format!("failed to read quick command groups: {e}"))?;
         let rows = stmt
             .query_map([], |row| {
@@ -81,6 +81,7 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
                     id: row.get(0)?,
                     name: row.get(1)?,
                     sort_order: row.get(2)?,
+                    description: row.get(3)?,
                 })
             })
             .map_err(|e| format!("failed to read quick command groups: {e}"))?;
@@ -90,7 +91,7 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
     }
 
     let mut stmt = conn
-        .prepare("SELECT id, name, command, group_id, auto_run FROM quick_commands ORDER BY sort_order")
+        .prepare("SELECT id, name, command, group_id, auto_run, description FROM quick_commands ORDER BY sort_order")
         .map_err(|e| format!("failed to read quick commands: {e}"))?;
     let rows = stmt
         .query_map([], |row| {
@@ -100,6 +101,7 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
                 command: row.get(2)?,
                 group_id: row.get(3)?,
                 auto_run: row.get::<_, i64>(4)? != 0,
+                description: row.get(5)?,
             })
         })
         .map_err(|e| format!("failed to read quick commands: {e}"))?;

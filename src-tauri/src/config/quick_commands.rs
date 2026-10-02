@@ -13,14 +13,15 @@ pub(super) fn quick_command_create_internal(state: &ConfigState, command: &Quick
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let sort_order = next_sort_order(&tx, "quick_commands").map_err(|e| e.to_string())?;
     tx.execute(
-        "INSERT INTO quick_commands (id, group_id, name, command, auto_run, sort_order)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO quick_commands (id, group_id, name, command, auto_run, description, sort_order)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         rusqlite::params![
             command.id,
             command.group_id,
             command.name,
             command.command,
             command.auto_run,
+            command.description,
             sort_order
         ],
     )
@@ -35,12 +36,13 @@ pub(super) fn quick_command_update_internal(state: &ConfigState, command: &Quick
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let changed = tx
         .execute(
-            "UPDATE quick_commands SET group_id = ?1, name = ?2, command = ?3, auto_run = ?4 WHERE id = ?5",
+            "UPDATE quick_commands SET group_id = ?1, name = ?2, command = ?3, auto_run = ?4, description = ?5 WHERE id = ?6",
             rusqlite::params![
                 command.group_id,
                 command.name,
                 command.command,
                 command.auto_run,
+                command.description,
                 command.id
             ],
         )
@@ -68,8 +70,8 @@ pub(super) fn quick_command_group_create_internal(state: &ConfigState, group: &Q
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let sort_order = next_sort_order(&tx, "quick_command_groups").map_err(|e| e.to_string())?;
     tx.execute(
-        "INSERT INTO quick_command_groups (id, name, sort_order) VALUES (?1, ?2, ?3)",
-        rusqlite::params![group.id, group.name, sort_order],
+        "INSERT INTO quick_command_groups (id, name, sort_order, description) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![group.id, group.name, sort_order, group.description],
     )
     .map_err(|e| format!("failed to create quick command group {}: {e}", group.id))?;
     mark_initialized(&tx).map_err(|e| format!("failed to mark config initialized: {e}"))?;
@@ -82,8 +84,8 @@ pub(super) fn quick_command_group_update_internal(state: &ConfigState, group: &Q
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let changed = tx
         .execute(
-            "UPDATE quick_command_groups SET name = ?1, sort_order = ?2 WHERE id = ?3",
-            rusqlite::params![group.name, group.sort_order, group.id],
+            "UPDATE quick_command_groups SET name = ?1, sort_order = ?2, description = ?3 WHERE id = ?4",
+            rusqlite::params![group.name, group.sort_order, group.description, group.id],
         )
         .map_err(|e| format!("failed to update quick command group {}: {e}", group.id))?;
     if changed == 0 {

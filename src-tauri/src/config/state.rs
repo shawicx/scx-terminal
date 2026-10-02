@@ -117,6 +117,14 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         )
         .map_err(|e| format!("failed to create local_groups schema: {e}"))?;
     }
+    if version < 5 {
+        conn.execute_batch(
+            "ALTER TABLE quick_command_groups ADD COLUMN description TEXT NOT NULL DEFAULT '';
+             ALTER TABLE quick_commands ADD COLUMN description TEXT NOT NULL DEFAULT '';
+             PRAGMA user_version = 5;",
+        )
+        .map_err(|e| format!("failed to add quick command description columns: {e}"))?;
+    }
     Ok(())
 }
 

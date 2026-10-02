@@ -11,7 +11,7 @@ import { ref } from 'vue'
 
 type GroupNameDialogKind = 'ssh-create' | 'ssh-rename' | 'qc-create' | 'qc-rename' | 'local-create' | 'local-rename'
 
-interface GroupNameDialog { kind: GroupNameDialogKind, groupId: string | null, draft: string }
+interface GroupNameDialog { kind: GroupNameDialogKind, groupId: string | null, draft: string, descriptionDraft: string }
 
 /** null = 弹窗关闭；打开时携带来源、目标组与名称草稿 */
 const groupNameDialog = ref<GroupNameDialog | null>(null)
@@ -58,11 +58,12 @@ export function useGroupNameDialog () {
         if (!name) {
             return
         }
+        const description = dialog.descriptionDraft.trim()
         groupNameDialog.value = null
         if (dialog.kind === 'ssh-create') {
             store.sshGroups.push({ id: `sshgroup-${nanoid(6)}`, name, sortOrder: nextGroupSortOrder(store.sshGroups) })
         } else if (dialog.kind === 'qc-create') {
-            store.quickCommandGroups.push({ id: `qcgroup-${nanoid(6)}`, name, sortOrder: nextGroupSortOrder(store.quickCommandGroups) })
+            store.quickCommandGroups.push({ id: `qcgroup-${nanoid(6)}`, name, sortOrder: nextGroupSortOrder(store.quickCommandGroups), description: description || undefined })
         } else if (dialog.kind === 'local-create') {
             store.localGroups.push({ id: `localgroup-${nanoid(6)}`, name, builtin: false, sortOrder: nextGroupSortOrder(store.localGroups) })
         } else if (dialog.kind === 'ssh-rename') {
@@ -74,6 +75,7 @@ export function useGroupNameDialog () {
             const group = store.quickCommandGroups.find(g => g.id === dialog.groupId)
             if (group) {
                 group.name = name
+                group.description = description || undefined
             }
         } else {
             const group = store.localGroups.find(g => g.id === dialog.groupId)
@@ -83,7 +85,13 @@ export function useGroupNameDialog () {
         }
     }
 
-    return { groupNameDialog, groupNameDialogTitle, commitGroupNameDialog }
+    /** 弹窗是否为快捷命令分组（仅此类分组支持描述字段） */
+    const groupNameDialogIsQuickCommand = computed(() => {
+        const kind = groupNameDialog.value?.kind
+        return kind === 'qc-create' || kind === 'qc-rename'
+    })
+
+    return { groupNameDialog, groupNameDialogTitle, groupNameDialogIsQuickCommand, commitGroupNameDialog }
 }
 
 /**
@@ -94,7 +102,7 @@ export function useGroupNameDialog () {
  *
  */
 export function openCreateLocalGroup (): void {
-    groupNameDialog.value = { kind: 'local-create', groupId: null, draft: '' }
+    groupNameDialog.value = { kind: 'local-create', groupId: null, draft: '', descriptionDraft: '' }
 }
 
 /**
@@ -109,7 +117,7 @@ export function openRenameLocalGroup (id: string): void {
     const store = useConfigStore().store
     const group = store.localGroups.find(g => g.id === id)
     if (group && !group.builtin) {
-        groupNameDialog.value = { kind: 'local-rename', groupId: id, draft: group.name }
+        groupNameDialog.value = { kind: 'local-rename', groupId: id, draft: group.name, descriptionDraft: '' }
     }
 }
 
@@ -121,7 +129,7 @@ export function openRenameLocalGroup (id: string): void {
  *
  */
 export function openCreateSshGroup (): void {
-    groupNameDialog.value = { kind: 'ssh-create', groupId: null, draft: '' }
+    groupNameDialog.value = { kind: 'ssh-create', groupId: null, draft: '', descriptionDraft: '' }
 }
 
 /**
@@ -136,7 +144,7 @@ export function openRenameSshGroup (id: string): void {
     const store = useConfigStore().store
     const group = store.sshGroups.find(g => g.id === id)
     if (group) {
-        groupNameDialog.value = { kind: 'ssh-rename', groupId: id, draft: group.name }
+        groupNameDialog.value = { kind: 'ssh-rename', groupId: id, draft: group.name, descriptionDraft: '' }
     }
 }
 
@@ -148,7 +156,7 @@ export function openRenameSshGroup (id: string): void {
  *
  */
 export function openCreateQuickCommandGroup (): void {
-    groupNameDialog.value = { kind: 'qc-create', groupId: null, draft: '' }
+    groupNameDialog.value = { kind: 'qc-create', groupId: null, draft: '', descriptionDraft: '' }
 }
 
 /**
@@ -163,6 +171,6 @@ export function openRenameQuickCommandGroup (id: string): void {
     const store = useConfigStore().store
     const group = store.quickCommandGroups.find(g => g.id === id)
     if (group) {
-        groupNameDialog.value = { kind: 'qc-rename', groupId: id, draft: group.name }
+        groupNameDialog.value = { kind: 'qc-rename', groupId: id, draft: group.name, descriptionDraft: group.description ?? '' }
     }
 }

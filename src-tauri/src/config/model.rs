@@ -18,6 +18,9 @@ pub struct QuickCommandRecord {
     pub group_id: Option<String>,
     #[serde(default)]
     pub auto_run: bool,
+    /// 描述（可选备注，空串 = 未填写）
+    #[serde(default)]
+    pub description: String,
 }
 
 /// 快捷命令分组记录
@@ -29,6 +32,9 @@ pub struct QuickCommandGroupRecord {
     /// 手动排序号（对应 SQLite sort_order）
     #[serde(default)]
     pub sort_order: i64,
+    /// 描述（可选备注，空串 = 未填写）
+    #[serde(default)]
+    pub description: String,
 }
 
 /// SSH 档案分组记录

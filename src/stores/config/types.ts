@@ -86,6 +86,8 @@ export interface QuickCommandGroup {
     name: string
     /** 手动排序号（SQLite sort_order；加载按该值升序） */
     sortOrder: number
+    /** 描述（可选备注） */
+    description?: string
 }
 
 /** 快捷命令：command 支持 {{参数}} 占位符（Warp Workflow 式），autoRun 控制写入后是否补换行执行 */
@@ -96,6 +98,8 @@ export interface QuickCommand {
     /** 所属分组 id；缺省 = 未分组 */
     groupId?: string
     autoRun: boolean
+    /** 描述（可选备注） */
+    description?: string
 }
 
 export interface TerminalConfig {

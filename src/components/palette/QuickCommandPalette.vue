@@ -31,6 +31,8 @@ interface VisibleItem {
     quickCommand: QuickCommand
     label: string
     preview: string
+    /** 描述（可选备注，空串 = 未填写） */
+    description: string
     /** 过滤后扁平列表中的索引（键盘导航用） */
     flatIndex: number
 }
@@ -49,11 +51,13 @@ const visibleSections = computed<VisibleSection[]>(() => {
             const items = section.items
                 .filter(quickCommand =>
                     fuzzyMatch(query.value, quickCommand.name) !== null ||
-                    fuzzyMatch(query.value, quickCommand.command) !== null)
+                    fuzzyMatch(query.value, quickCommand.command) !== null ||
+                    (quickCommand.description ? fuzzyMatch(query.value, quickCommand.description) !== null : false))
                 .map(quickCommand => ({
                     quickCommand,
                     label: quickCommand.name || previewQuickCommand(quickCommand.command),
                     preview: previewQuickCommand(quickCommand.command),
+                    description: quickCommand.description ?? '',
                     flatIndex: flatIndex++,
                 }))
             return { title: section.title, items }
@@ -309,6 +313,7 @@ watch(quickCommandPaletteOpen, value => {
                             >
                                 <span class="palette-item-main">
                                     <span class="palette-item-label">{{ item.label }}</span>
+                                    <span v-if="item.description" class="palette-item-description">{{ item.description }}</span>
                                     <span class="palette-item-preview">{{ item.preview }}</span>
                                 </span>
                                 <span v-if="item.quickCommand.autoRun" class="palette-item-hotkey">↵</span>
@@ -368,6 +373,14 @@ watch(quickCommandPaletteOpen, value => {
 }
 
 .palette-item-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.palette-item-description {
+    color: var(--color-muted-foreground);
+    font-size: 11px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

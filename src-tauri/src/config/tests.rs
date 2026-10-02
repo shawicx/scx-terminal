@@ -32,6 +32,7 @@ fn command_json(id: &str, name: &str, group_id: Option<&str>) -> QuickCommandRec
         command: format!("echo {name}"),
         group_id: group_id.map(str::to_string),
         auto_run: false,
+        description: String::new(),
     }
 }
 
@@ -49,7 +50,7 @@ fn schema_is_versioned() {
     let state = temp_state("version");
     let conn = state.lock_conn();
     let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
 }
 
 #[test]
@@ -198,7 +199,7 @@ fn quick_command_crud_round_trip() {
 #[test]
 fn group_delete_cascades_ungroup() {
     let state = temp_state("qc-group");
-    quick_command_group_create_internal(&state, &QuickCommandGroupRecord { id: "g1".into(), name: "ops".into(), sort_order: 0 }).unwrap();
+    quick_command_group_create_internal(&state, &QuickCommandGroupRecord { id: "g1".into(), name: "ops".into(), sort_order: 0, description: String::new() }).unwrap();
     quick_command_create_internal(&state, &command_json("c1", "list", Some("g1"))).unwrap();
     quick_command_create_internal(&state, &command_json("c2", "free", None)).unwrap();
 
@@ -214,19 +215,20 @@ fn group_crud_round_trip() {
     let state = temp_state("qc-group-crud");
     quick_command_group_create_internal(
         &state,
-        &QuickCommandGroupRecord { id: "g1".into(), name: "ops".into(), sort_order: 0 },
+        &QuickCommandGroupRecord { id: "g1".into(), name: "ops".into(), sort_order: 0, description: String::new() },
     )
     .unwrap();
     quick_command_group_update_internal(
         &state,
-        &QuickCommandGroupRecord { id: "g1".into(), name: "运维".into(), sort_order: 0 },
+        &QuickCommandGroupRecord { id: "g1".into(), name: "运维".into(), sort_order: 0, description: "运维相关命令".into() },
     )
     .unwrap();
     let snapshot = load_internal(&state).unwrap().unwrap();
     assert_eq!(snapshot.quick_command_groups[0].name, "运维");
+    assert_eq!(snapshot.quick_command_groups[0].description, "运维相关命令");
     assert!(quick_command_group_update_internal(
         &state,
-        &QuickCommandGroupRecord { id: "ghost".into(), name: "x".into(), sort_order: 0 }
+        &QuickCommandGroupRecord { id: "ghost".into(), name: "x".into(), sort_order: 0, description: String::new() }
     )
     .is_err());
     quick_command_group_delete_internal(&state, "g1").unwrap();

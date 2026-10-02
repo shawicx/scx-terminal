@@ -48,7 +48,7 @@ const pages = computed(() => [
 
 const confirmState = useConfirmState()
 
-const { groupNameDialog, groupNameDialogTitle, commitGroupNameDialog } = useGroupNameDialog()
+const { groupNameDialog, groupNameDialogTitle, groupNameDialogIsQuickCommand, commitGroupNameDialog } = useGroupNameDialog()
 </script>
 
 <template>
@@ -94,6 +94,13 @@ const { groupNameDialog, groupNameDialogTitle, commitGroupNameDialog } = useGrou
             <div class="group-name-form">
                 <Label>{{ t('settings.groupNameLabel') }}</Label>
                 <Input v-model="groupNameDialog.draft" @keydown.enter.prevent="commitGroupNameDialog" />
+            </div>
+            <div v-if="groupNameDialogIsQuickCommand" class="group-name-form">
+                <Label>{{ t('settings.quickCommandGroupDescription') }}</Label>
+                <Input
+                    v-model="groupNameDialog.descriptionDraft"
+                    :placeholder="t('settings.quickCommandGroupDescriptionPlaceholder')"
+                />
             </div>
             <template #footer>
                 <Button variant="outline" size="sm" @click="groupNameDialog = null">{{ t('settings.cancel') }}</Button>
