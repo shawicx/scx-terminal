@@ -9,7 +9,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| 版本 | 0.2.1 |
+| 版本 | 0.2.0 |
 | 许可证 | - |
 | 运行时 | ESM |
 
@@ -33,6 +33,7 @@
 | 文档 | 层级 | 回答的问题 |
 | --- | --- | --- |
 | [02-architecture/architecture.md](02-architecture/architecture.md) | structure | 分层结构、模块依赖、扇入扇出 |
+| [02-architecture/data-flow.md](02-architecture/data-flow.md) | structure | 数据形态与阶段转换（阶段表，非时序图） |
 | [02-architecture/modules.md](02-architecture/modules.md) | structure | 每个模块的文件、符号、职责 |
 
 ## 03-interface/
@@ -40,15 +41,6 @@
 | 文档 | 层级 | 回答的问题 |
 | --- | --- | --- |
 | [03-interface/api.md](03-interface/api.md) | structure | 导出函数与 CLI 命令（带 file:line） |
-| [03-interface/components.md](03-interface/components.md) | surface | 前端组件清单与被引用度 |
-| [03-interface/state.md](03-interface/state.md) | surface | 状态管理：store 清单与消费关系 |
-| [03-interface/routing.md](03-interface/routing.md) | surface | 前端路由表（path → 组件） |
-
-## 04-design/
-
-| 文档 | 层级 | 回答的问题 |
-| --- | --- | --- |
-| [04-design/decisions.md](04-design/decisions.md) | structure | 设计决策与演进依据（git 提交 + 文档证据锚定） |
 
 ## 05-guides/
 
@@ -78,6 +70,7 @@
 | 文档 | 层级 | 回答的问题 |
 | --- | --- | --- |
 | [08-topics/frontends-middleware-services.md](08-topics/frontends-middleware-services.md) | structure | 仓库专属主题（图谱聚类推导） |
+| [08-topics/ci-keypress-cmd-t-double-open.md](08-topics/ci-keypress-cmd-t-double-open.md) | history | CI 构建 keypress 补发致 ⌘T 双开：根因、修复与调试手法 |
 
 ## 相关文档（仓库）
 

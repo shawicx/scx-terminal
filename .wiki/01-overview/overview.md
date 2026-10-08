@@ -3,272 +3,136 @@
 <details>
 <summary>Relevant source files</summary>
 
-- cliff.toml
-- scripts/gen-icon.ts
-- src-tauri/Cargo.toml
+- README.md
 - src-tauri/build.rs
+- src-tauri/capabilities/default.json
+- src-tauri/Cargo.toml
 - src-tauri/src/background.rs
 - src-tauri/src/config/groups.rs
-- src/components/settings/useConfirmAction.ts
-- src/components/settings/useGroupNameDialog.ts
-- src/components/split/splitTree.test.ts
-- src/components/terminal/searchFocus.test.ts
-- src/components/titlebar/tabGroupLayout.test.ts
-- src/components/titlebar/tabStripLayout.test.ts
 - src/i18n/index.ts
-- src/lib/backgroundImage.test.ts
 - src/lib/frontendContext.ts
+- src/lib/frontends/frontend.ts
+- src/lib/frontends/xterm/frontend.ts
+- src/lib/frontends/xterm/renderer.ts
+- src/lib/frontends/xterm/resize.ts
+- src/lib/frontends/xterm/search.ts
+- src/lib/frontends/xterm/support.ts
+- src/lib/middleware/middleware.ts
 </details>
-
-> 本页锚点采用数据中给出的**完整相对路径**与**符号名**（源数据未提供行号，故不虚构 `file:line`）。所有事实声明均可在给定 JSON 数据中溯源。
-
-## 一句话职责
-
-scx-terminal 是一个基于 Tauri V2 + Rust 后端 + Vue 3 前端的跨平台终端应用，用 Web 技术栈重建传统终端的渲染与交互层（README 自述）。
 
 ## 项目定位
 
-项目自述（readmeExcerpt）为「一个基于 **Tauri V2 + Rust + Vue 3 + shadcn-vue** 的跨平台终端应用」，由开源项目 [Tabby](https://github.com/Eugeny/tabby)（MIT License）改造而来，并重写了整体架构：后端由 Rust 承担 PTY 管理、配置持久化与 shell 探测；前端由 Vue 3 + Vite + Tailwind CSS 4 + shadcn-vue 构成，终端渲染使用 xterm.js 并优先 WebGL。面向的场景是 Windows / macOS 桌面端的本地终端使用，README 提供了 NSIS 安装包与 DMG 两种分发形态，数据目录位于 `%APPDATA%\com.scx.terminal\`（Windows）或 `~/Library/Application Support/com.scx.terminal/`（macOS）。本次扫描共识别 259 个文件，是一个前端为主体、带 Rust 原生后端的混合工程（projectType 标记为 frontend）。
+scx-terminal 是一个跨平台终端应用，官方自述为「一个基于 **Tauri V2 + Rust + Vue 3 + shadcn-vue** 的跨平台终端应用」（`README.md#scx-terminal`）。它由开源项目 Tabby（MIT License）改造而来并重写了整体架构：**后端**使用 Rust（Tauri V2），负责 PTY 管理、配置持久化与 shell 探测；**前端**使用 Vue 3 + Vite + Tailwind CSS 4 + shadcn-vue，终端渲染基于 xterm.js 且「WebGL 优先」；**工具链**为 bun（包管理）与 oxlint（Lint）（`README.md`，readmeExcerpt）。
 
-## 语言分工
+面向场景为 Windows 与 macOS 桌面的本地终端使用：README 提供了 Windows 的 NSIS 安装向导（`scx-terminal_<版本>_x64-setup.exe`，界面跟随系统语言）与 macOS 的 DMG（Apple Silicon / Intel）（`README.md#下载与安装`、`README.md#Windows`）。项目数据目录为 `%APPDATA%\com.scx.terminal\`（Windows）与 `~/Library/Application Support/com.scx.terminal/`（macOS），其中包含 config.db 配置与 logs\ 日志（`README.md`，readmeExcerpt）。
 
-数据中 `languages` 列出 7 种语言，主要职责域划分如下（各语言的 exampleFiles 为扫描清单内的真实文件）：
-
-| 语言 | 文件数 | 职责域 | 锚点（真实文件） |
-| --- | --- | --- | --- |
-| TypeScript | 137 | 前端逻辑主体：状态管理（stores）、终端前端抽象（lib/frontends）、中间件流处理、服务层（服务化调用 Tauri 插件）、构建脚本 | `scripts/gen-icon.ts`、`src/components/settings/useConfirmAction.ts`、`src/components/settings/useGroupNameDialog.ts` |
-| Rust | 53 | 原生后端：Tauri 侧实现（如运行时后台逻辑与配置持久化模块） | `src-tauri/build.rs`、`src-tauri/src/background.rs`、`src-tauri/src/config/groups.rs` |
-| Vue | 50 | 视图层：应用根组件与各功能面板（转发、监控、设置、SFTP 等） | `src/App.vue`、`src/components/forwarding/ForwardRuleFormDialog.vue`、`src/components/forwarding/ForwardingTabContent.vue` |
-| CSS | 10 | 样式层：全局样式、配色变量与组件级样式 | `src/assets/styles/main.css`、`src/assets/styles/palette.css`、`src/components/forwarding/ForwardingTabContent.css` |
-| TOML | 2 | 构建/发布配置（Rust 依赖清单、changelog 生成配置） | `cliff.toml`、`src-tauri/Cargo.toml` |
-| HTML | 1 | 前端页面骨架 | 数据未提供该语言 exampleFiles（信息不足） |
-| YAML | 1 | 配置文件 | 数据未提供该语言 exampleFiles（信息不足） |
-
-前端职责由 TypeScript + Vue + CSS 共同承担（`src/App.vue` 中 import 了 `vue` 与 `vue-i18n`，见 depUsage），原生后端职责集中在 `src-tauri`，两域通过 `@tauri-apps/api` 及一组 Tauri 插件通信（锚点见「技术栈」章节）。
+工程规模：共 265 个文件，其中生产文件 230 个、测试文件 35 个（数据字段 `fileCount` / `productionFileCount` / `testFileCount`）。仓库首次提交为 `feat: 初始化`（commit:b5fb9da6，2026-09-13）。
 
 ## 核心设计思路
 
-**前后端职责切分以「原生能力下沉 Rust、交互与渲染留在 Web」为原则。** 按 README 自述，PTY 管理、配置持久化和 shell 探测由 Rust 完成，前端只做展示与交互；数据中也能看到 Rust 侧存在独立的配置模块 `src-tauri/src/config/groups.rs` 与运行时后台模块 `src-tauri/src/background.rs`，与前端 `src/stores/config/store.ts`（import `pinia`、`yaml`）形成配置双端配合。原生能力被拆成细粒度插件而非一次性大接口：剪贴板（`src/lib/frontendContext.ts`）、对话框（`src/components/settings/pages/AppearancePage.vue`、`src/components/settings/pages/BackupPage.vue`、`src/components/sftp/SftpBrowserPane.vue`）、通知（`src/services/notifications.ts`）、打开外部资源（`src/lib/frontends/xterm/support.ts` 等 4 处）、进程与更新（`src/services/updater.ts`），说明设计上倾向于「能力按场景暴露」。
+**前后端职责二分、以 Tauri IPC 为边界。** 项目自述即明确了架构分层：Rust 侧承担 PTY 管理 / 配置持久化 / shell 探测，Vue 侧承担界面与终端渲染（`README.md#scx-terminal`、`README.md`，readmeExcerpt）。这一分层在文件分布上得到印证：前端源码位于 `src`（Vue 51 个、TypeScript 107 个、CSS 10 个文件），后端源码位于 `src-tauri`（Rust 53 个文件，如 `src-tauri/src/background.rs`、`src-tauri/src/config/groups.rs`），两侧通过 `@tauri-apps/api` 通信（该包在前端有 25 个导入点，含 `src/main.ts`、`src/components/sftp/SftpTabContent.vue`）。仓库首次提交信息为 `feat: 初始化`（commit:b5fb9da6，2026-09-13），说明当前代码库是在一次性重写基础上推进的。
 
-**前端内部采用「前端引擎抽象 + 中间件 + 集中式 Store」的三层结构。** `src/lib/frontends/xterm/` 目录把 xterm 的渲染（`renderer.ts` 同时 import `@xterm/addon-webgl` 与 `@xterm/addon-canvas`）、尺寸适配（`resize.ts`）、搜索（`search.ts`）、行读取（`lines.ts`）、选项（`options.ts`）与终端主体（`frontend.ts`）拆分为独立模块，`src/lib/frontends/frontend.ts`、`src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts` 则统一 import 了 `rxjs`，可见终端数据流以响应式流的方式在处理层流转（OSC 序列处理单独成模块）。状态则通过 pinia 集中在 `src/stores/config/store.ts`、`src/stores/forwarding.ts`、`src/stores/monitor.ts`、`src/stores/tabs.ts`，视图组件不各自持有跨页状态。
+**以「工厂 + 桶模块」隔离实现细节。** 会话层采用工厂模式，源码头注释写明：「会话工厂：按配置档案 type（local/ssh）创建对应会话，供 TerminalPane 统一构造（消除对具体会话类型的硬编码）」（`src/lib/sessions/index.ts:1`）；配置层采用桶模块，源码头注释写明：「配置 store 桶模块：对外保持 `@/stores/config` 的完整公开面不变（类型 / 默认值与纯函数 / flush 引擎 / store 本体统一再导出）」（`src/stores/config/index.ts:1`）。两处注释共同体现了「调用方只依赖稳定公开面」的设计取向。
 
-**技术选型围绕「终端渲染性能 + 桌面集成完整度」展开。** 渲染侧同时引入 WebGL（`@xterm/addon-webgl`）与 Canvas（`@xterm/addon-canvas`）两套渲染器，对应 README「WebGL 优先」的降级策略；字符宽度、链接识别、搜索、自适应等能力分别由 `@xterm/addon-unicode11`、`@xterm/addon-web-links`、`@xterm/addon-search`、`@xterm/addon-fit` 补齐（均在 `src/lib/frontends/xterm/frontend.ts` / `resize.ts` / `search.ts` 中被 import）。桌面集成侧由 Tauri 插件族覆盖更新、通知、剪贴板等；UI 侧用 reka-ui（`src/components/ui/Label.vue`、`Separator.vue`、`Slider.vue`、`Switch.vue`）+ Tailwind 体系，`src/lib/utils.ts` 通过 `clsx` + `tailwind-merge` 统一类名合并，`src/components/ui/Button.vue` 用 `class-variance-authority` 管理变体。
+**体验层被抽为可复用中枢。** 动效被独立为单一入口，源码头注释写明：「GSAP 动效中枢：统一缓动语言与预设时间线工厂（浮层进出场、列表条目浮现、液态高亮滑块、数值数组插值），供面板/弹窗/监控图表等场景复用。仅使用 gsap core」（`src/lib/motion/index.ts:1`）；国际化同样集中装配，源码头注释写明：「vue-i18n 装配入口：语言包在 zh-CN.ts / en.ts（Messages 类型以 zh-CN 为基准）」（`src/i18n/index.ts:1`）。技术选型上，终端渲染引入了 xterm 的多个可选 addon（canvas / webgl / fit / search / unicode11 / web-links，见 depUsage），前端与中间件层统一以 rxjs 承载数据流（导入点含 `src/lib/frontends/frontend.ts`、`src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts`）。
 
 ## 技术栈
 
-下表用途陈述均锚定 depUsage 证据；`usageKind = import` 锚定其 importFiles，`usageKind = test` 锚定测试文件。
+下表仅列生产代码中有导入证据（usageKind=import）的依赖，锚点为 depUsage 中记录的导入文件。
 
-| 技术 | 用途（含证据锚点） |
-| --- | --- |
-| `vue` | 视图层运行时，被 60 处 import，如 `src/App.vue`、`src/components/forwarding/ForwardRuleFormDialog.vue` |
-| `vue-i18n` | 国际化，被 39 处 import，如 `src/App.vue`、`src/components/palette/CommandPalette.vue` |
-| `pinia` | 状态管理，被 `src/main.ts`、`src/stores/config/store.ts`、`src/stores/forwarding.ts`、`src/stores/monitor.ts`、`src/stores/tabs.ts` import |
-| `@tauri-apps/api` | 前端调用 Tauri 原生能力的统一入口，被 25 处 import，如 `src/main.ts`、`src/components/settings/pages/AboutPage.vue`、`src/components/sftp/SftpTabContent.vue` |
-| `@tauri-apps/plugin-clipboard-manager` | 剪贴板能力，import 于 `src/lib/frontendContext.ts` |
-| `@tauri-apps/plugin-dialog` | 原生对话框，import 于 `src/components/settings/pages/AppearancePage.vue`、`src/components/settings/pages/BackupPage.vue`、`src/components/sftp/SftpBrowserPane.vue` |
-| `@tauri-apps/plugin-notification` | 系统通知，import 于 `src/services/notifications.ts` |
-| `@tauri-apps/plugin-opener` | 打开外部链接/文件，import 于 `src/components/settings/pages/AboutPage.vue`、`src/components/sftp/SftpBrowserPane.vue`、`src/components/sftp/TransferPopover.vue`、`src/lib/frontends/xterm/support.ts` |
-| `@tauri-apps/plugin-process` | 进程控制（配合更新流程），import 于 `src/services/updater.ts` |
-| `@tauri-apps/plugin-updater` | 应用更新，import 于 `src/components/settings/pages/AboutPage.vue`、`src/services/updater.ts` |
-| `@xterm/xterm` | 终端核心，被 7 处 import，如 `src/lib/frontends/xterm/frontend.ts`、`renderer.ts`、`options.ts` |
-| `@xterm/addon-webgl` | WebGL 渲染后端，import 于 `src/lib/frontends/xterm/renderer.ts` |
-| `@xterm/addon-canvas` | Canvas 渲染后端（降级路径），import 于 `src/lib/frontends/xterm/renderer.ts` |
-| `@xterm/addon-fit` | 终端尺寸自适应，import 于 `src/lib/frontends/xterm/frontend.ts`、`src/lib/frontends/xterm/resize.ts` |
-| `@xterm/addon-search` | 终端内搜索，import 于 `src/lib/frontends/xterm/search.ts` |
-| `@xterm/addon-unicode11` | Unicode11 宽度处理，import 于 `src/lib/frontends/xterm/frontend.ts` |
-| `@xterm/addon-web-links` | 终端内链接识别，import 于 `src/lib/frontends/xterm/frontend.ts` |
-| `rxjs` | 终端数据流/中间件处理，import 于 `src/lib/frontends/frontend.ts`、`src/lib/frontends/xterm/frontend.ts`、`src/lib/frontends/xterm/support.ts`、`src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts` |
-| `reka-ui` | 无样式 UI 原语，import 于 `src/components/ui/Label.vue`、`Separator.vue`、`Slider.vue`、`Switch.vue` |
-| `class-variance-authority` | 组件变体定义，import 于 `src/components/ui/Button.vue` |
-| `clsx` + `tailwind-merge` | 类名拼接与冲突合并，import 于 `src/lib/utils.ts` |
-| `lucide-vue-next` | 图标库，被 28 处 import，如 `src/components/forwarding/ForwardingTabContent.vue`、`src/components/monitor/MonitorSidebar.vue` |
-| `nanoid` | ID 生成，被 12 处 import，如 `src/components/settings/pages/KeysPage.vue`、`LocalProfilesPage.vue`、`QuickCommandsPage.vue`、`SshPage.vue`、`TabGroupsPage.vue` |
-| `deep-equal` | 终端前端选项/数据的深比较，import 于 `src/lib/frontends/xterm/frontend.ts` |
-| `gsap` | 动效，import 于 `src/lib/motion/index.ts` |
-| `yaml` | 配置解析，import 于 `src/stores/config/store.ts` |
-| `tailwindcss` | 样式框架，import 于 `src/assets/styles/main.css` |
-| `tw-animate-css` | 动画样式集，import 于 `src/main.ts` |
-| `vite` | 构建/开发服务器，import 于 `vite.config.ts` |
-| `@vitejs/plugin-vue` | Vite 的 Vue 编译插件，import 于 `vite.config.ts` |
-| `@tailwindcss/vite` | Tailwind 的 Vite 集成，import 于 `vite.config.ts` |
-| `vitest` | 单元测试框架（usageKind = test），测试文件如 `src/components/split/splitTree.test.ts`、`src/components/terminal/searchFocus.test.ts`、`src/components/titlebar/tabGroupLayout.test.ts`、`src/components/titlebar/tabStripLayout.test.ts`、`src/lib/backgroundImage.test.ts` |
+| 技术 | 证据（usageKind / 导入点） | 用途 |
+| --- | --- | --- |
+| @tauri-apps/api | import，25 个导入点：`src/main.ts`、`src/components/settings/pages/AboutPage.vue`、`src/components/sftp/SftpTabContent.vue` 等 | 前端调用 Tauri 后端能力 |
+| @tauri-apps/plugin-clipboard-manager | import，`src/lib/frontendContext.ts` | 剪贴板能力接入 |
+| @tauri-apps/plugin-dialog | import，`src/components/settings/pages/AppearancePage.vue`、`src/components/settings/pages/BackupPage.vue`、`src/components/sftp/SftpBrowserPane.vue` | 系统对话框 |
+| @tauri-apps/plugin-notification | import，`src/services/notifications.ts` | 系统通知 |
+| @tauri-apps/plugin-opener | import，`src/components/settings/pages/AboutPage.vue`、`src/components/sftp/SftpBrowserPane.vue`、`src/components/sftp/TransferPopover.vue`、`src/lib/frontends/xterm/support.ts` | 打开外部资源 |
+| @tauri-apps/plugin-process | import，`src/services/updater.ts` | 进程相关能力 |
+| @tauri-apps/plugin-updater | import，`src/components/settings/pages/AboutPage.vue`、`src/services/updater.ts` | 应用更新 |
+| @xterm/xterm | import，7 个导入点：`src/lib/frontends/xterm/frontend.ts`、`lines.ts`、`options.ts`、`renderer.ts`、`resize.ts` | 终端核心渲染 |
+| @xterm/addon-canvas | import，`src/lib/frontends/xterm/renderer.ts` | Canvas 渲染后端 |
 
-**选型合理性分析之一：终端渲染层选型高度专业化。** xterm 生态被完整引入而非自研渲染：核心 `@xterm/xterm` 配合两个渲染后端（WebGL/Canvas）与四个能力插件（fit/search/unicode11/web-links），证据是 `src/lib/frontends/xterm/renderer.ts` 同时 import 了 `@xterm/addon-webgl` 与 `@xterm/addon-canvas`，说明渲染后端被设计为可切换的；`resize.ts` 与 `search.ts` 把自适应与搜索各自隔离成模块，符合「一个 addon 一个职责」的组织方式，便于替换与按需启停。
+| @xterm/addon-fit | import，`src/lib/frontends/xterm/frontend.ts`、`src/lib/frontends/xterm/resize.ts` | 终端尺寸自适应 |
+| @xterm/addon-search | import，`src/lib/frontends/xterm/search.ts` | 终端内文本搜索 |
+| @xterm/addon-unicode11 | import，`src/lib/frontends/xterm/frontend.ts` | Unicode 11 宽度计算 |
+| @xterm/addon-web-links | import，`src/lib/frontends/xterm/frontend.ts` | 终端内链接识别 |
+| @xterm/addon-webgl | import，`src/lib/frontends/xterm/renderer.ts` | WebGL 渲染后端（README 所述「WebGL 优先」的实现位置） |
+| class-variance-authority | import，`src/components/ui/Button.vue` | UI 组件变体类名组合 |
+| clsx | import，`src/lib/utils.ts` | 条件类名拼接 |
+| deep-equal | import，`src/lib/frontends/xterm/frontend.ts` | 终端选项/状态深比较 |
+| gsap | import，`src/lib/motion/index.ts` | 动效时间线引擎 |
+| lucide-vue-next | import，28 个导入点：`src/components/forwarding/ForwardRuleFormDialog.vue`、`src/components/monitor/MonitorSidebar.vue`、`src/components/settings/ColorSchemePicker.vue` 等 | 图标库 |
+| nanoid | import，12 个导入点：`src/components/settings/pages/KeysPage.vue`、`LocalProfilesPage.vue`、`QuickCommandsPage.vue`、`SshPage.vue`、`TabGroupsPage.vue` 等 | 生成短 ID |
+| pinia | import，`src/main.ts`、`src/stores/config/store.ts`、`src/stores/forwarding.ts`、`src/stores/monitor.ts`、`src/stores/tabs.ts` | 状态管理 |
+| reka-ui | import，`src/components/ui/Label.vue`、`Separator.vue`、`Slider.vue`、`Switch.vue` | 无样式 UI 基元 |
+| rxjs | import，`src/lib/frontends/frontend.ts`、`src/lib/frontends/xterm/frontend.ts`、`support.ts`、`src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts` | 前后端/中间件数据流 |
+| tailwind-merge | import，`src/lib/utils.ts` | Tailwind 类名冲突消解 |
+| tw-animate-css | import，`src/main.ts` | 动画样式注入 |
+| vue | import，62 个导入点：`src/App.vue`、`src/components/forwarding/ForwardRuleFormDialog.vue`、`src/components/monitor/MetricChart.vue` 等 | 前端框架本体 |
+| vue-i18n | import，40 个导入点：`src/App.vue`、`src/components/palette/CommandPalette.vue` 等 | 国际化 |
+| yaml | import，`src/stores/config/store.ts` | 配置序列化 |
+| @tailwindcss/vite | import，`vite.config.ts` | Vite 侧 Tailwind 集成 |
+| @vitejs/plugin-vue | import，`vite.config.ts` | Vite 侧 Vue SFC 编译 |
+| tailwindcss | import，`src/assets/styles/main.css` | 原子化 CSS 引擎 |
+| vite | import，`vite.config.ts` | 构建与开发服务器 |
 
-**选型合理性分析之二：UI 与状态层贴近 shadcn-vue 体系。** reka-ui 提供 Label/Separator/Slider/Switch 等无样式原语，`class-variance-authority` + `clsx` + `tailwind-merge` 组合（分别锚定 `src/components/ui/Button.vue`、`src/lib/utils.ts`）构成变体与类名合并链路，`tw-animate-css` 与 `src/assets/styles/main.css` 承担动画与全局样式；状态统一由 pinia 承载（`src/main.ts` 即注册），保证跨面板（终端、转发、监控、配置）状态一致。桌面侧能力则全部走 Tauri 官方插件，而非自建 IPC，更新、通知、剪贴板等分别由 `src/services/updater.ts`、`src/services/notifications.ts`、`src/lib/frontendContext.ts` 单点接入，职责边界清晰。
+测试与工具链类依赖（不计入生产运行时）：
+
+| 技术 | usageKind / 证据 | 说明 |
+| --- | --- | --- |
+| vitest | test，35 个导入点（如 `src/components/settings/groupDragSort.test.ts`、`src/components/split/splitTree.test.ts`、`src/components/terminal/searchFocus.test.ts`、`src/components/titlebar/tabGroupLayout.test.ts`、`src/components/titlebar/tabStripLayout.test.ts`） | 仅用于单元测试 |
+| oxlint | script | 通过 scripts 命令使用（README 列出 `bun run lint`） |
+| vue-tsc | script | 通过 scripts 命令使用 |
+| @tauri-apps/cli | none | 数据中无导入证据，声明未用（README 中的 `bun run tauri dev` / `tauri build` 属命令层使用，超出 depUsage 断言范围） |
+| @types/deep-equal | none | 数据中无导入证据，声明未用 |
+| @types/node | none | 数据中无导入证据，声明未用 |
+| typescript | none | 数据中无导入证据，声明未用 |
+
+**选型合理性分析。** 依赖集合清晰分成四组：Tauri 官方插件组（clipboard / dialog / notification / opener / process / updater）把系统级能力按最小粒度切分并各自绑定到单一服务或组件，例如通知只出现在 `src/services/notifications.ts`、更新只出现在 `src/services/updater.ts`，说明系统能力被收敛到服务层而非散落到视图层；xterm 组把「核心 + 可选渲染/交互 addon」拆开，renderer 相关实现集中在 `src/lib/frontends/xterm/renderer.ts`（canvas 与 webgl 两个后端同文件导入），搜索、链接、Unicode 宽度分别落在 `search.ts`、`frontend.ts` 等独立文件，与 README 声明的「WebGL 优先」渲染策略相符；UI 组（reka-ui + class-variance-authority + clsx + tailwind-merge + tw-animate-css + lucide-vue-next）构成 shadcn-vue 的典型底层组合，类名工具集中在 `src/lib/utils.ts` 与 `src/components/ui/` 下；数据流组以 pinia（store）+ rxjs（流式管道）分工，前者管理 `src/stores/` 下的应用状态，后者用于 `src/lib/frontends/` 与 `src/lib/middleware/` 的终端数据管道。
+
+从耦合面看，`vue`（62 导入点）与 `vue-i18n`（40 导入点）覆盖最广，属全局基础设施；`rxjs` 只出现在 `src/lib/` 之下，未在 `src/components/` 出现，说明流式抽象被限定在终端前端与中间件层，视图层不直接消费流对象。
 
 ## 项目结构
 
-`sourceDirs` 为 `src` 与 `src-tauri`，对应 Web 前端与 Rust 后端两个源码域。依据数据中出现的真实路径，各自内部结构如下：
+数据给出的源码目录为 `src` 与 `src-tauri` 两个（`sourceDirs`），对应前端与后端两个语言域。
 
-| 目录 | 职责 | 锚点示例 |
-| --- | --- | --- |
-| `src/` | Vue 前端源码域：根组件、状态、服务、终端前端抽象、国际化与样式 | `src/App.vue`、`src/main.ts` |
-| `src/components/` | 视图组件层，按功能域再分层：设置、SFTP、转发、监控、命令面板、分屏、终端、标题栏、UI 原语 | `src/components/settings/pages/AboutPage.vue`、`src/components/sftp/SftpBrowserPane.vue`、`src/components/forwarding/ForwardingTabContent.vue`、`src/components/monitor/MonitorSidebar.vue`、`src/components/palette/CommandPalette.vue`、`src/components/split/splitTree.test.ts`、`src/components/terminal/searchFocus.test.ts`、`src/components/titlebar/tabGroupLayout.test.ts`、`src/components/ui/Button.vue` |
-| `src/lib/` | 与框架无关的核心逻辑：终端前端抽象、中间件、会话、动效与通用工具 | `src/lib/frontends/frontend.ts`、`src/lib/frontends/xterm/frontend.ts`、`src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts`、`src/lib/sessions/index.ts`、`src/lib/motion/index.ts`、`src/lib/utils.ts`、`src/lib/frontendContext.ts` |
-| `src/stores/` | pinia 状态层，按领域拆分：配置、转发、监控、标签页 | `src/stores/config/store.ts`、`src/stores/config/index.ts`、`src/stores/forwarding.ts`、`src/stores/monitor.ts`、`src/stores/tabs.ts` |
-| `src/services/` | 原生能力服务封装：通知与更新 | `src/services/notifications.ts`、`src/services/updater.ts` |
-| `src/i18n/` | 国际化装配 | `src/i18n/index.ts` |
-| `src/assets/styles/` | 全局样式与配色 | `src/assets/styles/main.css`、`src/assets/styles/palette.css` |
-| `src-tauri/` | Rust 后端源码域：构建脚本、依赖清单与后端模块 | `src-tauri/build.rs`、`src-tauri/Cargo.toml`、`src-tauri/src/background.rs`、`src-tauri/src/config/groups.rs` |
-| `scripts/` | 工程脚本（图标生成等） | `scripts/gen-icon.ts` |
-| 根级配置 | 构建与发布配置 | `vite.config.ts`、`cliff.toml` |
+**`src`（Vue 前端，Vue 51 文件 / TypeScript 107 文件 / CSS 10 文件）。** 该目录承载界面与终端渲染。README 进一步说明其内部划分为 components / stores / services / lib / i18n（`README.md#目录结构`，readmeExcerpt）。数据中的具体证据包括：`src/main.ts` 作为前端装配入口，导入 pinia、`@tauri-apps/api`、tw-animate-css；`src/App.vue` 作为根组件；`src/stores/` 下有 `config/store.ts`、`forwarding.ts`、`monitor.ts`、`tabs.ts` 等多个 pinia store，并由桶模块 `src/stores/config/index.ts` 统一再导出（`src/stores/config/index.ts:1`）；`src/lib/` 下有 sessions 工厂（`src/lib/sessions/index.ts`）、motion 中枢（`src/lib/motion/index.ts`）、frontends（xterm 相关 `frontend.ts` / `renderer.ts` / `resize.ts` / `search.ts` / `lines.ts` / `options.ts` / `support.ts`）、middleware（`middleware.ts`、`oscProcessing.ts`）；`src/services/` 下有 `notifications.ts`、`updater.ts`；`src/i18n/index.ts` 为 vue-i18n 装配入口，语言包为 zh-CN.ts / en.ts（`src/i18n/index.ts:1`）。组件目录按功能横向切分，可见 forwarding、monitor、sftp、settings、split、terminal、titlebar、palette、ui 等分组（均以真实文件路径为据，如 `src/components/forwarding/ForwardingTabContent.vue`、`src/components/split/splitTree.test.ts`、`src/components/titlebar/tabStripLayout.test.ts`）。
 
-目录间关系：`src/main.ts` 是前端装配起点，导入 `pinia`、`@tauri-apps/api` 与 `tw-animate-css`；`src/App.vue` 作为根视图消费 `vue` / `vue-i18n`；`src/components/**` 依赖 `src/stores/**`（pinia，见 `src/stores/*.ts` 的 import 证据）与 `src/lib/**`（终端前端、工具、动效）；`src/lib/frontends/xterm/**` 内部再拆分为渲染、尺寸、搜索、行、选项等子模块；`src/services/**` 与 `src/lib/frontendContext.ts` 是前端触达 Rust 插件能力的出口，最终由 `src-tauri/**` 承载。
+**`src-tauri`（Rust 后端，Rust 53 文件）。** 该目录承载 PTY、配置持久化与 shell 探测；README 表述为「Rust 后端（pty 背压队列 / config 持久化 / shells 探测）」（`README.md#目录结构`，readmeExcerpt）。数据中的具体文件包括构建脚本 `src-tauri/build.rs`、`src-tauri/src/background.rs`、`src-tauri/src/config/groups.rs`，以及能力声明 `src-tauri/capabilities/default.json` 与清单 `src-tauri/Cargo.toml`。
+
+**目录关系。** 前端通过 `@tauri-apps/api` 与一组 Tauri 插件访问后端能力（`src/main.ts` 等 25 个导入点），后端通过 `src-tauri/capabilities/default.json` 声明可授予前端的权限；两目录分属不同语言与构建体系（Vite/bun 与 Cargo），仅经 Tauri IPC 交互。
+
+**规模与测试分布。** 全仓 265 文件 = 生产 230 + 测试 35。测试以 TypeScript 单元测试形式存在（`*.test.ts`，如 `src/components/settings/groupDragSort.test.ts`、`src/components/split/splitTree.test.ts`、`src/components/terminal/searchFocus.test.ts`、`src/components/titlebar/tabGroupLayout.test.ts`、`src/components/titlebar/tabStripLayout.test.ts`，共 35 个 vitest 导入点），集中在 `src/components/` 下的布局、拖拽排序与搜索焦点等纯逻辑模块。
 
 ## 入口文件
 
-`entryFiles` 共 5 项，其装配关系如下：
+| 入口 | 职责（依据源码/注释） |
+| --- | --- |
+| `src/main.ts` | 前端装配入口。导入 pinia（store 注册）、`@tauri-apps/api`（后端调用）与 tw-animate-css（动画样式） |
+| `src/i18n/index.ts` | 「vue-i18n 装配入口：语言包在 zh-CN.ts / en.ts（Messages 类型以 zh-CN 为基准）」（`src/i18n/index.ts:1`） |
+| `src/lib/motion/index.ts` | 「GSAP 动效中枢：统一缓动语言与预设时间线工厂（浮层进出场、列表条目浮现、液态高亮滑块、数值数组插值），供面板/弹窗/监控图表等场景复用。仅使用 gsap core」（`src/lib/motion/index.ts:1`） |
+| `src/lib/sessions/index.ts` | 「会话工厂：按配置档案 type（local/ssh）创建对应会话，供 TerminalPane 统一构造（消除对具体会话类型的硬编码）」（`src/lib/sessions/index.ts:1`） |
+| `src/stores/config/index.ts` | 「配置 store 桶模块：对外保持 `@/stores/config` 的完整公开面不变（类型 / 默认值与纯函数 / flush 引擎 / store 本体统一再导出）」（`src/stores/config/index.ts:1`） |
 
-| 入口 | 启动/装配职责 | 证据锚点 |
-| --- | --- | --- |
-| `src/main.ts` | 前端应用装配入口：注册 pinia、接入 `@tauri-apps/api`、引入动画样式，是 Vue 应用与 Tauri 运行时的接合点 | import `pinia`、`@tauri-apps/api`、`tw-animate-css`（depUsage） |
-| `src/App.vue` | 根视图组件，承载整体布局与国际化上下文 | import `vue`、`vue-i18n`（depUsage） |
-| `src/i18n/index.ts` | 国际化模块入口，向下为 39 处 `vue-i18n` 使用点提供多语言能力 | `src/i18n/index.ts`（entryFiles） |
-| `src/lib/motion/index.ts` | 动效模块入口，统一封装 `gsap` 供视图层调用 | import `gsap`（depUsage） |
-| `src/lib/sessions/index.ts` | 会话模块入口，对外提供会话相关能力聚合 | `src/lib/sessions/index.ts`（entryFiles） |
-| `src/stores/config/index.ts` | 配置状态模块入口，配置域的统一出口（具体实现位于 `src/stores/config/store.ts`） | `src/stores/config/index.ts`、`src/stores/config/store.ts`（entryFiles / import `pinia`、`yaml`） |
-
-启动链路可概括为：`src/main.ts` 引导 → `src/App.vue` 渲染根视图 → 组件树经 `src/stores/config/index.ts` 等状态入口加载配置、经 `src/i18n/index.ts` 加载语言、经 `src/lib/motion/index.ts` 加载动效，终端视图则由 `src/lib/frontends/xterm/frontend.ts` 承载 xterm 实例。
-
-Rust 侧数据中出现的入口性文件为 `src-tauri/build.rs`（构建期脚本）与 `src-tauri/Cargo.toml`（依赖与包定义）；应用运行时入口未出现在 `entryFiles` 中（见「待确认」）。
+启动流程：`src/main.ts` 完成框架与插件装配（pinia、Tailwind/动画样式、Tauri API），`src/i18n/index.ts` 提供语言装配，其余三个入口分别提供动效、会话构造与配置 store 的对外稳定面。整体运行链路的完整时序在现有数据中无逐跳证据，故仅列出装配级事实，不作顺序推断。
 
 ## 核心组件
 
-数据给出的 `topSymbols` 按复杂度排序，均为 function 类型，是工程内复杂度最集中的一段代码：
+数据给出的复杂度最高符号集中在后端与终端管道逻辑上，`topSymbols` 依次为：`lock_conn`（复杂度 47）、`execute`（44）、`load_internal`（26）、`mark_initialized`（25）、`push`（20）、`new`（20）、`temp_dir`（13）、`encodeUTF8`（9）。其中 `lock_conn`、`load_internal`、`mark_initialized`、`temp_dir` 的命名与 Rust 后端职责（配置持久化、数据库连接、初始化标记、临时目录）方向一致；`push`（复杂度 20）与 `new`（复杂度 20）与 README 所述「pty 背压队列」及会话工厂的构造语义方向一致；`encodeUTF8` 则对应终端数据编码环节。这些符号共同构成项目的核心逻辑层：配置/连接互斥与初始化状态机、命令执行、背压队列写入、会话构造、以及 UTF-8 编码。
 
-| 符号 | 类型 | 复杂度 |
-| --- | --- | --- |
-| `lock_conn` | function | 46 |
-| `execute` | function | 43 |
-| `load_internal` | function | 25 |
-| `mark_initialized` | function | 24 |
-| `push` | function | 20 |
-| `new` | function | 20 |
-| `temp_dir` | function | 13 |
-| `session` | function | 9 |
-
-从命名与复杂度分布看，这批符号构成后端的关键路径：`lock_conn`（46）与 `execute`（43）复杂度最高，是并发保护与执行逻辑的集中点，说明该工程把最重的分支判断放在了「连接加锁 + 执行」这一对操作上；紧随其后的 `load_internal`（25）与 `mark_initialized`（24）呈现「加载—标记初始化完成」的两段式模式，与 README 自述的「配置持久化」职责方向一致（`src-tauri/src/config/groups.rs` 是配置模块的真实文件锚点）；`push`（20）配合 README 提到的「PTY 背压队列」描述，指向入队写入路径，`temp_dir`（13）与 `session`（9）则为临时目录与会话相关操作。这些符号所属文件与调用边未包含在本次数据中，因此不做更进一步的模块归属推断。
-
-## 模块依赖关系
-
-下图的节点全部取自数据中出现的真实文件路径，边依据 depUsage 的 importFiles 证据绘制（同一依赖被多文件 import 时归并到相邻层）：
-
-```mermaid
-graph TD
-  main["src/main.ts"] --> App["src/App.vue"]
-  main --> Pinia["pinia（状态容器注册）"]
-  main --> TauriApi["@tauri-apps/api"]
-  main --> Anim["tw-animate-css"]
-
-  App --> Components["src/components（视图层）"]
-  App --> I18n["src/i18n/index.ts"]
-  Components --> Stores["src/stores（config / forwarding / monitor / tabs）"]
-  Components --> Lib["src/lib（frontends / middleware / motion / utils）"]
-  Components --> Services["src/services（notifications.ts / updater.ts）"]
-  Components --> UI["src/components/ui（Button.vue 等）"]
-
-  Lib --> XtermCore["@xterm/xterm"]
-  Lib --> XtermAddons["addons：webgl / canvas / fit / search / unicode11 / web-links"]
-  Lib --> Rx["rxjs"]
-  Lib --> Motion["gsap"]
-
-  Stores --> ConfigStore["src/stores/config/store.ts"]
-  Services --> Plugins["Tauri 插件：updater / notification / process"]
-  Lib --> FrontendCtx["src/lib/frontendContext.ts"]
-  FrontendCtx --> PluginClip["@tauri-apps/plugin-clipboard-manager"]
-
-  TauriApi --> Backend["src-tauri（Rust 后端）"]
-  Backend --> Background["src-tauri/src/background.rs"]
-  Backend --> ConfigGroups["src-tauri/src/config/groups.rs"]
-```
-
-依赖方向可以概括为三条纵向链路：视图层（`src/components/**`）→ 状态与逻辑层（`src/stores/**`、`src/lib/**`）→ 原生能力层（`src/services/**`、`src/lib/frontendContext.ts`）→ 运行时（`@tauri-apps/api` 与插件）→ Rust 后端（`src-tauri/**`）。所有跨层调用都必须经由这条链路，`src/components/**` 不直接 import `@tauri-apps/plugin-*`（depUsage 中这些插件的 importFiles 均落在 `src/lib/`、`src/services/` 或设置页，未出现终端组件）。
-
-### 调用关系
-
-按 R2，静态可达性一律用表格而非时序图。本次数据未提供调用边（无「调用方→被调用方」结构），因此只能列出可确证的 import 依赖关系：
-
-| 依赖方 | 被依赖方 | 证据锚点 |
-| --- | --- | --- |
-| `src/lib/frontends/xterm/frontend.ts` | `@xterm/xterm` | depUsage.importFiles |
-| `src/lib/frontends/xterm/frontend.ts` | `@xterm/addon-fit`、`@xterm/addon-unicode11`、`@xterm/addon-web-links` | depUsage.importFiles |
-| `src/lib/frontends/xterm/frontend.ts` | `rxjs`、`deep-equal` | depUsage.importFiles |
-| `src/lib/frontends/xterm/renderer.ts` | `@xterm/addon-webgl`、`@xterm/addon-canvas`、`@xterm/xterm` | depUsage.importFiles |
-| `src/lib/frontends/xterm/resize.ts` | `@xterm/addon-fit`、`@xterm/xterm` | depUsage.importFiles |
-| `src/lib/frontends/xterm/search.ts` | `@xterm/addon-search` | depUsage.importFiles |
-| `src/lib/frontends/xterm/lines.ts`、`src/lib/frontends/xterm/options.ts` | `@xterm/xterm` | depUsage.importFiles |
-| `src/lib/frontends/xterm/support.ts` | `rxjs`、`@tauri-apps/plugin-opener` | depUsage.importFiles |
-| `src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts` | `rxjs` | depUsage.importFiles |
-| `src/lib/utils.ts` | `clsx`、`tailwind-merge` | depUsage.importFiles |
-| `src/lib/motion/index.ts` | `gsap` | depUsage.importFiles |
-| `src/services/updater.ts` | `@tauri-apps/plugin-updater`、`@tauri-apps/plugin-process` | depUsage.importFiles |
-| `src/services/notifications.ts` | `@tauri-apps/plugin-notification` | depUsage.importFiles |
-| `src/lib/frontendContext.ts` | `@tauri-apps/plugin-clipboard-manager` | depUsage.importFiles |
-| `src/stores/config/store.ts` | `pinia`、`yaml` | depUsage.importFiles |
-| `src/components/ui/Button.vue` | `class-variance-authority` | depUsage.importFiles |
-
-更细粒度的函数级调用链（如 `execute`、`push` 的调用方）在本次数据中缺失，见「待确认」。
-
-## 配置与数据
-
-配置能力横跨前后端两侧，证据如下：
-
-| 侧 | 载体 | 说明与锚点 |
-| --- | --- | --- |
-| 前端状态 | `src/stores/config/store.ts` | import `pinia` 与 `yaml`，是以 store 形态承载配置并解析 YAML 的位置 |
-| 前端状态入口 | `src/stores/config/index.ts` | 配置域对外出口，属 entryFiles |
-| 后端持久化 | `src-tauri/src/config/groups.rs` | Rust 侧配置模块，对应 README 自述的「配置持久化」 |
-| 后端运行时 | `src-tauri/src/background.rs` | Rust 侧后台逻辑模块 |
-| 构建/包定义 | `src-tauri/Cargo.toml` | Rust 依赖与包元数据 |
-| 发布配置 | `cliff.toml` | changelog 生成配置 |
-| 构建配置 | `vite.config.ts` | import `vite`、`@vitejs/plugin-vue`、`@tailwindcss/vite` |
-
-数据落盘位置按 README 自述为 `%APPDATA%\com.scx.terminal\`（Windows，含 `config.db` 与 `logs\`）与 `~/Library/Application Support/com.scx.terminal/`（macOS），该路径为仓库自述内容而非代码锚点，故标注来源为 readmeExcerpt。README 同时说明设置页「关于」提供数据目录一键打开与调试日志开关，对应组件锚点为 `src/components/settings/pages/AboutPage.vue`（import `@tauri-apps/api` 与 `@tauri-apps/plugin-opener`）。
-
-## 构建与开发流程
-
-README（readmeExcerpt）给出的命令与本次数据中的构建文件对应关系如下，命令本身来源为 README，配置文件来源为真实路径：
-
-| 命令 | 作用 | 相关配置文件锚点 |
-| --- | --- | --- |
-| `bun install` | 安装前端依赖 | 依赖清单（`@tauri-apps/api`、`vue`、`pinia` 等，见技术栈表） |
-| `bun run dev` | 仅启动前端 Vite 开发服务器 | `vite.config.ts` |
-| `bun run tauri dev` | 启动完整桌面应用（开发模式） | `vite.config.ts`、`src-tauri/Cargo.toml` |
-| `bun run tauri build` | 构建发布版安装包 | `src-tauri/Cargo.toml`、`cliff.toml` |
-| `bun run lint` | oxlint 检查 | 数据未提供 oxlint 配置文件锚点 |
-| `bun run test` | vitest 单元测试 | `vitest` 被 33 个测试文件 import，如 `src/components/split/splitTree.test.ts`、`src/components/terminal/searchFocus.test.ts`、`src/components/titlebar/tabGroupLayout.test.ts`、`src/components/titlebar/tabStripLayout.test.ts`、`src/lib/backgroundImage.test.ts` |
-
-构建产物按 README 自述为 `src-tauri/target/release/bundle/macos/scx-terminal.app`（约 5MB），DMG 由 create-dmg 脚本生成，无 GUI 权限时可用 hdiutil 兜底 —— 该段为 readmeExcerpt 内容，无对应代码锚点。此外 `scripts/gen-icon.ts` 是仓库内真实存在的图标生成脚本，`src-tauri/build.rs` 为 Rust 构建期脚本。
-
-## 测试现状
-
-从 depUsage 中 `vitest` 的 importFiles 可确证工程存在成规模的单元测试，且测试集中在与布局/几何计算相关的纯逻辑上：
-
-| 测试文件 | 被测领域（依据路径命名） |
-| --- | --- |
-| `src/components/split/splitTree.test.ts` | 分屏树 |
-| `src/components/terminal/searchFocus.test.ts` | 终端搜索焦点 |
-| `src/components/titlebar/tabGroupLayout.test.ts` | 标签分组布局 |
-| `src/components/titlebar/tabStripLayout.test.ts` | 标签条布局 |
-| `src/lib/backgroundImage.test.ts` | 背景图处理 |
-
-`vitest` 共被 33 个 importCount 引用，说明测试覆盖面不止上表 5 个示例文件。测试文件按规则不计入项目功能描述。
+`topSymbols` 数据中未提供各符号所属文件与 qualified_name，因此上段仅能描述符号名与复杂度，无法给出 file:line 锚点归属——**待确认**：需补充符号所在文件路径以定位后端各核心模块的具体实现位置（该缺口影响读者按符号检索代码）。
 
 ## 待确认
 
-1. **Rust 运行时入口缺失**：`entryFiles` 只列出 5 个前端入口，`languages[Rust].exampleFiles` 仅含 `src-tauri/build.rs`、`src-tauri/src/background.rs`、`src-tauri/src/config/groups.rs`，缺少 Tauri 应用主入口（如 `src-tauri/src/main.rs` 或 `lib.rs`）的证据，故本页未给出后端启动流程。
-2. **符号归属与调用边缺失**：「核心组件」表中 8 个 `topSymbols` 未携带所属文件与调用方信息，`supplementalSymbols`（待确认） 为空，因此无法按 R2 产出函数级调用表，`lock_conn`/`execute` 等符号的模块归属未做推断。
-3. **HTML 与 YAML 文件身份未知**：`languages` 中 HTML（1 个）与 YAML（1 个）的 `exampleFiles` 均为空数组，无法确认其属于入口页面还是 CI 配置，本页未对其职责下结论。
-4. **配置模块双入口职责边界未定**：`src/stores/config/index.ts` 与 `src/stores/config/store.ts` 同时存在，但数据只显示后者 import `pinia`/`yaml`，前者仅出现在 `entryFiles`，二者分工缺少源码证据。
-5. **文档目录内容为空**：`docsFiles` 为空数组，而 README 自述存在 `docs/` 设计文档（Tabby → Tauri 移植记录），二者不一致，本页无法列出文档清单。
+1. **topSymbols 缺文件锚点**：`lock_conn` / `execute` / `load_internal` / `mark_initialized` / `push` / `new` / `temp_dir` / `encodeUTF8` 均无 file:line 或 qualified_name，无法指向具体模块。
+2. **docs/ 目录内容缺失**：README 目录结构声明存在 `docs/ 设计文档（Tabby → Tauri 移植记录）`，但本次数据 `docsFiles` 为空数组，无法列出延伸阅读清单。
 
-## 延伸阅读
-
-本次提供的数据中 `docsFiles` 为空数组，无任何文档文件路径可供列出。README（readmeExcerpt）自述存在 `docs/` 目录用于存放设计文档（Tabby → Tauri 移植记录），但该目录的具体文件清单在数据中缺失，属「待确认」第 5 项，故此处不列举条目。
-
-仓库根级另有 `cliff.toml`（changelog 生成配置）与 `src-tauri/Cargo.toml`（Rust 包定义）可供直接查阅，二者路径来自 `languages[TOML].exampleFiles`。
+> 说明：`packageDescription` 为空字符串，项目定位以 README 自述与代码证据为准；readmeExcerpt 已被截断，其后章节不在本页证据范围内。
 ## Related
 
 - 同目录：[tech-stack.md](tech-stack.md) · [environment.md](environment.md)
+- 互补职责：[tech-stack.md](../01-overview/tech-stack.md)
+- 共享 9 个源文件、共享 73 个符号：[onboarding.md](../05-guides/onboarding.md)
+- 共享 9 个源文件、共享 51 个符号：[troubleshooting.md](../05-guides/troubleshooting.md)
+- 共享 19 个符号：[components.md](../03-interface/components.md)
 - 总入口：[README](../README.md)

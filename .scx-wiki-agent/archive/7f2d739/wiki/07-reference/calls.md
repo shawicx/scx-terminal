@@ -1,4 +1,4 @@
-# 调用关系
+# Calls
 
 <details>
 <summary>Relevant source files</summary>
@@ -17,7 +17,7 @@
 - src-tauri/src/fsutil.rs
 - src-tauri/src/history.rs
 - src-tauri/src/lib.rs
-- src-tauri/src/monitor/mod.rs
+- src-tauri/src/main.rs
 </details>
 
 调用关系边表（按入口/热点分组）。每条边可被 trace_path / CALLS 查询复现。
@@ -50,7 +50,6 @@
 | `forward_stop` | src/services/forward.ts:33 | src-tauri/src/forward/mod.rs:431 |
 | `forward_list` | src/services/forward.ts:45 | src-tauri/src/forward/mod.rs:461 |
 | `forward_list_all` | src/services/forward.ts:56 | src-tauri/src/forward/mod.rs:479 |
-| `history_list` | src/services/history.ts:33 | src-tauri/src/history.rs:88 |
 | `history_record` | src/services/history.ts:69 | src-tauri/src/history.rs:67 |
 | `history_clear` | src/services/history.ts:78 | src-tauri/src/history.rs:151 |
 | `fs_read_text_file` | src/services/history.ts:106 | src-tauri/src/fsutil.rs:114 |
@@ -68,21 +67,22 @@
 | `pty_kill` | src/services/pty.ts:130 | src-tauri/src/pty/mod.rs:298 |
 | `pty_ack_data` | src/services/pty.ts:136 | src-tauri/src/pty/mod.rs:310 |
 | `key_inspect` | src/services/secrets.ts:55 | src-tauri/src/secrets/keys.rs:153 |
+| `key_generate` | src/services/secrets.ts:67 | src-tauri/src/secrets/keys.rs:100 |
 
-## 扇入（被调用次数）
+## Fan-in（被调用次数）
 
 | 符号 | 文件 | 扇入 |
 | --- | --- | --- |
-| lock_conn |  | 47 |
-| execute |  | 44 |
-| load_internal |  | 26 |
-| mark_initialized |  | 25 |
+| lock_conn |  | 46 |
+| execute |  | 43 |
+| load_internal |  | 25 |
+| mark_initialized |  | 24 |
 | push |  | 20 |
 | new |  | 20 |
-| new |  | 15 |
 | temp_dir |  | 13 |
+| new |  | 12 |
 | new |  | 10 |
-| encodeUTF8 |  | 9 |
+| session |  | 9 |
 
 ## main
 
@@ -91,9 +91,9 @@
 | 调用方 | 被调用方 | 源文件:行号 |
 | --- | --- | --- |
 | main | run | src-tauri/src/lib.rs:70 |
-| run | Users-scx-Documents-code-scx-terminal.src-tauri.src.shells.ShellInfo.default | src-tauri/src/shells.rs:15 |
-| run | Users-scx-Documents-code-scx-terminal.src-tauri.src.history.HistoryState.new | src-tauri/src/history.rs:38 |
-| run | Users-scx-Documents-code-scx-terminal.src-tauri.src.proc_cwd.VnodeInfoPath.path | src-tauri/src/proc_cwd.rs:50 |
+| run | default | src-tauri/src/shells.rs:15 |
+| run | new | src-tauri/src/history.rs:38 |
+| run | path | src-tauri/src/proc_cwd.rs:50 |
 
 ## useGroupNameDialog
 
@@ -111,14 +111,14 @@
 | --- | --- | --- |
 | constructor | FlowControl | src/lib/frontends/xterm/support.ts:61 |
 | constructor | encodeUTF8 | src/lib/utils/bytes.ts:50 |
-| constructor | Users-scx-Documents-code-scx-terminal.src.lib.frontends.xterm.frontend.XTermFrontend.getSelection | src/lib/frontends/xterm/frontend.ts:274 |
-| constructor | Users-scx-Documents-code-scx-terminal.src.lib.frontends.xterm.frontend.XTermFrontend.copySelection | src/lib/frontends/xterm/frontend.ts:278 |
+| constructor | getSelection | src/lib/frontends/xterm/frontend.ts:271 |
+| constructor | copySelection | src/lib/frontends/xterm/frontend.ts:275 |
 | constructor | createKeyboardEventHandler | src/lib/frontends/xterm/keyboard.ts:28 |
 | constructor | createKeyGate | src/lib/frontends/xterm/keyboard.ts:82 |
 | constructor | ResizeScheduler | src/lib/frontends/xterm/resize.ts:13 |
-| constructor | Users-scx-Documents-code-scx-terminal.src.lib.frontends.xterm.frontend.XTermFrontend.isAttachActive | src/lib/frontends/xterm/frontend.ts:53 |
+| constructor | isAttachActive | src/lib/frontends/xterm/frontend.ts:51 |
 | constructor | XtermRendererManager | src/lib/frontends/xterm/renderer.ts:26 |
-| copySelection | Users-scx-Documents-code-scx-terminal.src.lib.frontends.xterm.frontend.XTermFrontend.getSelection | src/lib/frontends/xterm/frontend.ts:274 |
+| copySelection | getSelection | src/lib/frontends/xterm/frontend.ts:271 |
 | createKeyboardEventHandler | encodeUTF8 | src/lib/utils/bytes.ts:50 |
 | createKeyGate | isIMETextKey | src/lib/frontends/xterm/support.ts:35 |
 
@@ -130,14 +130,14 @@
 | --- | --- | --- |
 | connectHeadless | useConfigStore | src/stores/config/store.ts:23 |
 | connectHeadless | SshProxy | src/services/ssh.ts:57 |
-| connectHeadless | Users-scx-Documents-code-scx-terminal.src.lib.sshConnectionRegistry.SshConnectionRegistry.noteHeadlessDead | src/lib/sshConnectionRegistry.ts:165 |
+| connectHeadless | noteHeadlessDead | src/lib/sshConnectionRegistry.ts:165 |
 | connectHeadless | refreshMirror | src/services/sshConnections.ts:152 |
 | connectHeadless | pendingKbdResolver | src/services/sshConnections.ts:33 |
 | connectHeadless | setProfilePassword | src/services/secrets.ts:126 |
 | refreshMirror | useConfigStore | src/stores/config/store.ts:23 |
-| refreshMirror | Users-scx-Documents-code-scx-terminal.src.lib.sshConnectionRegistry.SshConnectionRegistry.hasPaneSessions | src/lib/sshConnectionRegistry.ts:85 |
-| refreshMirror | Users-scx-Documents-code-scx-terminal.src.lib.sshConnectionRegistry.SshConnectionRegistry.headlessSshIdFor | src/lib/sshConnectionRegistry.ts:211 |
-| refreshMirror | Users-scx-Documents-code-scx-terminal.src.lib.sshConnectionRegistry.SshConnectionRegistry.isConnecting | src/lib/sshConnectionRegistry.ts:215 |
+| refreshMirror | hasPaneSessions | src/lib/sshConnectionRegistry.ts:85 |
+| refreshMirror | headlessSshIdFor | src/lib/sshConnectionRegistry.ts:211 |
+| refreshMirror | isConnecting | src/lib/sshConnectionRegistry.ts:215 |
 
 ## copy_file
 
@@ -146,16 +146,16 @@
 | 调用方 | 被调用方 | 源文件:行号 |
 | --- | --- | --- |
 | copy_file | failed | src-tauri/src/transfers/mod.rs:112 |
-| copy_file | Users-scx-Documents-code-scx-terminal.src-tauri.src.transfers.mod.TransferManager.new | src-tauri/src/transfers/mod.rs:117 |
-| copy_file | Users-scx-Documents-code-scx-terminal.src-tauri.src.monitor.parse.MonitorSample.load | src-tauri/src/monitor/parse.rs:55 |
+| copy_file | new | src-tauri/src/transfers/mod.rs:117 |
+| copy_file | load | src-tauri/src/monitor/parse.rs:55 |
 | copy_file | advance | src-tauri/src/transfers/mod.rs:289 |
-| copy_file | Users-scx-Documents-code-scx-terminal.src-tauri.src.pty.queue.Utf8Splitter.flush | src-tauri/src/pty/queue.rs:50 |
-| copy_file | Users-scx-Documents-code-scx-terminal.src-tauri.src.forward.mod.ForwardHandle.shutdown | src-tauri/src/forward/mod.rs:156 |
-| new | Users-scx-Documents-code-scx-terminal.src-tauri.src.shells.ShellInfo.default | src-tauri/src/shells.rs:15 |
-| advance | Users-scx-Documents-code-scx-terminal.src-tauri.src.transfers.mod.TransferManager.mutate | src-tauri/src/transfers/mod.rs:173 |
+| copy_file | flush | src-tauri/src/pty/queue.rs:50 |
+| copy_file | shutdown | src-tauri/src/forward/mod.rs:156 |
+| new | default | src-tauri/src/shells.rs:15 |
+| advance | mutate | src-tauri/src/transfers/mod.rs:173 |
 | advance | emit_all | src-tauri/src/transfers/mod.rs:282 |
 | mutate | is_terminal | src-tauri/src/transfers/mod.rs:89 |
-| emit_all | Users-scx-Documents-code-scx-terminal.src-tauri.src.transfers.mod.TransferManager.snapshots | src-tauri/src/transfers/mod.rs:190 |
+| emit_all | snapshots | src-tauri/src/transfers/mod.rs:190 |
 
 ## accept_local_connection
 
@@ -163,25 +163,14 @@
 
 | 调用方 | 被调用方 | 源文件:行号 |
 | --- | --- | --- |
-| accept_local_connection | Users-scx-Documents-code-scx-terminal.src-tauri.src.forward.mod.ForwardHandle.snapshot | src-tauri/src/forward/mod.rs:168 |
-| accept_local_connection | Users-scx-Documents-code-scx-terminal.src-tauri.src.forward.mod.ForwardHandle.spawn_tracked | src-tauri/src/forward/mod.rs:189 |
-| accept_local_connection | Users-scx-Documents-code-scx-terminal.src-tauri.src.ssh.session.SshSession.open_direct_tcpip | src-tauri/src/ssh/session.rs:200 |
-| accept_local_connection | Users-scx-Documents-code-scx-terminal.src-tauri.src.ssh.session.ScxHandler.port | src-tauri/src/ssh/session.rs:25 |
+| accept_local_connection | snapshot | src-tauri/src/forward/mod.rs:168 |
+| accept_local_connection | spawn_tracked | src-tauri/src/forward/mod.rs:189 |
+| accept_local_connection | open_direct_tcpip | src-tauri/src/ssh/session.rs:200 |
+| accept_local_connection | port | src-tauri/src/ssh/session.rs:25 |
 | accept_local_connection | pipe_bidirectional | src-tauri/src/forward/loops.rs:50 |
-| spawn_tracked | Users-scx-Documents-code-scx-terminal.src-tauri.src.pty.queue.PtyDataQueue.push | src-tauri/src/pty/queue.rs:96 |
+| spawn_tracked | push | src-tauri/src/pty/queue.rs:96 |
 | push | maybe_emit | src-tauri/src/pty/queue.rs:151 |
-
-## 本页确定知道的事实
-
-- 调用边分组 6 组（入口 2 / 热点锚定 4）
-- 调用边共 45 条（每组内已去重）
-- 扇入表条目 10 个
-- Tauri IPC 跨语言命令 95 个、事件 5 个
 ## Related
 
 - 同目录：[classes.md](classes.md) · [glossary.md](glossary.md)
-- 互补职责：[glossary.md](../07-reference/glossary.md)
-- 共享 15 个源文件、共享 40 个符号：[api.md](../03-interface/api.md)
-- 共享 3 个源文件、共享 3 个符号：[architecture.md](../02-architecture/architecture.md)
-- 共享 6 个源文件：[onboarding.md](../05-guides/onboarding.md)
 - 总入口：[README](../README.md)

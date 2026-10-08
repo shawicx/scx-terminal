@@ -16,5 +16,15 @@
       "src/lib/sessions/localSession.ts",
       "src/lib/frontends/xterm/resize.ts"
     ]
+  },
+  {
+    "id": "ci-keypress-cmd-t-double-open",
+    "title": "CI 构建包 keypress 补发导致 ⌘T 双开（根因与调试手法）",
+    "pinned": true,
+    "files": [
+      "src/lib/frontends/xterm/keyboard.ts",
+      "src/lib/frontends/xterm/frontend.ts",
+      "src/lib/hotkeys/hotkeys.ts"
+    ]
   }
 ]

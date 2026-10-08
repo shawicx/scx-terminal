@@ -1,534 +1,626 @@
-# 故障排除（Troubleshooting）
+# 故障排除指南
 
 <details>
 <summary>Relevant source files</summary>
 
 - scripts/gen-icon.ts
-- src/components/split/splitTree.test.ts
-- src/components/terminal/searchFocus.test.ts
-- src/components/titlebar/tabGroupLayout.test.ts
-- src/components/titlebar/tabStripLayout.test.ts
+- src-tauri/src/fsutil.rs
 - src/i18n/index.ts
-- src/lib/backgroundImage.test.ts
 - src/lib/backgroundImage.ts
+- src/lib/colorSchemes.ts
 - src/lib/frontendContext.ts
 - src/lib/frontends/frontend.ts
 - src/lib/frontends/xterm/frontend.ts
-- src/lib/frontends/xterm/lines.ts
-- src/lib/frontends/xterm/options.ts
 - src/lib/frontends/xterm/renderer.ts
 - src/lib/frontends/xterm/resize.ts
+- src/lib/frontends/xterm/search.ts
+- src/lib/frontends/xterm/support.ts
+- src/lib/middleware/middleware.ts
+- src/lib/middleware/oscProcessing.ts
+- src/lib/motion/index.ts
 </details>
 
-本页汇总 `frontend`（Vue 3 + Vite + Tauri）项目在环境、构建、运行时三个层面可复现的问题与处置方式，所有条目均锚定到数据集提供的文件路径与符号。
-
-> 锚点说明：本页锚点使用数据集中的**完整相对路径**（如 `src/components/monitor/MonitorSidebar.vue`）。数据集未提供行号，故不标注 `:line`，也不推测行号；凡是数据集未覆盖的内容一律显式标注「待确认」。
+本页汇总该项目（Vue 3 + Vite + TypeScript + Tauri 前端工程）在环境配置、构建、运行时三个阶段最可能遇到的问题，全部条目均以源码锚点或配置字段为依据。
 
 ---
 
-## 一、环境问题
+## 0. 症状速查表
 
-### 1.1 包管理器必须使用 bun
+| 症状 | 先去哪一节 |
+| --- | --- |
+| `bun install` / 依赖树不一致、锁文件冲突 | 环境问题 §1 |
+| `tauri dev` / `tauri build` 报找不到 Rust 工具链或命令不存在 | 环境问题 §2 |
+| `vite` 启动后行为与 Tauri 内运行不一致 | 环境问题 §3 |
+| `vue-tsc` 报错导致 `bun run build` 直接失败 | 构建问题 §1 |
+| Tailwind 类名不生效、动画类缺失 | 构建问题 §2 |
+| `deep-equal` 相关 ESLint/打包报错 | 构建问题 §3 |
+| 图标资源生成失败或尺寸不符 | 构建问题 §4 |
+| 终端画面黑屏/花屏、显卡切换后不恢复 | 运行时问题 §1 |
+| 终端尺寸错位、拖拽窗口后列数不对 | 运行时问题 §2 |
+| 自动滚动/回滚行为异常 | 运行时问题 §3 |
+| 命令建议菜单项数不对、看不到历史 | 运行时问题 §4 |
+| 历史搜索找不到较早条目 | 运行时问题 §5 |
+| 监控图表曲线异常/内存增长 | 运行时问题 §6 |
+| 侧边栏拖拽到某个宽度后不再变化 | 运行时问题 §7 |
+| 背景图透明度拖到最低后看不见 | 运行时问题 §8 |
 
-**问题描述**
-依赖安装/脚本执行若混用 npm、pnpm、yarn，可能出现依赖提升结果不一致、脚本行为差异。
+---
 
-**原因分析**
-数据集 `packageManager` 明确为 `bun`；`scripts` 中所有命令均为裸命令（`dev`、`build`、`preview`、`app:dev`、`app:build`、`lint`、`test`），没有前缀声明，项目约定用 bun 驱动。
+## 1. 环境问题
 
-**解决方案**
+### 1.1 包管理器不是 npm/yarn —— 必须使用 Bun
+
+**问题描述**：按 `npm install` / `yarn`（待确认） 安装后出现依赖版本不一致，或脚手架脚本无法执行。
+
+**原因分析**：项目声明的包管理器为 `packageManager` = `bun`。混用包管理器会生成多份锁文件，导致 `@tauri-apps/*`、`@xterm/*` 等包解析到不同版本。
+
+**解决方案**：
 
 ```bash
-bun install          # 安装依赖
-bun run dev          # 等价于 vite
-bun run build        # vue-tsc --noEmit && vite build
-bun run app:dev      # tauri dev
+bun install          # 统一使用 bun 安装
+bun run dev          # 开发服务器
+bun run app:dev      # Tauri 桌面开发（见 §1.2）
 ```
 
-若怀疑本地依赖树被污染，删除 `node_modules` 后用 bun 重装，再复现问题。
+如果仓库中已存在 `package-lock.json` / `yarn.lock`，删除后再执行 `bun install`。
 
 ---
 
-### 1.2 Node 版本要求未在数据中声明
+### 1.2 Tauri CLI 与 Rust（Cargo）工具链缺失
 
-**问题描述**
-无法从数据判断项目要求的最低 Node 版本，遇到 `vue-tsc` 或 `vite` 报语法/API 不支持时无法直接对照版本要求。
+**问题描述**：执行 `bun run app:dev` 或 `bun run app:build` 时报 “command not found: tauri” 或 Rust 编译工具链相关错误。
 
-**原因分析**
-`nodeVersion` 字段为空字符串。
+**原因分析**：
 
-**解决方案**
-以 bun 自带运行时为准执行脚本（见 1.1）；如需确认 Node 侧要求，**待确认**：数据未提供 `.nvmrc`、`engines` 或 CI 配置，无法给出具体版本号。
+- `@tauri-apps/cli` 在依赖使用证据中 `usageKind = none`、`importFiles` 为空，它不通过源码 `import` 使用，而是由 npm scripts 调起的命令行程序：
+  - `app:dev` → `tauri dev`
+  - `app:build` → `tauri build`
+- 该项目包含 Rust 侧代码，模块清单中存在 `Cargo` 模块，且 Rust 源码文件 `src-tauri/src/fsutil.rs` 在变更统计中被追踪（锚点：`commit:c81c17e5 (2026-09-19)`，target `src-tauri/src/fsutil.rs`）。因此构建链路依赖本机安装 Rust 工具链。
+
+**解决方案**：
+
+```bash
+bun install                 # 确保 @tauri-apps/cli 已安装到 node_modules
+bunx tauri --version        # 验证 CLI 可用
+rustc --version && cargo --version   # 验证 Rust 工具链
+bun run app:dev
+```
+
+若 `bunx tauri` 可用但 `bun run app:dev` 失败，检查 `PATH` 是否包含 `node_modules/.bin`（Bun 运行时脚本应自动注入）。
+
+> 说明：`src-tauri/` 下的 Rust 依赖版本与 Tauri 配置内容未在本次数据中提供，不在此展开（见 §6 待确认）。
 
 ---
 
-### 1.3 Tauri 环境变量缺失（纯 Vite 模式）
+### 1.3 Vite 侧 Tauri 环境变量
 
-**问题描述**
-用 `bun run dev`（即 `vite`）在浏览器里打开页面时，Tauri 注入的运行时上下文不存在，涉及宿主相关分支的逻辑表现与 `bun run app:dev` 不一致。
+**问题描述**：把应用跑在浏览器里（`bun run dev` 直接打开 `localhost`）时，行为与 `tauri dev` 窗口内不一致（例如资源路径、调试开关不同）。
 
-**原因分析**
-数据集登记的环境变量为：
+**原因分析**：`vite.config.ts` 中读取了两个环境变量：
 
-| 变量名 | 敏感 | 说明 |
+| 变量 | 敏感 | 引用位置（生产源码锚点） |
 | --- | --- | --- |
-| `TAURI_ENV_HOST` | 否 | Tauri CLI 注入，标识宿主/目标平台信息 |
-| `TAURI_ENV_DEBUG` | 否 | Tauri CLI 注入，标识调试构建 |
+| `TAURI_ENV_HOST` | 否 | `vite.config.ts` |
+| `TAURI_ENV_DEBUG` | 否 | `vite.config.ts` |
 
-这两个变量由 Tauri CLI 在启动时注入，独立运行 `vite` 时不会存在。数据未提供这两个变量的读取位置（无 `filePath`），因此无法给出精确读取点锚点。
+**解决方案**：
 
-**解决方案**
+- 需要完整桌面环境时始终使用 `bun run app:dev`，而不是 `bun run dev`。
+- 若必须在纯浏览器下调试，手动导出后再启动：
 
 ```bash
-bun run app:dev      # 走 Tauri CLI，注入 TAURI_ENV_* 后再复现问题
+TAURI_ENV_DEBUG=true bun run dev
 ```
 
-排障原则：**凡是涉及宿主能力的现象，一律用 `bun run app:dev` 复现，不要在纯 `vite` 下判断。**
+> 推断：这两个变量名以 `TAURI_ENV_` 前缀命名，且 `vite.config.ts` 是唯一引用点，结合脚本 `app:dev: tauri dev`，可判断它们由 Tauri CLI 在启动时注入；直接执行 `vite` 时不会被注入。推断依据：变量命名前缀 + `vite.config.ts` 单一引用点 + `scripts.app:dev/app:build`。
 
 ---
 
-### 1.4 Tauri 插件包与宿主侧不匹配
+### 1.4 前端插件依赖与原生能力的对应关系
 
-**问题描述**
-调用剪贴板、文件对话框、通知、打开外部链接、进程退出、更新检查时抛错或静默失败。
+**问题描述**：某个功能在开发时正常，打包后调用（如系统弹窗、通知、打开外部链接、检查更新）静默失败或直接抛错。
 
-**原因分析**
-前端已通过 import 接入以下插件包（均有引用证据）：
+**原因分析**：以下 `@tauri-apps/plugin-*` 包均为前端 `import` 使用，若原生侧未启用对应插件，运行时会失败。使用证据如下（均为 `usageKind = import`）：
 
-| 依赖 | 引用方（示例） | usageKind |
+| 依赖 | 前端 import 锚点 |
+| --- | --- |
+| `@tauri-apps/plugin-clipboard-manager` | `src/lib/frontendContext.ts` |
+| `@tauri-apps/plugin-dialog` | `src/components/settings/pages/AppearancePage.vue`、`src/components/settings/pages/BackupPage.vue`、`src/components/sftp/SftpBrowserPane.vue` |
+| `@tauri-apps/plugin-notification` | `src/services/notifications.ts` |
+| `@tauri-apps/plugin-opener` | `src/components/settings/pages/AboutPage.vue`、`src/components/sftp/SftpBrowserPane.vue`、`src/components/sftp/TransferPopover.vue`、`src/lib/frontends/xterm/support.ts` |
+| `@tauri-apps/plugin-process` | `src/services/updater.ts` |
+| `@tauri-apps/plugin-updater` | `src/components/settings/pages/AboutPage.vue`、`src/services/updater.ts` |
+
+其中 `@tauri-apps/plugin-opener` 的一个关键使用点是终端超链接处理：`src/lib/frontends/xterm/support.ts` —— 终端里点击链接打不开，优先检查此处链路。
+
+**解决方案**：
+
+1. 确认 `bun install` 完整（`node_modules/@tauri-apps/` 下六个 plugin 目录都存在）。
+2. 确认运行的是 `bun run app:dev` / `bun run app:build`（原生插件仅在 Tauri 容器内提供实现）。
+3. 只影响单条链路时，按上表定位到对应 `import` 文件，在调用处加日志确认是在前端 `invoke` 阶段失败还是原生侧返回错误。
+
+---
+
+## 2. 构建问题
+
+### 2.1 `vue-tsc --noEmit` 类型检查失败导致构建中断
+
+**问题描述**：`bun run build` 直接失败，报出大量 `TSxxxx`（待确认） 错误，`vite build` 根本没开始。
+
+**原因分析**：构建脚本是串行两步：
+
+```json
+"build": "vue-tsc --noEmit && vite build"
+```
+
+`&&` 意味着类型检查不通过就不会打包。`typescript` 与 `vue-tsc` 在依赖使用证据中均为 `usageKind = none` / `usageKind = script`（`vue-tsc` 由 `scripts.build` 调用），说明它们是构建期工具，不在运行时代码中被 `import`。
+
+**解决方案**：
+
+```bash
+bun run build                       # 完整校验（先类型后打包）
+bunx vue-tsc --noEmit               # 只跑类型检查，快速定位
+bunx vue-tsc --noEmit --pretty false | head -50   # 错误过多时截断
+```
+
+定位到具体 `.vue` / `.ts` 文件后逐个修复，不要通过改脚本绕过类型检查（会掩盖 `.vue` 模板层的类型错误）。
+
+---
+
+### 2.2 Tailwind 相关样式不生效 / 动画类缺失
+
+**问题描述**：构建成功但页面完全没有样式，或 `animate-*` 动画类无效。
+
+**原因分析**：样式链路由三处构成，缺任一环都会失效：
+
+| 依赖 | 使用证据 | 锚点 |
 | --- | --- | --- |
-| `@tauri-apps/plugin-clipboard-manager` | `src/lib/frontendContext.ts` | import |
-| `@tauri-apps/plugin-dialog` | `src/components/settings/pages/AppearancePage.vue`、`src/components/settings/pages/BackupPage.vue`、`src/components/sftp/SftpBrowserPane.vue` | import |
-| `@tauri-apps/plugin-notification` | `src/services/notifications.ts` | import |
-| `@tauri-apps/plugin-opener` | `src/components/settings/pages/AboutPage.vue`、`src/components/sftp/SftpBrowserPane.vue`、`src/components/sftp/TransferPopover.vue`、`src/lib/frontends/xterm/support.ts` | import |
-| `@tauri-apps/plugin-process` | `src/services/updater.ts` | import |
-| `@tauri-apps/plugin-updater` | `src/components/settings/pages/AboutPage.vue`、`src/services/updater.ts` | import |
-| `@tauri-apps/api` | `src/main.ts` 等 5 处文件、共 25 次引用 | import |
+| `tailwindcss` | `usageKind = import` | `src/assets/styles/main.css` |
+| `@tailwindcss/vite` | `usageKind = import` | `vite.config.ts` |
+| `tw-animate-css` | `usageKind = import` | `src/main.ts` |
 
-前端插件包与宿主侧注册必须成对存在；只装了前端包而宿主未注册，会在调用点报错。
+**解决方案**：
 
-**解决方案**
-按「报错文件 → 插件包」定位：`src/services/notifications.ts` 报错查 `@tauri-apps/plugin-notification`；`src/services/updater.ts` 报错查 `@tauri-apps/plugin-process` / `@tauri-apps/plugin-updater`；`src/lib/frontendContext.ts` 报错查 `@tauri-apps/plugin-clipboard-manager`。改完依赖后重跑 `bun run app:dev`。
-
----
-
-### 1.5 xterm 主包与 addon 版本必须成对
-
-**问题描述**
-终端无法渲染，或报 addon 加载失败。
-
-**原因分析**
-终端能力由 `@xterm/xterm`（`src/lib/frontends/xterm/frontend.ts`、`lines.ts`、`options.ts`、`renderer.ts`、`resize.ts`，共 7 次引用）配合 6 个 addon 构成：
-
-| addon | 引用方 |
-| --- | --- |
-| `@xterm/addon-fit` | `src/lib/frontends/xterm/frontend.ts`、`src/lib/frontends/xterm/resize.ts` |
-| `@xterm/addon-webgl` | `src/lib/frontends/xterm/renderer.ts` |
-| `@xterm/addon-canvas` | `src/lib/frontends/xterm/renderer.ts` |
-| `@xterm/addon-search` | `src/lib/frontends/xterm/search.ts` |
-| `@xterm/addon-unicode11` | `src/lib/frontends/xterm/frontend.ts` |
-| `@xterm/addon-web-links` | `src/lib/frontends/xterm/frontend.ts` |
-
-`@xterm/addon-*` 与 `@xterm/xterm` 是同一版本线下的 scope 包，错配会表现为渲染器初始化失败。
-
-**解决方案**
-统一升级/降级 `@xterm/xterm` 与全部 `@xterm/addon-*` 后 `bun install`，再运行 `bun run app:dev` 验证。
-
----
-
-### 1.6 Tailwind v4 工具链配置
-
-**问题描述**
-样式全部失效（无 Tailwind 类效果），或动画类无效。
-
-**原因分析**
-数据集显示 Tailwind 采用 **v4 + Vite 插件** 形式，不存在 v3 的 `tailwind.config.js` + PostCSS 数据：
-
-| 包 | 引用方 |
-| --- | --- |
-| `tailwindcss` | `src/assets/styles/main.css` |
-| `@tailwindcss/vite` | `vite.config.ts` |
-| `tw-animate-css` | `src/main.ts` |
-
-**解决方案**
-确认 `vite.config.ts` 中 `@tailwindcss/vite` 插件仍被注册，且 `src/main.ts` 引入了 `tw-animate-css`、`src/assets/styles/main.css` 被入口链引用。若自行添加了 v3 风格的 PostCSS 配置，需移除后再构建。
-
----
-
-## 二、构建问题
-
-### 2.1 类型检查先于打包：`vue-tsc` 失败即中止
-
-**问题描述**
-执行构建时先报 TypeScript 错误，`vite build` 根本没有执行，没有任何产物。
-
-**原因分析**
-`scripts.build` 的完整命令是：
+1. 确认 `vite.config.ts` 中 `@tailwindcss/vite` 插件已注册（它是本项目 Tailwind 的 Vite 集成点）。
+2. 确认 `src/main.ts` 中的 `tw-animate-css` 引入未被删除——它负责动画工具类。
+3. 确认 `src/assets/styles/main.css` 引入了 `tailwindcss`。
+4. 清缓存重跑：
 
 ```bash
-vue-tsc --noEmit && vite build
+rm -rf node_modules/.vite && bun run dev
 ```
 
-`&&` 决定了两阶段串行，第一阶段失败则第二阶段不运行。
+---
 
-**解决方案**
+### 2.3 CJS/ESM 互操作类报错
+
+**问题描述**：构建或运行时报模块格式相关错误，涉及 `deep-equal`。
+
+**原因分析**：`deep-equal` 是纯 CommonJS 包，在本项目中被 ESM 源码引用：
+
+- `usageKind = import`，`importFiles`: `src/lib/frontends/xterm/frontend.ts`
+- 对应类型包 `@types/deep-equal` 已声明（`usageKind = none`，类型包不产生 `import` 属正常）。
+
+**解决方案**：
+
+1. 若报 `default` 导入不是函数/对象，检查 `src/lib/frontends/xterm/frontend.ts` 中的导入形态是否与 `esModuleInterop`（待确认） 设置匹配。
+2. 清掉 Vite 预构建缓存后重试：
 
 ```bash
-bunx vue-tsc --noEmit            # 单独复现类型错误
-bun run build                    # 修好后完整构建
+rm -rf node_modules/.vite && bun run dev
 ```
 
-注意：`bun run dev`（`vite`）**不做类型检查**，因此存在「dev 正常、build 失败」的常见现象，属于预期。
+3. 若仅在打包产物中出现而开发模式正常，用 `bun run preview` 复现生产行为进行对比。
 
 ---
 
-### 2.2 ESM / CJS 互操作
+### 2.4 图标资源生成问题
 
-**问题描述**
-构建或运行时报 `does not provide an export named 'default'`、`require is not defined` 之类的模块系统错误。
+**问题描述**：`tauri build` 前需要应用图标，生成出的图标模糊或尺寸不对。
 
-**原因分析**
-以下依赖以 import 形式接入，且来源模块系统各异，是互操作问题的高发点：
+**原因分析**：图标生成脚本中定义了源图尺寸常量：
 
-| 依赖 | 引用方 |
-| --- | --- |
-| `yaml` | `src/stores/config/store.ts` |
-| `deep-equal` | `src/lib/frontends/xterm/frontend.ts` |
-| `nanoid` | 12 处，含 `src/components/settings/pages/KeysPage.vue`、`LocalProfilesPage.vue`、`QuickCommandsPage.vue`、`SshPage.vue`、`TabGroupsPage.vue` |
-| `rxjs` | 7 处，含 `src/lib/frontends/frontend.ts`、`src/lib/frontends/xterm/frontend.ts`、`src/lib/frontends/xterm/support.ts`、`src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts` |
-| `clsx` / `tailwind-merge` | `src/lib/utils.ts` |
+| 常量 | 值 | 锚点 |
+| --- | --- | --- |
+| `SIZE` | `1024` | `scripts/gen-icon.ts:7` |
 
-**解决方案**
-按「报错模块 → 引用方文件」定位后，调整导入形式（默认导入 / 命名导入 / 命名空间导入）以匹配包的实际导出；不要为了绕过而改 `src/lib/utils.ts` 这类公共工具文件。
+**解决方案**：
 
----
-
-### 2.3 Tauri 打包与前端构建不同步
-
-**问题描述**
-`bun run app:build` 产出的应用内界面与 `bun run build` 的结果不一致（例如界面是旧版本）。
-
-**原因分析**
-前端构建命令 `vue-tsc --noEmit && vite build` 与 Tauri 打包命令 `tauri build` 是两条独立链路（`scripts.build` / `scripts.app:build`），Tauri 侧是否调用前端构建由其自身配置决定。
-
-**解决方案**
-出现界面不一致时，先手动执行 `bun run build` 确认前端产物是最新的，再执行 `bun run app:build`。**待确认**：数据集未提供 Tauri 配置内容，无法给出其中 `beforeBuildCommand` 的确切取值。
-
----
-
-### 2.4 图标生成脚本的尺寸常量
-
-**问题描述**
-重新生成图标后发现尺寸不符合下游预期。
-
-**原因分析**
-`scripts/gen-icon.ts` 中定义常量 `SIZE = 1024`，即脚本产出 1024 尺寸的图标。
-
-**解决方案**
-脚本未登记在 `scripts` 中，需直接执行（bun 可直接运行 TS）：
+1. 源图必须是正方形，且不小于 `SIZE`（`scripts/gen-icon.ts:7` 定义为 1024），否则缩小后边缘模糊。
+2. 重新生成后确认输出目录中的图标文件已被替换，再执行：
 
 ```bash
-bun scripts/gen-icon.ts
+bun run app:build
 ```
 
-调整 `SIZE` 前，先确认图标消费方接受的尺寸；数据未提供消费方配置，**待确认**。
+---
+
+## 3. 运行时问题
+
+### 3.1 终端渲染异常与 WebGL 恢复次数上限
+
+**问题描述**：终端出现黑屏、花屏、字符渲染错乱，切换显卡/休眠唤醒后不恢复。
+
+**原因分析**：`src/lib/frontends/xterm/renderer.ts` 同时引入了两套渲染后端：
+
+- `@xterm/addon-webgl`（`usageKind = import`，锚点 `src/lib/frontends/xterm/renderer.ts`）
+- `@xterm/addon-canvas`（`usageKind = import`，锚点 `src/lib/frontends/xterm/renderer.ts`）
+
+WebGL 上下文丢失后允许的最大恢复尝试次数被硬编码为常量：
+
+| 常量 | 值 | 锚点 |
+| --- | --- | --- |
+| `MAX_WEBGL_RECOVERY_ATTEMPTS` | `3` | `src/lib/frontends/xterm/support.ts:58` |
+
+**触界症状**：WebGL 上下文在短时间内连续丢失超过 3 次后，`src/lib/frontends/xterm/support.ts:58` 的上限被耗尽，表现为终端**彻底不再尝试恢复渲染**，界面停留在一片空白/黑色区域，但底层会话仍在运行（输入仍有回显到日志/其他窗口）。
+
+**解决方案**：
+
+1. 触发一次完整重建（关闭该标签页后重开），以重置恢复计数。
+2. 若在虚拟机、远程桌面、多显卡切换场景下频繁触发，优先排查 GPU 驱动；必要时临时禁用 WebGL 走 Canvas 路径（渲染后端选择逻辑位于 `src/lib/frontends/xterm/renderer.ts`）。
+3. 排查显卡相关诱因时，可用 `bun run app:dev` 打开 devtools 查看控制台中的 WebGL 上下文丢失日志。
 
 ---
 
-### 2.5 CSS 入口链断裂导致样式丢失
+### 3.2 终端尺寸同步与 resize 节流
 
-**问题描述**
-构建成功但界面无样式。
+**问题描述**：拖拽窗口或调整分屏后，终端列数/行数与实际显示区域不匹配，出现换行错位或右侧留白。
 
-**原因分析**
-样式链路是 `src/main.ts`（引入 `tw-animate-css`）→ `src/assets/styles/main.css`（引入 `tailwindcss`）→ `vite.config.ts`（注册 `@tailwindcss/vite`）。任一环缺失都会导致样式丢失。
+**原因分析**：尺寸计算依赖 `@xterm/addon-fit`（`usageKind = import`，锚点 `src/lib/frontends/xterm/resize.ts`、`src/lib/frontends/xterm/frontend.ts`），同时有最小重算间隔限制：
 
-**解决方案**
-按上述链路逐环检查，重点确认 `src/main.ts` 的样式/动画导入语句未被删除。
+| 常量 | 值 | 锚点 |
+| --- | --- | --- |
+| `RESIZE_MIN_INTERVAL` | `32` | `src/lib/frontends/xterm/resize.ts:11` |
+
+**触界症状**：连续快速拖拽窗口时，若两次 resize 间隔小于 `32`（毫秒级节流窗口，见 `src/lib/frontends/xterm/resize.ts:11`），中间的尺寸变更会被丢弃，只在停顿后应用最后一次。表现为**拖拽过程中终端内容短暂错位、松手后才对齐**——这是节流生效的正常表现，不是 bug。
+
+真正需要排查的是：松手后仍不对齐 → 说明最后一次 fit 计算未能拿到正确的容器尺寸（容器尺寸变化早于布局完成）。
+
+**解决方案**：
+
+1. 松手后仍错位时，先触发一次容器重排（如切换标签页再切回），确认是否能自愈。
+2. 若稳定复现，检查承载终端的容器是否在 `RESIZE_MIN_INTERVAL`（`src/lib/frontends/xterm/resize.ts:11`）窗口内被多次改动尺寸，可以在 `src/lib/frontends/xterm/resize.ts` 的节流逻辑处临时降低间隔进行验证。
+3. 关闭窗口动画（`src/lib/motion/index.ts` 中的 GSAP 动效链路）以排除动画过渡期间测量容器尺寸导致的偏差。
 
 ---
 
-## 三、运行时问题
+### 3.3 终端滚动行为异常（已知语义坑）
 
-### 3.1 依赖引用关系（排障定位表）
+**问题描述**：期望“用户滚动”触发的逻辑（如自动跟随、回滚到提示符）没有触发。
 
-| 依赖 | 引用方锚点 | 次数 | usageKind |
+**原因分析**：源码中有一条明确的作者注记：
+
+> `NOTE: xterm.onScroll only fires for content-driven scroll (new lines),`
+> —— 锚点 `src/lib/frontends/xterm/frontend.ts:120`
+
+也就是说 `xterm.onScroll`（待确认） **只在内容驱动滚动（新行输出）时触发**，用户手动拖拽滚动条不一定会走到该回调。
+
+**解决方案**：
+
+1. 需要响应“用户滚轮/拖拽”时，不要依赖 `src/lib/frontends/xterm/frontend.ts:120` 附近这条 `onScroll`（待确认） 语义，改为在承载元素的 DOM 滚动事件上处理。
+2. 排查“自动跟随失效”类问题时，先确认输出是否在持续产生新行——若没有新行，`onScroll`（待确认） 本就不会触发。
+3. 定位入口：`src/lib/frontends/xterm/frontend.ts:120`。
+
+---
+
+### 3.4 命令建议菜单的容量上限
+
+**问题描述**：命令建议（补全）菜单里的候选项比预期少，或历史命令一直重复同几条。
+
+**原因分析**：建议引擎有一组硬上限常量，全部集中定义：
+
+| 常量 | 值 | 锚点 |
+| --- | --- | --- |
+| `MAX_HISTORY_SAME_SOURCE` | `8` | `src/lib/suggestions/suggestionEngine.ts:11` |
+| `MAX_HISTORY_GLOBAL` | `4` | `src/lib/suggestions/suggestionEngine.ts:12` |
+| `MAX_QUICK_COMMANDS` | `4` | `src/lib/suggestions/suggestionEngine.ts:13` |
+| `MAX_PATHS` | `8` | `src/lib/suggestions/suggestionEngine.ts:14` |
+| `MAX_TOTAL` | `16` | `src/lib/suggestions/suggestionEngine.ts:15` |
+| `MAX_VISIBLE_ROWS` | `8` | `src/components/terminal/SuggestionMenu.vue:41` |
+| `DEFAULT_MAX_PROMPT_JUMP` | `20` | `src/lib/suggestions/promptTracker.ts:125` |
+
+**触界症状与解决方案**：
+
+- **候选总数被封顶在 16**（`src/lib/suggestions/suggestionEngine.ts:15`）：即使匹配到更多，最终列表也不会超过 16 项。若某条想要的命令没出现，先用 `bun run app:dev` 的 devtools 检查它在哪一类配额里被截断（同类 8 / 全局 4 / 快捷 4 / 路径 8）。
+- **菜单一次只显示 8 行**（`src/components/terminal/SuggestionMenu.vue:41`）：超过 8 项需滚动，鼠标滚轮不生效时先确认该常量对应的滚动容器。
+- **提示符跳转最多记录 20 个**（`src/lib/suggestions/promptTracker.ts:125`）：长时间会话中往回跳超过 20 个提示符会跳不到——此时用终端搜索（§3.5）而不是提示符跳转。
+
+---
+
+### 3.5 历史记录搜索上限
+
+**问题描述**：搜索历史命令时，较早的记录搜不到。
+
+**原因分析**：
+
+| 常量 | 值 | 锚点 |
+| --- | --- | --- |
+| `INDEX_LIMIT` | `5000` | `src/services/history.ts:9` |
+
+**触界症状**：历史条目数超过 `5000`（`src/services/history.ts:9`）后，超出的部分不进入索引，表现为**搜索无结果但翻页/终端内回滚能看到该命令**。
+
+**解决方案**：
+
+1. 确认历史数据的来源与落盘位置（`src/services/history.ts` 为读写入口）。
+2. 若确实超出规模，清理历史文件或提高 `src/services/history.ts:9` 的上限后重启应用。
+3. 紧急查找时改用终端内搜索：`@xterm/addon-search` 的接入点在 `src/lib/frontends/xterm/search.ts`。
+
+---
+
+### 3.6 监控数据采样与图表
+
+**问题描述**：监控图表长时间运行后内存上涨，或曲线只保留很短一段。
+
+**原因分析**：
+
+| 常量 | 值 | 锚点 |
+| --- | --- | --- |
+| `MAX_SAMPLES` | `150` | `src/stores/monitor.ts:11` |
+
+**触界症状**：采样点达到 `150`（`src/stores/monitor.ts:11`）后按环形缓冲淘汰最旧数据。表现为**图表只能看到最近 150 个采样点对应的时段**，更早的数据不可回溯——这是设计行为。
+
+**解决方案**：
+
+1. 采样上限是设计行为，不需要修复；若需要更长窗口，调整 `src/stores/monitor.ts:11` 的 `MAX_SAMPLES` 并观察内存。
+2. 若内存持续上涨而非稳定在 150 点规模，先排除图表组件侧的问题：`src/components/monitor/MetricChart.vue` 是图表渲染点，`src/components/monitor/MonitorSidebar.vue` 是侧栏宿主。
+3. 采样数据由 `src/stores/monitor.ts` 统一持有，排查时以该 store 为单一事实来源。
+
+---
+
+### 3.7 侧边栏拖拽宽度的双组边界
+
+**问题描述**：侧边栏拖到某个宽度后拖不动了，或拖到极窄时内容溢出。
+
+**原因分析**：项目中有**两套独立**的侧边栏宽度边界，作用于不同界面：
+
+| 常量 | 值 | 锚点 | 适用界面 |
 | --- | --- | --- | --- |
-| `vue` | `src/App.vue`、`src/components/forwarding/ForwardRuleFormDialog.vue`、`ForwardingTabContent.vue`、`src/components/monitor/MetricChart.vue`、`MonitorSidebar.vue` 等 | 60 | import |
-| `vue-i18n` | `src/App.vue`、`src/components/forwarding/ForwardRuleFormDialog.vue`、`ForwardingTabContent.vue`、`src/components/monitor/MonitorSidebar.vue`、`src/components/palette/CommandPalette.vue` 等 | 39 | import |
+| `SIDEBAR_MIN_WIDTH` | `260` | `src/components/monitor/MonitorSidebar.vue:166` | 监控侧栏 |
+| `SIDEBAR_MAX_WIDTH` | `480` | `src/components/monitor/MonitorSidebar.vue:167` | 监控侧栏 |
+| `SIDEBAR_MIN_WIDTH` | `180` | `src/components/start/StartPageContent.vue:53` | 起始页内容区 |
+| `SIDEBAR_MAX_WIDTH` | `240` | `src/components/start/StartPageContent.vue:54` | 起始页内容区 |
 
-| `lucide-vue-next` | `src/components/forwarding/ForwardRuleFormDialog.vue`、`ForwardingTabContent.vue`、`src/components/monitor/MonitorSidebar.vue`、`src/components/settings/ColorSchemePicker.vue`、`GroupAccordion.vue` 等 | 28 | import |
-| `@tauri-apps/api` | `src/components/settings/pages/AboutPage.vue`、`AppearancePage.vue`、`KeysPage.vue`、`src/components/sftp/SftpTabContent.vue`、`src/main.ts` | 25 | import |
-| `nanoid` | `src/components/settings/pages/KeysPage.vue`、`LocalProfilesPage.vue`、`QuickCommandsPage.vue`、`SshPage.vue`、`TabGroupsPage.vue` 等 | 12 | import |
-| `pinia` | `src/main.ts`、`src/stores/config/store.ts`、`src/stores/forwarding.ts`、`src/stores/monitor.ts`、`src/stores/tabs.ts` | 7 | import |
-| `rxjs` | `src/lib/frontends/frontend.ts`、`src/lib/frontends/xterm/frontend.ts`、`support.ts`、`src/lib/middleware/middleware.ts`、`oscProcessing.ts` | 7 | import |
-| `@xterm/xterm` | `src/lib/frontends/xterm/frontend.ts`、`lines.ts`、`options.ts`、`renderer.ts`、`resize.ts` | 7 | import |
-| `@tauri-apps/plugin-opener` | `src/components/settings/pages/AboutPage.vue`、`src/components/sftp/SftpBrowserPane.vue`、`TransferPopover.vue`、`src/lib/frontends/xterm/support.ts` | 4 | import |
-| `reka-ui` | `src/components/ui/Label.vue`、`Separator.vue`、`Slider.vue`、`Switch.vue` | 4 | import |
-| `@tauri-apps/plugin-dialog` | `src/components/settings/pages/AppearancePage.vue`、`BackupPage.vue`、`src/components/sftp/SftpBrowserPane.vue` | 3 | import |
-| `@tauri-apps/plugin-updater` | `src/components/settings/pages/AboutPage.vue`、`src/services/updater.ts` | 2 | import |
-| `@xterm/addon-fit` | `src/lib/frontends/xterm/frontend.ts`、`resize.ts` | 2 | import |
-| `@tauri-apps/plugin-clipboard-manager` / `plugin-notification` / `plugin-process` | `src/lib/frontendContext.ts` / `src/services/notifications.ts` / `src/services/updater.ts` | 1 各 | import |
-| `@xterm/addon-canvas` / `addon-search` / `addon-unicode11` / `addon-web-links` / `addon-webgl` | `renderer.ts` / `search.ts` / `frontend.ts` / `frontend.ts` / `renderer.ts` | 1 各 | import |
-| `class-variance-authority` | `src/components/ui/Button.vue` | 1 | import |
-| `clsx` / `tailwind-merge` | `src/lib/utils.ts` | 1 各 | import |
-| `deep-equal` | `src/lib/frontends/xterm/frontend.ts` | 1 | import |
-| `gsap` | `src/lib/motion/index.ts` | 1 | import |
-| `tw-animate-css` | `src/main.ts` | 1 | import |
-| `yaml` | `src/stores/config/store.ts` | 1 | import |
-| `vitest` | `src/components/split/splitTree.test.ts`、`src/components/terminal/searchFocus.test.ts`、`src/components/titlebar/tabGroupLayout.test.ts`、`src/components/titlebar/tabStripLayout.test.ts`、`src/lib/backgroundImage.test.ts` 等 | 33 | test |
+**触界症状**：
 
-以上依赖均有实际引用证据（`usageKind = import` 或 `test`），**不存在「声明未用」项**。运行时若某功能不生效，应到上表「引用方」中按模块定位，而不是怀疑依赖未安装。
+- 监控页拖拽被硬卡在 `260`（`src/components/monitor/MonitorSidebar.vue:166`）与 `480`（`src/components/monitor/MonitorSidebar.vue:167`）之间。
+- 起始页拖拽被硬卡在 `180`（`src/components/start/StartPageContent.vue:53`）与 `240`（`src/components/start/StartPageContent.vue:54`）之间。
+- **若两个界面看起来“手感不一样”，这不是 bug**——这是两组不同常量导致的预期差异。排查时务必先确认当前界面属于哪一组，避免在错误的文件里改数值。
+
+**解决方案**：
+
+1. 拖不动时先确认当前页面，再定位到上表对应锚点。
+2. 宽度不对时只改对应文件中的那一组常量，不要跨文件统一（两组边界各自独立）。
 
 ---
 
-### 3.2 外部依赖未安装（终端后端 / MCP 类能力）
+### 3.8 背景图透明度下限
 
-**问题描述**
-终端相关的异步数据流在中途断流或长时间无输出，但前端本身没有抛错。
+**问题描述**：拖动背景图透明度滑块到底后，背景图“消失”了。
 
-**原因分析**
-`src/lib/frontends/frontend.ts`、`src/lib/frontends/xterm/frontend.ts`、`src/lib/frontends/xterm/support.ts`、`src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts` 均基于 `rxjs` 构建（7 处引用）。前端侧只负责订阅数据流，实际数据由宿主侧进程提供；宿主侧能力缺失时，前端表现为流无产出。
+**原因分析**：
 
-**解决方案**
-这类问题的排障顺序是「先确认宿主进程是否存在 → 再确认前端订阅是否正确」：使用 `bun run app:dev` 启动，观察宿主侧输出。**待确认**：数据集未提供外部进程/服务的清单与安装方式，无法给出具体安装命令。
+| 常量 | 值 | 锚点 |
+| --- | --- | --- |
+| `MIN_BACKGROUND_OPACITY` | `0.05` | `src/lib/backgroundImage.ts:9` |
 
----
+**触界症状**：滑块拖到最左端时停在 `0.05`（`src/lib/backgroundImage.ts:9`），背景图几乎不可见但**并未被移除**。视觉上像是“关了背景”，实际是下限保护生效。
 
-### 3.3 常量越界引发的运行时异常（逐项说明）
+**解决方案**：
 
-以下常量是各模块的硬边界。触界时症状明确，排障时优先核对这些值。
-
-#### 3.3.1 `SIDEBAR_MIN_WIDTH = 260` / `SIDEBAR_MAX_WIDTH = 480`
-- 文件：`src/components/monitor/MonitorSidebar.vue`
-- **触界症状**：监控侧边栏拖拽到边界后停止响应，宽度不再变化。
-- **处置**：确认拖拽宽度被约束在 260–480 之间；预期外的钳制即为该常量生效，非 bug。
-
-#### 3.3.2 `SIDEBAR_MIN_WIDTH = 180` / `SIDEBAR_MAX_WIDTH = 240`
-- 文件：`src/components/start/StartPageContent.vue`
-- **触界症状**：启动页内容区侧栏拖拽范围被限制在 180–240。
-- **注意**：与 3.3.1 同名但**不同文件、不同取值**，排查时务必先确认是哪个组件。这是本项目中同名常量最容易被误判的一处。
-
-#### 3.3.3 `MAX_VISIBLE_ROWS = 8`
-- 文件：`src/components/terminal/SuggestionMenu.vue`
-- **触界症状**：终端建议菜单最多显示 8 行，第 9 条及之后不再展示（候选本身可能仍存在，只是不可见）。
-- **处置**：若怀疑候选缺失，需区分「候选被过滤掉」与「候选超出可见行数被折叠」。
-
-#### 3.3.4 `MIN_BACKGROUND_OPACITY = 0.05`
-- 文件：`src/lib/backgroundImage.ts`
-- **触界症状**：背景图透明度调到最低仍能隐约可见，无法完全透明。
-- **处置**：0.05 为下限，不要把「无法设为 0」当作渲染 bug。
-
-#### 3.3.5 `RESIZE_MIN_INTERVAL = 32`
-- 文件：`src/lib/frontends/xterm/resize.ts`
-- **触界症状**：快速拖拽窗口时终端重排有约 32ms 的节流感，尺寸在停止拖拽后才最终对齐。
-- **处置**：这是防抖/节流阈值，非渲染卡顿。
-
-#### 3.3.6 `MAX_WEBGL_RECOVERY_ATTEMPTS = 3`
-- 文件：`src/lib/frontends/xterm/support.ts`
-- **触界症状**：WebGL 渲染上下文丢失（例如 GPU 驱动重置、切换显卡）后最多尝试恢复 3 次；超过 3 次后终端不再自动恢复，可能显示异常或回退渲染。
-- **处置**：连续看到恢复失败时，检查 GPU/驱动是否反复重置；达到上限后需重启应用或重建终端实例。渲染器相关代码见 `src/lib/frontends/xterm/renderer.ts`（引用 `@xterm/addon-webgl`、`@xterm/addon-canvas`）。
-
-#### 3.3.7 `DEFAULT_MAX_PROMPT_JUMP = 20`
-- 文件：`src/lib/suggestions/promptTracker.ts`
-- **触界症状**：提示符跳转只能回溯 20 步，更早的提示符无法定位。
-- **处置**：属设计上限，不作为缺陷处理。
-
-#### 3.3.8 建议引擎配额常量
-- 文件：`src/lib/suggestions/suggestionEngine.ts`
-- 常量：`MAX_HISTORY_SAME_SOURCE = 8`、`MAX_HISTORY_GLOBAL = 4`、`MAX_QUICK_COMMANDS = 4`、`MAX_PATHS = 8`、`MAX_TOTAL = 16`
-- **触界症状**：建议列表被裁剪——同一来源最多 8 条、历史全局最多 4 条、快捷命令最多 4 条、路径最多 8 条，总量不超过 16 条。表现为「某些历史命令不再出现在建议里」。
-- **处置**：排查「建议不全」类问题时，先对照这五个配额，确认是配额裁剪而非数据丢失。
-
-#### 3.3.9 `INDEX_LIMIT = 5000`
-- 文件：`src/services/history.ts`
-- **触界症状**：历史索引规模达到 5000 后不再增长，超出的历史项不会被索引。
-- **处置**：定位「历史搜索搜不到早期记录」类问题时，先确认是否触达该上限。
-
-#### 3.3.10 `MAX_SAMPLES = 150`
-- 文件：`src/stores/monitor.ts`
-- **触界症状**：监控图表最多保留 150 个采样点，更早的点被滚动丢弃。
-- **处置**：图表「开头数据消失」属预期行为（环形/滑动窗口）。
+1. 先确认背景图仍被设置（设置入口在设置页，背景图处理逻辑集中在 `src/lib/backgroundImage.ts`）。
+2. 若确实需要完全隐藏，应通过关闭背景图开关而不是继续往下拖。
+3. 排查“背景图不显示”时，先排除是否只是透明度接近下限。
 
 ---
 
-### 3.4 配置存储与 YAML 解析
+### 3.9 入口与模块解析
 
-**问题描述**
-配置读写异常、启动时配置结构不符合预期。
+**问题描述**：应用启动即白屏，或某个 store / i18n / 动效模块未初始化导致运行时报错。
 
-**原因分析**
-配置相关入口与实现为 `src/stores/config/index.ts`（entryFiles）与 `src/stores/config/store.ts`，其中 `src/stores/config/store.ts` 引入 `yaml` 与 `pinia`，说明配置以 YAML 形式处理并挂在 Pinia 上。
+**原因分析**：应用由以下入口文件驱动，任一环节初始化顺序错误都会在启动阶段暴露：
 
-**解决方案**
-优先检查 `src/stores/config/index.ts` 的加载顺序与 `src/stores/config/store.ts` 中 YAML 的解析结果。**待确认**：数据集未提供配置文件的磁盘路径与格式示例，无法给出具体文件位置。
-
----
-
-### 3.5 国际化文案缺失
-
-**问题描述**
-界面出现 key 原文（如 `xxx.yyy`（待确认））而非译文。
-
-**原因分析**
-i18n 入口为 `src/i18n/index.ts`（entryFiles），而 `vue-i18n` 在 39 处文件被引用（含 `src/App.vue`、`src/components/palette/CommandPalette.vue` 等）。
-
-**解决方案**
-以 `src/i18n/index.ts` 为起点核对语言包注册与 key 命名空间；报 key 原文的组件必然在上述 39 处引用文件中，可直接反查。
-
----
-
-### 3.6 通知与更新流程
-
-**问题描述**
-通知不弹出、更新检查失败。
-
-**原因分析**
-
-| 能力 | 引用方锚点 |
+| 入口文件 | 职责定位（依据命名与路径） |
 | --- | --- |
-| 通知 | `src/services/notifications.ts`（`@tauri-apps/plugin-notification`） |
-| 更新 | `src/services/updater.ts`（`@tauri-apps/plugin-updater`、`@tauri-apps/plugin-process`）、`src/components/settings/pages/AboutPage.vue` |
+| `src/main.ts` | 应用主入口（引入 `@tauri-apps/api`、`pinia`、`tw-animate-css`） |
+| `src/i18n/index.ts` | 国际化初始化入口 |
+| `src/lib/motion/index.ts` | 动效库入口（引入 `gsap`） |
+| `src/lib/sessions/index.ts` | 会话层入口 |
+| `src/stores/config/index.ts` | 配置 store 入口 |
 
-**解决方案**
-通知问题定位 `src/services/notifications.ts` + 宿主侧通知权限；更新问题定位 `src/services/updater.ts` 与 `src/components/settings/pages/AboutPage.vue` 的触发点。两者都依赖宿主侧插件已注册（见 1.4）。
+其中 `src/main.ts` 同时是 `pinia`、`@tauri-apps/api`、`tw-animate-css` 的 import 点，是最关键的启动结点。
 
----
+**解决方案**：
 
-### 3.7 文件对话框与外部打开
-
-**问题描述**
-打开文件/目录选择框失败，或点击链接无反应。
-
-**原因分析**
-
-| 能力 | 引用方锚点 |
-| --- | --- |
-| 对话框 | `src/components/settings/pages/AppearancePage.vue`、`src/components/settings/pages/BackupPage.vue`、`src/components/sftp/SftpBrowserPane.vue` |
-| 打开外部 | `src/components/settings/pages/AboutPage.vue`、`src/components/sftp/SftpBrowserPane.vue`、`src/components/sftp/TransferPopover.vue`、`src/lib/frontends/xterm/support.ts` |
-
-**解决方案**
-注意 `src/lib/frontends/xterm/support.ts` 也引用了 `@tauri-apps/plugin-opener`——即终端内点击链接同样走外部打开能力，排障时不要漏掉这一处。
+1. 白屏时先打开 devtools 看第一条报错，再按上表从 `src/main.ts` 开始逐个确认入口是否被执行。
+2. 配置相关问题优先查 `src/stores/config/index.ts` 与 `src/stores/config/store.ts`（后者是 `pinia` 与 `yaml` 的 import 点，见 §5 表）。
+3. 启动期命令相关行为异常时，注意 `src/services/commands.ts` 是变更最频繁的文件（见 §3.10）。
 
 ---
 
-## 四、调试技巧
+### 3.10 高频变更热点带来的回归风险
 
-### 4.1 排障起点：入口文件
+以下文件是变更统计中提交次数较多的区域（`intent` 中的 `git-churn` 证据）。排障时若问题落在这些区域，应优先怀疑最近一次改动引入的回归。
 
-| 入口文件 | 作用域 |
-| --- | --- |
-| `src/main.ts` | 应用启动入口（引入 `pinia`、`tw-animate-css`、`@tauri-apps/api`） |
-| `src/i18n/index.ts` | 国际化初始化 |
-| `src/stores/config/index.ts` | 配置状态入口 |
-| `src/lib/motion/index.ts` | 动效入口（引入 `gsap`） |
-| `src/lib/sessions/index.ts` | 会话入口 |
+| 文件 | 提交次数 | 最近一次变更锚点 |
+| --- | --- | --- |
+| `src/services/commands.ts` | 14 | `commit:be02b631 (2026-09-29)`「feat: 新增分组感知的标签页切换器」 |
+| `src/stores/tabs.ts` | 12 | `commit:be02b631 (2026-09-29)`「feat: 新增分组感知的标签页切换器」 |
+| `src/lib/colorSchemes.ts` | 4 | `commit:e8315896 (2026-09-16)`「feat: 新增配色方案独立设置页，按首字母分组折叠展示并支持方案预览」 |
+| `src/lib/sessions/sshSession.ts` | 4 | `commit:432d9996 (2026-09-18)`「feat: 新增 SSH keyboard-interactive 认证与动态凭据弹窗（记住密码回存）」 |
+| `src-tauri/src/fsutil.rs` | 4 | `commit:c81c17e5 (2026-09-19)`「feat: 接入自动更新链路」 |
 
-问题定位顺序建议：从 `src/main.ts` 确认应用是否完成启动装配 → 再按现象跳到对应入口（文案 → i18n；配置 → config；动效 → motion；会话 → sessions）。
+**问题描述**：标签页切换/分组、配色方案展示、SSH 交互式认证与凭据弹窗、文件读写与自动更新链路这几类功能出现异常。
+
+**原因分析**：
+
+- 标签页相关：`src/services/commands.ts`（14 次提交）与 `src/stores/tabs.ts`（12 次提交）是同一功能演进（分组感知标签页切换器）的两个协同变更点，改动其一容易漏改另一个。
+- 配色方案：`src/lib/colorSchemes.ts` 在引入独立设置页后经历多轮调整，展示逻辑与数据定义耦合度较高。
+- SSH 认证：`src/lib/sessions/sshSession.ts` 在引入 keyboard-interactive 认证与动态凭据弹窗后，凭据回存路径成为新风险面。
+- 文件读写与更新：`src-tauri/src/fsutil.rs` 因接入自动更新链路被修改，属于跨前后端的接口边界。
+
+**解决方案**：
+
+1. 先确认问题是否出现在上述最近一次变更（锚点见上表）之后，用版本回退验证。
+2. 标签页类问题同时检查 `src/services/commands.ts` 与 `src/stores/tabs.ts`，避免只改一侧。
+3. 配色方案类问题以 `src/lib/colorSchemes.ts` 为单一入口排查。
+4. 认证类问题从 `src/lib/sessions/sshSession.ts` 入手，先确认凭据弹窗是否正常唤起。
+5. 更新/文件类问题注意横跨 `src/services/updater.ts`（前端，import `@tauri-apps/plugin-updater`、`@tauri-apps/plugin-process`）与 `src-tauri/src/fsutil.rs`（Rust 侧），两侧需同时排查。
 
 ---
 
-### 4.2 用完整命令复现
+## 4. 调试技巧
 
-| 目的 | 命令 |
-| --- | --- |
-| 前端单独起服（无 Tauri 上下文） | `bun run dev` |
-| 类型检查单独执行 | `bunx vue-tsc --noEmit` |
-| 完整构建（类型 + 打包） | `bun run build` |
-| 预览构建产物 | `bun run preview` |
-| 宿主内运行（注入 `TAURI_ENV_*`） | `bun run app:dev` |
-| 宿主内打包 | `bun run app:build` |
-| 静态检查 | `bun run lint`（即 `oxlint src`） |
-| 全量单测 | `bun run test`（即 `vitest run`） |
+### 4.1 按入口文件分层定位
 
+启动、配置、国际化、动效、会话五类问题分别从对应的入口文件切入，避免在无关目录里搜索：
+
+```bash
+# 主入口相关
+bun run dev            # 浏览器内快速验证非 Tauri 依赖的逻辑
+bun run app:dev        # 完整桌面环境（推荐，含原生插件）
+
+# 排查入口链路时直接打开对应文件
+# src/main.ts / src/i18n/index.ts / src/lib/motion/index.ts
+# src/lib/sessions/index.ts / src/stores/config/index.ts
+```
+
+### 4.2 类型层快速反馈
+
+```bash
+bunx vue-tsc --noEmit          # 不打包，只做类型检查，秒级反馈
+bun run build                  # 完整校验：vue-tsc --noEmit && vite build
+```
+
+修改 `.vue` 模板或 props 类型后，先跑 `bunx vue-tsc --noEmit` 再跑完整构建。
 
 ### 4.3 单文件测试调试
 
-测试由 `vitest` 驱动（`usageKind = test`，33 处引用），已登记的测试文件包括：
+测试运行器为 `vitest`（`usageKind = test`，覆盖 35 处引用，典型锚点如下）：
 
-| 测试文件 | 覆盖目标 |
+| 测试文件 | 锚点 |
 | --- | --- |
-| `src/components/split/splitTree.test.ts` | 分屏树 |
-| `src/components/terminal/searchFocus.test.ts` | 终端搜索聚焦 |
+| `src/components/settings/groupDragSort.test.ts` | 分组拖拽排序逻辑 |
+| `src/components/split/splitTree.test.ts` | 分屏树结构 |
+| `src/components/terminal/searchFocus.test.ts` | 终端搜索焦点 |
 | `src/components/titlebar/tabGroupLayout.test.ts` | 标签组布局 |
 | `src/components/titlebar/tabStripLayout.test.ts` | 标签条布局 |
-| `src/lib/backgroundImage.test.ts` | 背景图（含 `MIN_BACKGROUND_OPACITY` 所在模块） |
 
-单文件调试命令（vitest 直接接受文件路径参数）：
-
-```bash
-bunx vitest run src/lib/backgroundImage.test.ts
-bunx vitest run src/components/titlebar/tabStripLayout.test.ts
-```
-
-需要交互式重跑时用 watch 模式：
+命令：
 
 ```bash
-bunx vitest src/lib/backgroundImage.test.ts
+bun run test                                   # 全量：vitest run
+bunx vitest run src/components/split/splitTree.test.ts   # 只跑单个文件
+bunx vitest src/components/titlebar/tabGroupLayout.test.ts  # watch 模式
 ```
 
-**注意**：`scripts.test` 为 `vitest run`（一次性执行、不进入 watch），本地调试用上面的 `bunx vitest <file>` 更高效。
+布局类问题（分屏、标签条/标签组、侧栏分组拖拽）优先在对应 `*.test.ts` 中写最小复现用例，比在界面上手拖更快定位。
+
+### 4.4 Lint 与静态检查
+
+```bash
+bun run lint          # oxlint src
+```
+
+`oxlint` 为 `usageKind = script`（由 `scripts.lint` 调用），只扫描 `src` 目录。提交前跑一次可提前发现未使用 import 与可疑写法。
+
+### 4.5 运行时日志的查看位置
+
+- 前端日志：`bun run app:dev` 启动的窗口内右键 → 打开开发者工具 → Console。
+- 生产行为对比：`bun run preview` 预览 `vite build` 的产物，确认问题是否只在开发模式出现。
+- 终端渲染问题：从 `src/lib/frontends/xterm/renderer.ts`（WebGL/Canvas 后端选择）与 `src/lib/frontends/xterm/support.ts`（含 `MAX_WEBGL_RECOVERY_ATTEMPTS`，见 §3.1）两处着手查看渲染后端切换日志。
+- 更新链路：`src/services/updater.ts` 是前端更新流程的唯一入口。
+
+### 4.6 用常量作为排障边界
+
+遇到“数量不对/拖不动/看不到”的问题时，先对照下表确认是否撞上了设计上限，避免把预期行为误判为 bug：
+
+| 常量 | 值 | 锚点 | 触界语义 |
+| --- | --- | --- | --- |
+| `SIZE` | `1024` | `scripts/gen-icon.ts:7` | 图标源图基准尺寸 |
+| `SIDEBAR_MIN_WIDTH` | `260` | `src/components/monitor/MonitorSidebar.vue:166` | 监控侧栏下限 |
+| `SIDEBAR_MAX_WIDTH` | `480` | `src/components/monitor/MonitorSidebar.vue:167` | 监控侧栏上限 |
+| `SIDEBAR_MIN_WIDTH` | `180` | `src/components/start/StartPageContent.vue:53` | 起始页下限 |
+| `SIDEBAR_MAX_WIDTH` | `240` | `src/components/start/StartPageContent.vue:54` | 起始页上限 |
+| `MAX_VISIBLE_ROWS` | `8` | `src/components/terminal/SuggestionMenu.vue:41` | 建议菜单可见行数 |
+| `MIN_BACKGROUND_OPACITY` | `0.05` | `src/lib/backgroundImage.ts:9` | 背景图透明度下限 |
+| `RESIZE_MIN_INTERVAL` | `32` | `src/lib/frontends/xterm/resize.ts:11` | resize 节流窗口 |
+| `MAX_WEBGL_RECOVERY_ATTEMPTS` | `3` | `src/lib/frontends/xterm/support.ts:58` | WebGL 恢复次数上限 |
+| `DEFAULT_MAX_PROMPT_JUMP` | `20` | `src/lib/suggestions/promptTracker.ts:125` | 提示符跳转深度 |
+| `MAX_HISTORY_SAME_SOURCE` | `8` | `src/lib/suggestions/suggestionEngine.ts:11` | 同类历史候选上限 |
+| `MAX_HISTORY_GLOBAL` | `4` | `src/lib/suggestions/suggestionEngine.ts:12` | 全局历史候选上限 |
+| `MAX_QUICK_COMMANDS` | `4` | `src/lib/suggestions/suggestionEngine.ts:13` | 快捷命令上限 |
+| `MAX_PATHS` | `8` | `src/lib/suggestions/suggestionEngine.ts:14` | 路径候选上限 |
+| `MAX_TOTAL` | `16` | `src/lib/suggestions/suggestionEngine.ts:15` | 建议候选总数上限 |
+| `INDEX_LIMIT` | `5000` | `src/services/history.ts:9` | 历史索引条目上限 |
+| `MAX_SAMPLES` | `150` | `src/stores/monitor.ts:11` | 监控采样点数上限 |
 
 ---
 
-### 4.4 使用调试环境变量
+## 5. 依赖使用锚点速查
 
-`TAURI_ENV_DEBUG` 由 Tauri CLI 注入，用于区分调试构建；`TAURI_ENV_HOST` 标识宿主。调试时：
+排查“某个依赖到底用在哪”时按下表定位（全部来自 `depUsage` 使用证据）。
 
-```bash
-bun run app:dev      # 观察注入的 TAURI_ENV_* 实际取值
-```
+### 5.1 前端框架与状态（`usageKind = import`）
 
-**待确认**：数据集未提供这两个变量的读取位置，无法给出「在哪个文件打印/分支」的具体锚点。
-
----
-
-### 4.5 终端相关问题的分层排查
-
-终端是本项目代码量最集中的子系统，建议按层定位：
-
-| 层 | 文件锚点 | 常见症状 |
+| 依赖 | 关键 import 锚点 | 引用数 |
 | --- | --- | --- |
-| 渲染器 | `src/lib/frontends/xterm/renderer.ts`（webgl / canvas） | 花屏、恢复失败（对照 `MAX_WEBGL_RECOVERY_ATTEMPTS = 3`） |
-| 尺寸 | `src/lib/frontends/xterm/resize.ts`（fit；`RESIZE_MIN_INTERVAL = 32`） | 尺寸不跟手、重排延迟 |
-| 行数据 | `src/lib/frontends/xterm/lines.ts` | 行内容异常 |
-| 配置 | `src/lib/frontends/xterm/options.ts` | 选项不生效 |
-| 搜索 | `src/lib/frontends/xterm/search.ts`（`@xterm/addon-search`） | 搜索无结果、不定位 |
-| 宿主能力 | `src/lib/frontends/xterm/support.ts`（opener + webgl 恢复上限） | 点击链接无效、重复恢复尝试 |
-| 主前端 | `src/lib/frontends/xterm/frontend.ts`（fit / unicode11 / web-links / deep-equal） | 宽字符错位、链接不可点、选项比对失效 |
-| 中间件 | `src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts`（rxjs） | OSC 序列未生效、数据流断流 |
+| `vue` | `src/App.vue`、`src/components/monitor/MetricChart.vue` 等 | 62 |
+| `vue-i18n` | `src/App.vue`、`src/components/palette/CommandPalette.vue` 等 | 40 |
+| `pinia` | `src/main.ts`、`src/stores/config/store.ts`、`src/stores/tabs.ts` 等 | 7 |
+| `rxjs` | `src/lib/frontends/frontend.ts`、`src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts` 等 | 7 |
+| `yaml` | `src/stores/config/store.ts` | 1 |
 
-建议的排查顺序：**渲染器 → 尺寸 → 主前端 → 中间件 → 宿主能力**，因为前三层的问题最容易表现为「界面看起来坏了」。
+### 5.2 UI 与工具库（`usageKind = import`）
 
----
-
-### 4.6 依赖问题的通用定位法
-
-遇到某个能力异常时，按「能力 → 依赖 → 引用方文件」三步定位，全部依据来自 3.1 的引用表：
-
-- 按钮/变体样式异常 → `class-variance-authority`（`src/components/ui/Button.vue`）+ `clsx`/`tailwind-merge`（`src/lib/utils.ts`）
-- 基础交互组件（开关、滑块、标签、分隔线）异常 → `reka-ui`（`src/components/ui/Switch.vue`、`Slider.vue`、`Label.vue`、`Separator.vue`）
-- 图标不显示 → `lucide-vue-next`（28 处引用）
-- ID 生成冲突 → `nanoid`（12 处引用）
-- 动效异常 → `gsap`（`src/lib/motion/index.ts`）
-- 终端选项比对异常 → `deep-equal`（`src/lib/frontends/xterm/frontend.ts`）
-
-`src/lib/utils.ts` 是 `clsx` 与 `tailwind-merge` 的唯一引用点，改动该文件影响面为全项目，排障时优先怀疑调用方而非该文件本身。
-
----
-
-## 五、待确认事项汇总
-
-| # | 缺口 | 影响 |
+| 依赖 | import 锚点 | 引用数 |
 | --- | --- | --- |
-| 1 | `nodeVersion` 为空，且无 `.nvmrc` / `engines` / CI 配置证据 | 无法给出最低 Node 版本要求 |
-| 2 | `TAURI_ENV_HOST` / `TAURI_ENV_DEBUG` 无 `filePath`，读取点未知 | 无法定位这两个变量的分支逻辑 |
-| 3 | Tauri 配置内容未提供 | 无法确认 `app:build` 是否自动调用前端构建 |
-| 4 | 外部进程/服务（终端后端等）清单与安装方式未提供 | 无法给出 3.2 中外部依赖缺失的具体安装命令 |
-| 5 | 配置文件磁盘路径与格式示例未提供 | 无法给出 3.4 中配置的落盘位置 |
+| `lucide-vue-next` | `src/components/forwarding/ForwardRuleFormDialog.vue`、`src/components/monitor/MonitorSidebar.vue` 等 | 28 |
+| `nanoid` | `src/components/settings/pages/KeysPage.vue`、`src/components/settings/pages/SshPage.vue` 等 | 12 |
+| `reka-ui` | `src/components/ui/Label.vue`、`src/components/ui/Slider.vue` 等 | 4 |
+| `class-variance-authority` | `src/components/ui/Button.vue` | 1 |
+| `clsx` | `src/lib/utils.ts` | 1 |
+| `tailwind-merge` | `src/lib/utils.ts` | 1 |
+| `gsap` | `src/lib/motion/index.ts` | 1 |
+| `deep-equal` | `src/lib/frontends/xterm/frontend.ts` | 1 |
 
-以上为本页保留的关键缺口；数据集已覆盖的 `scripts`、`envVars`、`constants`、`depUsage`、`entryFiles` 均已在上文逐项引用，未作「待确认」处理。
+### 5.3 终端与原生桥接（`usageKind = import`）
+
+| 依赖 | import 锚点 |
+| --- | --- |
+| `@xterm/xterm` | `src/lib/frontends/xterm/frontend.ts`、`lines.ts`、`options.ts`、`renderer.ts`、`resize.ts` |
+| `@xterm/addon-fit` | `src/lib/frontends/xterm/frontend.ts`、`src/lib/frontends/xterm/resize.ts` |
+| `@xterm/addon-webgl` / `@xterm/addon-canvas` | `src/lib/frontends/xterm/renderer.ts` |
+| `@xterm/addon-search` | `src/lib/frontends/xterm/search.ts` |
+| `@xterm/addon-unicode11` / `@xterm/addon-web-links` | `src/lib/frontends/xterm/frontend.ts` |
+| `@tauri-apps/api` | `src/main.ts`、`src/components/settings/pages/AboutPage.vue` 等（25 处） |
+
+### 5.4 构建与工具链（非运行时代码）
+
+| 依赖 | 使用方式 | 锚点 |
+| --- | --- | --- |
+| `vite` | `import` | `vite.config.ts` |
+| `@vitejs/plugin-vue` | `import` | `vite.config.ts` |
+| `@tailwindcss/vite` | `import` | `vite.config.ts` |
+| `vue-tsc` | `script` | `scripts.build` |
+| `oxlint` | `script` | `scripts.lint` |
+| `vitest` | `test` | `src/components/split/splitTree.test.ts` 等 35 处 |
+| `tailwindcss` | `import` | `src/assets/styles/main.css` |
+| `@tauri-apps/cli` | `script` | `scripts.app:dev`（`tauri dev`）、`scripts.app:build`（`tauri build`） |
+| `typescript` / `@types/node` / `@types/deep-equal` | 无源码 import 点（类型与工具链依赖，属正常） | — |
+
+---
+
+## 6. 待确认
+
+以下方面在本次数据中未被覆盖，无法给出基于锚点的结论。遇到这些问题时需自行补充证据：
+
+1. **Rust / Tauri 原生侧配置**：`src-tauri/` 下的依赖版本、`tauri.conf.json` 内容、以及原生插件的启用清单未提供。§1.2 与 §1.4 中关于“原生侧是否已启用对应插件”的判断无法在此确认，需要直接查看 `src-tauri/` 目录。
+2. **Node 版本要求**：`nodeVersion` 字段为空，无法给出建议的 Node 运行时版本区间。本项目的包管理器为 `bun`（见 §1.1），但 Bun 版本要求同样未提供，需查看仓库中的版本声明文件。
+3. **自动更新的服务端点与签名配置**：`src/services/updater.ts` 与 `src/components/settings/pages/AboutPage.vue` 是前端链路锚点，但更新源地址、公钥等配置未在数据中给出（相关变更锚点为 `commit:c81c17e5 (2026-09-19)`）。
 ## Related
 
 - 同目录：[onboarding.md](onboarding.md) · [testing.md](testing.md)
+- 共享 10 个源文件、共享 73 个符号：[tech-stack.md](../01-overview/tech-stack.md)
+- 共享 9 个源文件、共享 51 个符号：[overview.md](../01-overview/overview.md)
+- 共享 23 个符号：[environment.md](../01-overview/environment.md)
 - 总入口：[README](../README.md)

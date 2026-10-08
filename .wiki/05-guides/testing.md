@@ -1,85 +1,127 @@
 # 测试体系
 
-本页基于测试探测结果（framework / configPath / testDirs / fixturesDir / coverageThreshold / runCommand 六个字段）整理，说明本项目使用的测试框架、测试目录分布与运行方式。
+<details>
+<summary>Relevant source files</summary>
 
-> 锚点说明：本次探测结果仅提供目录级路径，未提供文件级路径与行号。因此下文锚点统一使用探测结果中给出的完整相对路径（目录级）。数据中不存在 file:line 级锚点，故不编造具体文件名与行号。
+- package.json
+- src/components/settings/groupDragSort.test.ts
+- src/components/split/splitTree.test.ts
+- src/components/terminal/searchFocus.test.ts
+- src/components/titlebar/tabGroupLayout.test.ts
+- src/components/titlebar/tabStripLayout.test.ts
+- src/components/titlebar/tabSwitcherModel.test.ts
+- src/lib/backgroundImage.test.ts
+- src/lib/colorSchemes.test.ts
+- src/lib/frontends/bufferRows.test.ts
+- src/lib/hotkeys/hotkeys.test.ts
+- src/lib/itermColors.test.ts
+- src/lib/middleware/oscProcessing.test.ts
+- src/lib/monitorOrchestrator.test.ts
+- src/lib/portForwarding.test.ts
+</details>
+
+本页说明该项目的测试框架、测试文件分布、运行方式与测试专用依赖；所有结论均来自探测数据，未探测到的项如实标注。
 
 ## 测试体系概览
 
-| 事实项 | 取值 | 锚点 / 来源 |
-|---|---|---|
-| 测试框架 | `vitest` | 探测结果 `framework` 字段 |
-| 运行命令 | `vitest run` | 探测结果 `runCommand` 字段 |
-| 配置文件 | 未检测到（`configPath` 为 null） | 探测结果 `configPath` 字段 |
-| 夹具目录 | 未检测到（`fixturesDir` 为 null） | 探测结果 `fixturesDir` 字段 |
-| 覆盖率阈值 | 未检测到（`coverageThreshold` 为 null） | 探测结果 `coverageThreshold` 字段 |
-| 测试目录数量 | 11 个 | 探测结果 `testDirs` 字段 |
-| 测试目录根位置 | 全部位于 `src/` 之下 | 探测结果 `testDirs` 字段 |
+| 项目 | 事实 | 证据 |
+| --- | --- | --- |
+| 测试框架 | `vitest` | testOnlyDeps[0].name |
+| 框架版本 | `^5.0.0` | testOnlyDeps[0].version |
+| 配置文件 | 未检测到（`configPath` 为 null） | 探测结果 configPath |
+| 测试目录 | 12 个：`src/components/settings`、`src/components/split`、`src/components/terminal`、`src/components/titlebar`、`src/lib`、`src/lib/frontends`、`src/lib/hotkeys`、`src/lib/middleware`、`src/lib/sessions`、`src/lib/suggestions`、`src/services`、`src/stores` | 探测结果 testDirs |
+| 夹具目录 | 未检测到（`fixturesDir` 为 null） | 探测结果 fixturesDir |
+| 覆盖率阈值 | 未检测到（`coverageThreshold` 为 null） | 探测结果 coverageThreshold |
+| 生产文件数 | 230 | 探测结果 productionFileCount |
+| 测试文件数 | 35 | 探测结果 testFileCount |
+| 运行命令 | `vitest run` | 探测结果 runCommand |
 
-### 测试目录分布
-
-全部 11 个测试目录及其锚点：
-
-| # | 测试目录（锚点） | 所在层 |
-|---|---|---|
-| 1 | `src/components/split` | 组件层 |
-| 2 | `src/components/terminal` | 组件层 |
-| 3 | `src/components/titlebar` | 组件层 |
-| 4 | `src/lib` | 库层（顶层） |
-| 5 | `src/lib/frontends` | 库层（子域） |
-| 6 | `src/lib/hotkeys` | 库层（子域） |
-| 7 | `src/lib/middleware` | 库层（子域） |
-| 8 | `src/lib/sessions` | 库层（子域） |
-| 9 | `src/lib/suggestions` | 库层（子域） |
-| 10 | `src/services` | 服务层 |
-| 11 | `src/stores` | 状态层 |
-
-### 目录层级关系
+测试文件与生产代码位于同一批目录下（`testDirs` 均为 `src/` 下的子路径），测试文件统一采用 `*.test.ts` 命名。
 
 ```mermaid
 graph TD
-  SRC["src/"] --> C["src/components"]
-  SRC --> L["src/lib"]
-  SRC --> SV["src/services"]
-  SRC --> ST["src/stores"]
-  C --> C1["src/components/split"]
-  C --> C2["src/components/terminal"]
-  C --> C3["src/components/titlebar"]
-  L --> L1["src/lib/frontends"]
-  L --> L2["src/lib/hotkeys"]
-  L --> L3["src/lib/middleware"]
-  L --> L4["src/lib/sessions"]
-  L --> L5["src/lib/suggestions"]
+  SRC[src] --> A[src/components/settings]
+  SRC --> B[src/components/split]
+  SRC --> C[src/components/terminal]
+  SRC --> D[src/components/titlebar]
+  SRC --> E[src/lib]
+  SRC --> F[src/services]
+  SRC --> G[src/stores]
+  E --> E1[src/lib/frontends]
+  E --> E2[src/lib/hotkeys]
+  E --> E3[src/lib/middleware]
+  E --> E4[src/lib/sessions]
+  E --> E5[src/lib/suggestions]
 ```
 
-图中节点均为探测结果 `testDirs` 中给出的真实目录路径，未引入数据之外的结构。
+> 图中节点全部取自 `testDirs` 的 12 个已探测目录（为版面清晰，`src/lib` 的 5 个子目录合并展示）。
 
 ## 运行方式
 
-### 全量运行
+**命令**
 
 ```bash
 vitest run
 ```
 
-- **来源**：探测结果 `runCommand` 字段给出的值即为 `vitest run`。
-- **行为**：`run` 子命令执行一次性全量测试，跑完即退出，不进入 watch 监听状态。这是 vitest 的通用运行模式。
-- **预期产出**：终端打印本轮各测试文件的通过/失败结果与汇总统计。探测结果未提供用例数量、通过率或耗时数据，本页不做任何数字预测。
+**做了什么**：以非交互（一次性）模式执行全部匹配的测试文件，执行完成后进程退出，不进入文件监听。测试文件按 `*.test.ts` 命名分布在上述 12 个目录中，共 35 个文件。
 
-### 命令相关缺口
+**预期产出**：终端输出逐文件的测试执行结果与整体汇总（通过/失败计数）；存在失败用例时进程以非零退出码结束。
 
-探测结果未提供任何自定义运行脚本（例如 `package.json` 中的 `test` 脚本映射）、未提供 `configPath`，因此无法确认 `vitest run` 是否携带额外参数或环境变量。若需在 CI 或本地复用该命令，以 `vitest run` 作为基准命令即可，其余参数需另行确认。
+**框架通用用法（非本次探测结果）**：单文件运行可追加路径参数；按用例名过滤可用名称参数；去掉 `run` 进入监听模式。这些属 vitest 的公共用法，具体参数形式以所装版本的官方文档为准。
+
+**包管理器与脚本别名**：探测数据仅给出 `vitest run` 本身，未提供 `package.json` 中的 script 名称或包管理器信息，调用入口需按仓库实际情况确认。
+
+## 测试专用证据
+
+### 测试专用环境变量
+
+未检测到（`testOnlyEnvVars` 为空数组）。即本次探测未发现仅由测试使用的环境变量。
+
+### 测试专用常量
+
+未检测到（`testOnlyConstants` 为空数组）。即本次探测未发现仅由测试使用的常量。
+
+### 测试专用依赖
+
+测试专用依赖共 1 项，下表列出其被引用的全部测试文件（`importFiles` 共 35 项，与 `testFileCount` 一致）。
+
+| 依赖 | 版本 | 引用测试文件数 |
+| --- | --- | --- |
+| `vitest` | `^5.0.0` | 35 |
+
+**引用点明细（按目录分组，锚点为测试文件完整相对路径）**
+
+| 目录 | 测试文件 |
+| --- | --- |
+| `src/components/settings` | `src/components/settings/groupDragSort.test.ts` |
+| `src/components/split` | `src/components/split/splitTree.test.ts` |
+| `src/components/terminal` | `src/components/terminal/searchFocus.test.ts` |
+| `src/components/titlebar` | `src/components/titlebar/tabGroupLayout.test.ts`、`src/components/titlebar/tabStripLayout.test.ts`、`src/components/titlebar/tabSwitcherModel.test.ts` |
+| `src/lib` | `src/lib/backgroundImage.test.ts`、`src/lib/colorSchemes.test.ts`、`src/lib/itermColors.test.ts`、`src/lib/monitorOrchestrator.test.ts`、`src/lib/portForwarding.test.ts`、`src/lib/quickCommands.test.ts`、`src/lib/sftpPane.test.ts`、`src/lib/sftpTransferMath.test.ts`、`src/lib/sshConnectionRegistry.test.ts`、`src/lib/startPage.test.ts` |
+| `src/lib/frontends` | `src/lib/frontends/bufferRows.test.ts` |
+| `src/lib/hotkeys` | `src/lib/hotkeys/hotkeys.test.ts` |
+| `src/lib/middleware` | `src/lib/middleware/oscProcessing.test.ts` |
+| `src/lib/sessions` | `src/lib/sessions/baseSession.test.ts`、`src/lib/sessions/sshSession.test.ts` |
+| `src/lib/suggestions` | `src/lib/suggestions/controller.test.ts`、`src/lib/suggestions/pathWord.test.ts`、`src/lib/suggestions/promptTracker.test.ts`、`src/lib/suggestions/shellHistory.test.ts`、`src/lib/suggestions/suggestionEngine.test.ts` |
+| `src/services` | `src/services/backgroundImage.test.ts`、`src/services/notifications.test.ts`、`src/services/tabSession.test.ts`、`src/services/updater.test.ts` |
+| `src/stores` | `src/stores/config.flush.test.ts`、`src/stores/config.test.ts`、`src/stores/config.windows.test.ts`、`src/stores/monitor.test.ts`、`src/stores/tabs.test.ts` |
+
+> 以上依赖、文件与版本均属测试环境范畴，不构成生产运行时配置或生产技术栈。
 
 ## 测试策略解读
 
-从目录分布看，本项目的测试采用**与源码同层、按模块就近组织**的方式：11 个测试目录全部位于 `src/` 之下，并与源码模块目录同名（`src/components/*`、`src/lib/*`、`src/services`、`src/stores`），不存在独立于源码树的顶层 `tests/` 目录。这种布局意味着测试文件与其被测代码物理相邻，读者沿源码目录即可定位对应测试，无需额外的路径映射。
+测试投入主要集中在 `src/lib`（10 个测试文件）及其子目录（`frontends`、`hotkeys`、`middleware`、`sessions`、`suggestions` 合计另有 10 个），此外 `src/stores` 与 `src/services` 各 5 个和 4 个，`src/components` 下的四个目录共 6 个。测试文件与生产代码同目录共存，说明组织方式以「就近测试」为主：被测单元与其测试文件位于同一模块目录内（例如 `src/lib/sessions/sshSession.test.ts` 与同目录的会话实现，`src/stores/tabs.test.ts` 与同目录的状态管理代码）。测试覆盖面更偏向纯逻辑与状态层而非 UI 渲染层——`src/lib` 系列覆盖了建议引擎（`src/lib/suggestions/suggestionEngine.test.ts`、`controller.test.ts`、`pathWord.test.ts`、`promptTracker.test.ts`、`shellHistory.test.ts`）、终端中间件（`src/lib/middleware/oscProcessing.test.ts`）、复用前端缓冲（`src/lib/frontends/bufferRows.test.ts`）以及 SFTP 相关计算与面板（`src/lib/sftpTransferMath.test.ts`、`src/lib/sftpPane.test.ts`）、端口转发与连接注册表（`src/lib/portForwarding.test.ts`、`src/lib/sshConnectionRegistry.test.ts`）。
 
-覆盖重点集中在三个层面：**组件层**限定为 3 个具体组件目录（`src/components/split`、`src/components/terminal`、`src/components/titlebar`），说明组件测试并非全组件铺开，而是有选择地落在少数几个组件上；**库层**粒度最细，除 `src/lib` 顶层外还向下拆分出 5 个子域（`frontends`、`hotkeys`、`middleware`、`sessions`、`suggestions`），是测试目录数量最多的区域，反映该区域被按职责切分为多个可独立验证的单元；**服务与状态层**各占 1 个目录（`src/services`、`src/stores`），以整目录为单位组织测试，未进一步细分。上述判断仅基于目录结构本身，各目录内部的具体测试内容、用例数量与断言范围，探测结果未提供。
+从文件命名还可读出两类针对性拆分：一是按平台差异拆分，存在 `src/stores/config.windows.test.ts` 与 `src/stores/config.test.ts` 并列；二是按具体行为拆分，存在 `src/stores/config.flush.test.ts` 这类以行为后缀命名的文件。这种命名方式表明同一模块的测试会按平台或特定行为分别成文件，便于定位失败范围。以上结论仅基于目录与文件命名结构，未涉及用例数量与覆盖率等未被探测的数据。
 
-## 缺口汇总
+## 缺口说明
 
-探测结果中 `configPath`、`fixturesDir`、`coverageThreshold` 三项均为 null，即未检测到 vitest 配置文件、共享夹具目录与覆盖率阈值设置；本页因此无法说明测试环境配置来源（如运行环境、别名、setup 文件）、测试数据复用方式与覆盖率门槛要求。此外，探测结果停留在目录级，未提供任何测试文件路径、用例名称或调用关系，故本页不含调用关系表与用例清单。
+本次探测未获得以下信息，均不做过往推断：独立测试配置文件的位置与内容（`configPath` 为 null）、测试夹具目录（`fixturesDir` 为 null）、覆盖率阈值与覆盖率统计（`coverageThreshold` 为 null，且测试专用依赖中仅有 `vitest`，未见覆盖率插件）。因此本文不提供任何用例数量或覆盖率数字。
 ## Related
 
 - 同目录：[onboarding.md](onboarding.md) · [troubleshooting.md](troubleshooting.md)
+- 共享 1 个源文件、共享 9 个符号：[tech-stack.md](../01-overview/tech-stack.md)
+- 共享 7 个符号：[overview.md](../01-overview/overview.md)
+- 共享 1 个源文件、共享 3 个符号：[environment.md](../01-overview/environment.md)
 - 总入口：[README](../README.md)

@@ -3,248 +3,247 @@
 <details>
 <summary>Relevant source files</summary>
 
-- src-tauri/Cargo.toml
+- package.json
 - src-tauri/build.rs
 - src-tauri/capabilities/default.json
+- src-tauri/Cargo.toml
 - src-tauri/src/background.rs
 - src-tauri/src/config/groups.rs
 - src-tauri/src/config/legacy.rs
 - src-tauri/src/config/load.rs
 - src-tauri/src/config/mod.rs
-- src/components/split/splitTree.test.ts
-- src/components/terminal/searchFocus.test.ts
-- src/components/titlebar/tabGroupLayout.test.ts
-- src/components/titlebar/tabStripLayout.test.ts
+- src-tauri/src/lib.rs
+- src-tauri/src/main.rs
 - src/i18n/index.ts
-- src/lib/backgroundImage.test.ts
 - src/lib/frontendContext.ts
+- src/lib/frontends/frontend.ts
+- src/lib/frontends/xterm/frontend.ts
 </details>
 
-本页面向新加入的开发者，基于仓库实际数据说明该 Tauri + Vue 3 桌面项目的环境准备、安装流程、可用脚本命令、目录职责与开发工作流。
-
-项目类型为 **frontend**（含 TypeScript），包管理器为 **bun**，源码目录为 `src`（Vue 3 前端）与 `src-tauri`（Rust 侧构建与能力配置）。
+本页面向新加入的开发者，覆盖从环境准备、依赖安装、脚本使用到代码结构与开发流程的完整上手路径。所有事实均来自项目现有源码、配置与依赖引用数据。
 
 ---
 
-## 1. 技术栈与依赖证据
+## 1. 项目概览
 
-技术栈来自项目依赖清单，下表列出各依赖在源码中的实际导入点（`depUsage.importFiles` 为数据中提供的证据路径）。
+- 项目类型：**前端项目**（`projectType: frontend`），且包含 Rust 侧源码目录与 Cargo 清单（`src-tauri/Cargo.toml`），属于 Tauri 桌面应用形态。
+- 类型系统：启用 TypeScript（`hasTypeScript: true`）。
+- 包管理器：**bun**（`packageManager: bun`）。
+- 源码根目录：`src`（前端）与 `src-tauri`（Rust 侧）。
 
-| 领域 | 依赖 | 使用证据（导入文件锚点） |
-| --- | --- | --- |
-| 前端框架 | `vue` | `src/App.vue`、`src/main.ts`（共 60 处导入） |
-| 状态管理 | `pinia` | `src/main.ts`、`src/stores/config/store.ts`、`src/stores/forwarding.ts`、`src/stores/monitor.ts`、`src/stores/tabs.ts` |
-| 国际化 | `vue-i18n` | `src/App.vue`、`src/components/forwarding/ForwardRuleFormDialog.vue`、`src/components/monitor/MonitorSidebar.vue`、`src/components/palette/CommandPalette.vue` |
-| 终端内核 | `@xterm/xterm` | `src/lib/frontends/xterm/frontend.ts`、`lines.ts`、`options.ts`、`renderer.ts`、`resize.ts` |
-| 终端插件 | `@xterm/addon-fit` | `src/lib/frontends/xterm/frontend.ts`、`src/lib/frontends/xterm/resize.ts` |
-| 终端插件 | `@xterm/addon-canvas`、`@xterm/addon-webgl` | `src/lib/frontends/xterm/renderer.ts` |
-| 终端插件 | `@xterm/addon-search` | `src/lib/frontends/xterm/search.ts` |
-| 终端插件 | `@xterm/addon-unicode11`、`@xterm/addon-web-links` | `src/lib/frontends/xterm/frontend.ts` |
-| 流式处理 | `rxjs` | `src/lib/frontends/frontend.ts`、`src/lib/frontends/xterm/frontend.ts`、`src/lib/frontends/xterm/support.ts`、`src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts` |
-| Tauri 桥接 | `@tauri-apps/api` | `src/main.ts`、`src/components/settings/pages/AboutPage.vue`、`src/components/settings/pages/AppearancePage.vue`、`src/components/settings/pages/KeysPage.vue`、`src/components/sftp/SftpTabContent.vue` |
-| Tauri 插件 | `@tauri-apps/plugin-dialog` | `src/components/settings/pages/AppearancePage.vue`、`src/components/settings/pages/BackupPage.vue`、`src/components/sftp/SftpBrowserPane.vue` |
-| Tauri 插件 | `@tauri-apps/plugin-opener` | `src/components/settings/pages/AboutPage.vue`、`src/components/sftp/SftpBrowserPane.vue`、`src/components/sftp/TransferPopover.vue`、`src/lib/frontends/xterm/support.ts` |
-| Tauri 插件 | `@tauri-apps/plugin-updater` | `src/components/settings/pages/AboutPage.vue`、`src/services/updater.ts` |
-| Tauri 插件 | `@tauri-apps/plugin-process` | `src/services/updater.ts` |
-| Tauri 插件 | `@tauri-apps/plugin-notification` | `src/services/notifications.ts` |
-| Tauri 插件 | `@tauri-apps/plugin-clipboard-manager` | `src/lib/frontendContext.ts` |
-| UI 基础组件 | `reka-ui` | `src/components/ui/Label.vue`、`src/components/ui/Separator.vue`、`src/components/ui/Slider.vue`、`src/components/ui/Switch.vue` |
-| 图标 | `lucide-vue-next` | `src/components/forwarding/ForwardRuleFormDialog.vue`、`src/components/forwarding/ForwardingTabContent.vue`、`src/components/monitor/MonitorSidebar.vue`、`src/components/settings/ColorSchemePicker.vue`、`src/components/settings/GroupAccordion.vue`（共 28 处） |
-| 样式原子化 | `tailwindcss` | `src/assets/styles/main.css` |
-| 动画 | `gsap` | `src/lib/motion/index.ts` |
-| ID 生成 | `nanoid` | `src/components/settings/pages/KeysPage.vue`、`LocalProfilesPage.vue`、`QuickCommandsPage.vue`、`SshPage.vue`、`TabGroupsPage.vue`（共 12 处） |
-| 序列化 | `yaml` | `src/stores/config/store.ts` |
-| 样式工具 | `clsx`、`tailwind-merge` | `src/lib/utils.ts` |
-| 变体工具 | `class-variance-authority` | `src/components/ui/Button.vue` |
-| 深比较 | `deep-equal` | `src/lib/frontends/xterm/frontend.ts` |
-| 过渡样式 | `tw-animate-css` | `src/main.ts` |
-| 构建 | `vite`、`@vitejs/plugin-vue`、`@tailwindcss/vite` | `vite.config.ts` |
-| 测试 | `vitest` | `src/lib/backgroundImage.test.ts` 等测试文件（共 33 处，usageKind=test） |
+### 1.1 入口文件
+
+以下文件被数据标记为入口文件（entryFiles）：
+
+| 入口文件 | 说明与可锚定的引用证据 |
+| --- | --- |
+| `src/main.ts` | 前端启动入口；该文件中引用了 `pinia`、`tw-animate-css`、`@tauri-apps/api`（见 `src/main.ts`） |
+| `src/App.vue` | 根组件；该文件中引用了 `vue`、`vue-i18n`（见 `src/App.vue`） |
+| `src/i18n/index.ts` | 国际化模块入口 |
+| `src/lib/motion/index.ts` | 动效模块入口；该文件中引用了 `gsap`（见 `src/lib/motion/index.ts`） |
+| `src/lib/sessions/index.ts` | 会话模块入口 |
+| `src/stores/config/index.ts` | 配置状态模块入口（同目录 `src/stores/config/store.ts` 引用了 `pinia`、`yaml`） |
 
 ---
 
 ## 2. 环境准备
 
-| 环境项 | 要求 | 依据 / 说明 |
-| --- | --- | --- |
-| 包管理器 | **bun** | 项目 `packageManager` 字段为 `bun`，安装与脚本执行统一使用 bun，不使用 npm/yarn/pnpm |
-| Node.js | **待确认**：数据中 `nodeVersion` 字段为空，未声明最低/推荐版本 | Vite、Vitest 基于 Node 运行，安装前请按团队约定确认版本；这是本页唯一影响安装决策的缺口 |
-| Rust / Cargo 工具链 | 需要 | `src-tauri/Cargo.toml`、`src-tauri/build.rs` 存在，`app:dev` / `app:build`（tauri dev/build）会编译 Rust 侧代码 |
-| 前端运行时依赖 | 由 `bun install` 安装 | 见上文依赖表 |
-| 环境变量 | `TAURI_ENV_HOST`、`TAURI_ENV_DEBUG` | 见「环境变量」章节 |
+### 2.1 必装项
 
-各依赖的作用以其在源码中的导入点为准，例如 `src/lib/utils.ts` 导入 `clsx` 与 `tailwind-merge`（用于类名合并），`src/stores/config/store.ts` 导入 `yaml`（配置序列化/解析），`src/services/updater.ts` 导入 `@tauri-apps/plugin-updater` 与 `@tauri-apps/plugin-process`（更新流程）。
+| 组件 | 版本要求 | 作用 | 依据 |
+| --- | --- | --- | --- |
+| bun | 未在数据中约束版本 | 安装依赖、执行 `scripts` 中的全部脚本 | `packageManager: bun` |
+| Rust 工具链 | 未在数据中约束版本 | 编译 `src-tauri` 下的 Rust 代码（Tauri 侧） | `src-tauri/Cargo.toml`、`src-tauri/build.rs` 存在 |
+| Node.js | 待确认 | 提供 Vite / vue-tsc / vitest 等 JS 工具链运行时；数据中 `nodeVersion` 字段为空，未提供 engines 或版本文件约束 | `nodeVersion: ""` |
+
+> 关于 Node.js 版本：数据未给出具体版本要求，请以本机已能运行 `bun run dev` 为准；如需锁定版本，需另行补充 `engines` 或版本管理文件（当前数据中不存在）。
+
+### 2.2 依赖分组说明
+
+依赖清单分为运行时依赖与开发期工具链两类：
+
+| 类别 | 代表依赖 | 作用（均有引用点佐证） |
+| --- | --- | --- |
+| UI 框架 | `vue`、`reka-ui`、`lucide-vue-next`、`class-variance-authority` | `vue` 在 62 个文件中被引用（如 `src/App.vue`）；`reka-ui` 用于基础控件（如 `src/components/ui/Label.vue`、`src/components/ui/Slider.vue`）；`lucide-vue-next` 在 28 个文件中被引用（如 `src/components/monitor/MonitorSidebar.vue`）；`class-variance-authority` 用于按钮变体（`src/components/ui/Button.vue`） |
+| 状态与配置 | `pinia`、`yaml`、`nanoid` | `pinia` 注册于 `src/main.ts`，并在 `src/stores/config/store.ts`、`src/stores/forwarding.ts`、`src/stores/monitor.ts`、`src/stores/tabs.ts` 中使用；`yaml` 用于配置文件解析（`src/stores/config/store.ts`）；`nanoid` 用于生成 ID（如 `src/components/settings/pages/KeysPage.vue`，共 12 个引用文件） |
+| 国际化 | `vue-i18n` | 在 40 个文件中被引用（如 `src/App.vue`、`src/components/palette/CommandPalette.vue`） |
+| 终端仿真 | `@xterm/xterm` 及 `@xterm/addon-*` | 核心在 `src/lib/frontends/xterm/` 下：`frontend.ts`、`renderer.ts`、`resize.ts`、`search.ts`、`lines.ts`、`options.ts`、`support.ts` |
+| 响应式流 | `rxjs` | 在 `src/lib/frontends/frontend.ts`、`src/lib/frontends/xterm/frontend.ts`、`src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts` 等 7 个文件中使用 |
+| 桌面能力 | `@tauri-apps/api` 与各 `@tauri-apps/plugin-*` | API 在 25 个文件中被引用；插件分别为 clipboard-manager（`src/lib/frontendContext.ts`）、dialog（`src/components/settings/pages/BackupPage.vue` 等）、notification（`src/services/notifications.ts`）、opener（`src/components/sftp/TransferPopover.vue` 等）、process 与 updater（`src/services/updater.ts`） |
+| 动效 | `gsap`、`tw-animate-css` | `gsap` 见 `src/lib/motion/index.ts`；`tw-animate-css` 见 `src/main.ts` |
+| 样式工具 | `clsx`、`tailwind-merge`、`tailwindcss` | `clsx` 与 `tailwind-merge` 共同用于类名合并（`src/lib/utils.ts`）；`tailwindcss` 由 `src/assets/styles/main.css` 引入 |
+| 构建工具链 | `vite`、`@vitejs/plugin-vue`、`@tailwindcss/vite` | 三者均在 `vite.config.ts` 中被引用 |
+| 校验与测试 | `vue-tsc`、`oxlint`、`vitest` | `vue-tsc` 用于 `scripts.build` 的类型检查；`oxlint` 用于 `scripts.lint`；`vitest` 被 35 处测试文件引用（如 `src/components/split/splitTree.test.ts`） |
+
+> `deep-equal` 在 `src/lib/frontends/xterm/frontend.ts` 中被引用；`@types/deep-equal`、`@types/node`、`typescript` 未出现在源码 import 中，属于类型/工具链支撑。
 
 ---
 
 ## 3. 安装步骤
 
-1. **确认 bun 可用**
+项目使用 **bun** 作为包管理器，所有依赖安装与脚本执行均通过 bun 完成。
 
-   ```bash
-   bun --version
-   ```
+### 步骤 1：安装前端依赖
 
-   预期输出：bun 的版本号字符串。若命令不存在，需先按 bun 官方方式安装包管理器。
+```bash
+bun install
+```
 
-2. **安装前端依赖**
+- 作用：读取 `package.json`（数据来源为依赖清单）并安装 `dependencies` / `devDependencies`，同时生成或更新 bun 锁文件。
+- 预期输出：安装进度与安装包数量汇总，最终生成 `node_modules/`。
+- 验证方法：确认 `node_modules/` 目录存在；随后执行 `bun run dev`，Vite 开发服务器应能启动（`scripts.dev` 为 `vite`）。
 
-   ```bash
-   bun install
-   ```
+### 步骤 2：准备 Rust 侧依赖
 
-   预期输出：解析依赖并生成/更新 `node_modules` 与锁文件，末尾打印安装包数量与耗时。
+Rust 依赖由 Cargo 在构建时自动拉取，无需手动 `cargo add`：
 
-   **验证方法**：确认仓库根目录出现 `node_modules`，且无 error 级别日志。
+```bash
+bun run app:dev
+```
 
-3. **（首次运行桌面端时）安装 Rust 侧依赖**
+- 作用：执行 `tauri dev`，首次运行会依据 `src-tauri/Cargo.toml` 下载并编译 Rust 依赖，`src-tauri/build.rs` 作为构建脚本参与编译。
+- 预期输出：Cargo 编译日志 + Tauri 应用窗口启动。
+- 验证方法：应用窗口成功打开即表示 Rust 侧环境配置正确。
 
-   ```bash
-   bun run app:dev
-   ```
+### 步骤 3：验证工具链完整性
 
-   Tauri 在首次执行 `tauri dev` 时根据 `src-tauri/Cargo.toml` 拉取并编译 Rust 依赖（由 `src-tauri/build.rs` 参与构建）。预期输出：Cargo 编译进度 + 应用窗口启动。此步耗时较长，属正常现象。
+```bash
+bun run lint
+bun run test
+```
 
-4. **验证安装结果**
-
-   ```bash
-   bun run dev
-   ```
-
-   预期输出：Vite 开发服务器启动，并打印本地访问地址（Vite 默认端口为 5173）。
+- `bun run lint` 对应 `oxlint src`，仅扫描 `src` 目录。
+- `bun run test` 对应 `vitest run`，执行单次测试（非 watch 模式）。
 
 ---
 
 ## 4. 项目初始化
 
-数据中 `cliCommands` 为**空数组**，即本项目未提供自定义 CLI 命令（无自研脚手架/生成器命令）。初始化流程即为上述 `bun install` 加项目脚本，脚本定义如下（来源：项目 `scripts` 配置）：
+数据中的 `cliCommands` 为空数组，即**项目未提供自定义 CLI 命令**。因此初始化流程完全依赖 `scripts` 中定义的脚本，不存在需要额外调用的初始化子命令。
 
-| 脚本 | 实际命令 | 作用 | 使用场景 |
-| --- | --- | --- | --- |
-| `dev` | `vite` | 启动前端开发服务器 | 纯前端页面调试 |
-| `build` | `vue-tsc --noEmit && vite build` | 先做 TypeScript 类型检查，再产物构建 | 出包前自检、CI 构建 |
-| `preview` | `vite preview` | 本地预览构建产物 | 验证 `build` 结果 |
-| `app:dev` | `tauri dev` |
-
-启动 Tauri 桌面应用（开发模式） | 调试前后端交互、终端、SFTP 等需要 Rust 侧能力的功能 |
-| `app:build` | `tauri build` | 构建桌面应用安装包 | 发布/打包 |
-| `lint` | `oxlint src` | 静态检查 `src` 目录 | 提交前代码检查 |
-| `test` | `vitest run` | 单次运行单元测试 | 本地验证、CI 测试 |
-
-调用方式统一为 `bun run <脚本名>`，例如 `bun run app:dev`。
+| 场景 | 命令 | 说明 |
+| --- | --- | --- |
+| 仅启动前端 | `bun run dev` | 等价于 `vite`，拉起 Vite 开发服务器 |
+| 启动完整桌面应用 | `bun run app:dev` | 等价于 `tauri dev`，包含 Rust 编译与窗口启动，是日常开发的推荐入口 |
+| 前端产物预览 | `bun run preview` | 等价于 `vite preview`，用于预览已构建的产物 |
 
 ---
 
 ## 5. 基本使用
 
-### 5.1 核心命令
+### 5.1 脚本清单
+
+以下命令全部直接来自项目 `scripts` 定义：
 
 ```bash
-# 安装依赖
-bun install
-
-# 前端开发服务器（浏览器可访问）
+# 开发：仅前端（Vite Dev Server）
 bun run dev
 
-# 桌面应用开发模式（含 Rust 侧编译）
+# 开发：完整桌面应用（Tauri + Rust 编译）
 bun run app:dev
 
-# 类型检查 + 生产构建
+# 构建：先做类型检查，再打包前端
 bun run build
+
+# 构建：打包桌面应用安装包
+bun run app:build
 
 # 预览构建产物
 bun run preview
 
-# 桌面应用打包
-bun run app:build
-
-# 代码检查
+# 静态检查（仅 src 目录）
 bun run lint
 
-# 运行测试
+# 运行测试（单次执行）
 bun run test
 ```
 
-以上命令均直接来自项目 `scripts` 配置，无待确认项。
+对应的脚本定义：
+
+| 脚本名 | 实际命令 |
+| --- | --- |
+| `dev` | `vite` |
+| `build` | `vue-tsc --noEmit && vite build` |
+| `preview` | `vite preview` |
+| `app:dev` | `tauri dev` |
+| `app:build` | `tauri build` |
+| `lint` | `oxlint src` |
+| `test` | `vitest run` |
 
 ### 5.2 典型工作流
 
-| 阶段 | 命令 | 说明 |
-| --- | --- | --- |
-| 1. 拉取代码后安装 | `bun install` | 安装前端依赖 |
-| 2. 类型自检 + 构建 | `bun run build` | `vue-tsc --noEmit` 先行，类型不通过则中断，随后执行 `vite build` |
-| 3. 检查 | `bun run lint` | 对 `src` 目录执行 oxlint |
-| 4. 测试 | `bun run test` | vitest 单次运行，测试文件示例见 `src/lib/backgroundImage.test.ts`、`src/components/split/splitTree.test.ts` |
-| 5. 本地验证产物 | `bun run preview` | 预览 `vite build` 输出 |
-| 6. 调试整机功能 | `bun run app:dev` | 需要 Tauri 插件能力（如 `src/services/notifications.ts`、`src/services/updater.ts`）时使用 |
-| 7. 打包发布 | `bun run app:build` | 产出桌面安装包 |
+**日常开发（推荐）**
 
-### 5.3 命令选择建议
+1. `bun run app:dev` —— 启动桌面应用，前端热更新 + Rust 侧编译。
+2. 修改 `src/` 下代码 —— Vite 自动热更新。
+3. 修改 `src-tauri/` 下代码 —— 由 `tauri dev` 触发重新编译。
 
-- 只改 Vue 组件/样式时：`bun run dev` 足以覆盖，例如 `src/components/monitor/MonitorSidebar.vue`、`src/components/forwarding/ForwardingTabContent.vue` 等纯前端组件。
-- 涉及 Tauri API 调用时：使用 `bun run app:dev`。这类调用分布在 `src/main.ts`（`@tauri-apps/api`）、`src/services/notifications.ts`（`@tauri-apps/plugin-notification`）、`src/services/updater.ts`（`@tauri-apps/plugin-updater`、`@tauri-apps/plugin-process`）、`src/lib/frontendContext.ts`（`@tauri-apps/plugin-clipboard-manager`）等位置，仅靠浏览器运行无法完整验证。
+**提交前校验**
+
+1. `bun run lint` —— 静态检查 `src` 目录（注意：不覆盖 `src-tauri`）。
+2. `bun run test` —— 执行 `src/components/**` 下的 Vitest 用例（如 `src/components/settings/groupDragSort.test.ts`、`src/components/split/splitTree.test.ts`、`src/components/terminal/searchFocus.test.ts`、`src/components/titlebar/tabGroupLayout.test.ts`、`src/components/titlebar/tabStripLayout.test.ts`）。
+3. `bun run build` —— `vue-tsc --noEmit` 先做全量类型检查，通过后才执行 `vite build`；类型错误会直接中断流程。
+
+**发布**
+
+1. `bun run build` —— 确认前端类型与打包均无问题。
+2. `bun run app:build` —— 由 `tauri build` 产出桌面应用安装包。
 
 ---
 
 ## 6. 环境变量
 
-| 变量名 | 敏感 | 说明 |
-| --- | --- | --- |
-| `TAURI_ENV_HOST` | 否 | Tauri 环境标识变量 |
-| `TAURI_ENV_DEBUG` | 否 | Tauri 调试模式标识变量 |
+数据中提供的环境变量均为构建期变量，且集中在 `vite.config.ts` 中被引用：
 
-数据仅提供变量名与敏感标记，未提供取值示例或默认值，具体取值按 Tauri CLI 运行环境传入。
+| 变量名 | 是否敏感 | 生产引用文件 |
+| --- | --- | --- |
+| `TAURI_ENV_HOST` | 否 | `vite.config.ts` |
+| `TAURI_ENV_DEBUG` | 否 | `vite.config.ts` |
+
+说明：
+
+- 两个变量均非敏感信息，无需通过密钥管理注入。
+- 二者仅在构建配置 `vite.config.ts` 中被引用，未出现在 `src/` 或 `src-tauri/` 源码中，因此属于构建/打包阶段的开关类变量。
 
 ---
 
 ## 7. 项目结构概览
 
-源码目录为 `src`（前端）与 `src-tauri`（Rust 侧）。以下按数据中 `sourceDirFiles` 给出的真实文件样本说明各目录职责，锚点均为仓库内完整相对路径。
+### 7.1 `src/` —— 前端（Vue 3 + TypeScript）
 
-### 7.1 `src`（Vue 3 前端主目录）
+| 子路径 | 作用 | 数据中可见的真实文件样本 |
+| --- | --- | --- |
+| `src/`（根） | 应用入口与根组件 | `src/App.vue`、`src/main.ts` |
+| `src/assets/styles/` | 全局样式与调色板样式 | `src/assets/styles/main.css`、`src/assets/styles/palette.css` |
+| `src/components/forwarding/` | 端口转发相关界面 | `src/components/forwarding/ForwardRuleFormDialog.vue`、`src/components/forwarding/ForwardingTabContent.vue`、`src/components/forwarding/ForwardingTabContent.css` |
+| `src/components/monitor/` | 指标监控界面 | `src/components/monitor/MetricChart.vue`、`src/components/monitor/MonitorSidebar.vue` |
+| `src/components/settings/` | 设置页，按功能分页 | `src/components/settings/pages/AboutPage.vue`、`AppearancePage.vue`、`KeysPage.vue`、`BackupPage.vue`、`LocalProfilesPage.vue`、`QuickCommandsPage.vue`、`SshPage.vue`、`TabGroupsPage.vue`；另有 `src/components/settings/ColorSchemePicker.vue`、`src/components/settings/GroupAccordion.vue` |
+| `src/components/sftp/` | SFTP 浏览与传输 | `src/components/sftp/SftpTabContent.vue`、`src/components/sftp/SftpBrowserPane.vue`、`src/components/sftp/TransferPopover.vue` |
+| `src/components/ui/` | 通用基础控件 | `src/components/ui/Button.vue`、`Label.vue`、`Separator.vue`、`Slider.vue`、`Switch.vue` |
+| `src/components/palette/` | 命令面板 | `src/components/palette/CommandPalette.vue` |
+| `src/components/split/` | 分屏相关逻辑与测试 | `src/components/split/splitTree.test.ts` |
+| `src/components/terminal/` | 终端界面逻辑与测试 | `src/components/terminal/searchFocus.test.ts` |
+| `src/components/titlebar/` | 标题栏/标签页布局与测试 | `src/components/titlebar/tabGroupLayout.test.ts`、`src/components/titlebar/tabStripLayout.test.ts` |
+| `src/lib/` | 与 UI 无关的核心逻辑层 | `src/lib/utils.ts`、`src/lib/frontendContext.ts` |
+| `src/lib/frontends/` | 终端前端抽象层 | `src/lib/frontends/frontend.ts` |
+| `src/lib/frontends/xterm/` | xterm 具体实现（渲染、尺寸、搜索、行处理等） | `src/lib/frontends/xterm/frontend.ts`、`renderer.ts`、`resize.ts`、`search.ts`、`lines.ts`、`options.ts`、`support.ts` |
+| `src/lib/middleware/` | 终端数据中间件与 OSC 处理 | `src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts` |
+| `src/lib/motion/` | 动效封装（基于 gsap） | `src/lib/motion/index.ts` |
+| `src/lib/sessions/` | 会话模块 | `src/lib/sessions/index.ts` |
+| `src/services/` | 系统级服务封装 | `src/services/notifications.ts`（通知）、`src/services/updater.ts`（进程与更新） |
+| `src/stores/` | Pinia 状态仓库 | `src/stores/config/index.ts`、`src/stores/config/store.ts`、`src/stores/forwarding.ts`、`src/stores/monitor.ts`、`src/stores/tabs.ts` |
+| `src/i18n/` | 国际化资源与实例 | `src/i18n/index.ts` |
 
-数据提供该目录下真实文件样本如下：
+### 7.2 `src-tauri/` —— Rust 侧（Tauri 后端）
 
-| 文件锚点 | 含义 |
-| --- | --- |
-| `src/App.vue` | 应用根组件，导入 `vue` 与 `vue-i18n` |
-| `src/main.ts` | 前端入口文件（同时出现在 `entryFiles` 中），导入 `@tauri-apps/api`、`pinia`、`tw-animate-css` |
-| `src/assets/styles/main.css` | 全局样式入口，导入 `tailwindcss` |
-| `src/assets/styles/palette.css` | 调色板样式文件 |
-| `src/components/forwarding/ForwardRuleFormDialog.vue` | 端口转发规则表单对话框组件 |
-| `src/components/forwarding/ForwardingTabContent.vue` | 端口转发标签页内容组件 |
-| `src/components/forwarding/ForwardingTabContent.css` | 上述转发标签页的配套样式文件 |
-| `src/components/monitor/MetricChart.vue` | 监控指标图表组件 |
-| `src/components/monitor/MonitorSidebar.vue` | 监控侧边栏组件 |
+| 子路径 | 作用 | 数据中可见的真实文件样本 |
+| --- | --- | --- |
+| `src-tauri/`（根） | Cargo 清单与构建脚本 | `src-tauri/Cargo.toml`、`src-tauri/build.rs` |
+| `src-tauri/capabilities/` | Tauri 权限能力配置 | `src-tauri/capabilities/default.json` |
+| `src-tauri/src/` | Rust 源码根 | `src-tauri/src/background.rs`（后台任务） |
+| `src-tauri/src/config/` | 配置加载、迁移与分组 | `src-tauri/src/config/mod.rs`、`src-tauri/src/config/load.rs`、`src-tauri/src/config/legacy.rs`（历史配置兼容）、`src-tauri/src/config/groups.rs` |
 
-### 7.2 `src-tauri`（Tauri / Rust 侧目录）
-
-数据提供该目录下真实文件样本如下：
-
-| 文件锚点 | 含义 |
-| --- | --- |
-| `src-tauri/Cargo.toml` | Rust 包清单，声明 crate 元数据与依赖 |
-| `src-tauri/build.rs` | Cargo 构建脚本，参与 Rust 侧编译流程 |
-| `src-tauri/capabilities/default.json` | Tauri 能力（权限）配置 |
-| `src-tauri/src/background.rs` | Rust 侧源码模块 |
-| `src-tauri/src/config/groups.rs` | 配置模块：分组相关 |
-| `src-tauri/src/config/legacy.rs` | 配置模块：旧版配置兼容 |
-| `src-tauri/src/config/load.rs` | 配置模块：加载逻辑 |
-| `src-tauri/src/config/mod.rs` | 配置模块入口 |
-
-### 7.3 前端入口文件（`entryFiles`）
-
-数据给出的前端入口/聚合入口文件：
-
-| 入口文件 | 说明 |
-| --- | --- |
-| `src/main.ts` | 应用主入口 |
-| `src/i18n/index.ts` | 国际化模块入口 |
-| `src/lib/motion/index.ts` | 动画模块入口（导入 `gsap`） |
-| `src/lib/sessions/index.ts` | 会话模块入口 |
-| `src/stores/config/index.ts` | 配置 store 模块入口 |
-
-从这些入口可看出前端由若干聚合模块组成：国际化（`src/i18n/`）、动画（`src/lib/motion/`）、会话（`src/lib/sessions/`）、配置状态（`src/stores/config/`）。终端渲染相关代码位于 `src/lib/frontends/xterm/`（样本中可见 `frontend.ts`、`renderer.ts`、`resize.ts`、`lines.ts`、`options.ts`、`search.ts`、`support.ts`），中间件与 OSC 处理位于 `src/lib/middleware/`。
+> `src-tauri/src/main.rs`、`src-tauri/src/lib.rs` 未出现在给出的文件样本中，其具体入口组织方式见文末「待确认」。
 
 ---
 
@@ -253,74 +252,58 @@ bun run test
 ### 8.1 构建
 
 ```bash
-bun run build
+# 前端构建（含类型检查）
+bun run build      # vue-tsc --noEmit && vite build
+
+# 桌面应用打包
+bun run app:build  # tauri build
 ```
 
-流程为两段串联：先 `vue-tsc --noEmit` 做全量类型检查（该步骤失败会直接终止，不会产出构建物），再执行 `vite build` 生成生产产物。因此**类型错误必须在构建阶段修完**，无法绕过。前端构建配置集中在 `vite.config.ts`，其中使用了 `@vitejs/plugin-vue`、`@tailwindcss/vite`（Tailwind CSS 的 Vite 集成）与 `vite` 自身。
-
-桌面端打包使用：
-
-```bash
-bun run app:build
-```
+- `bun run build` 会先执行 `vue-tsc --noEmit` 做全量类型检查，类型错误会阻止后续 `vite build`。
+- 构建产物可用 `bun run preview`（`vite preview`）进行本地预览。
 
 ### 8.2 运行测试
 
 ```bash
-bun run test
+bun run test   # vitest run，单次执行后退出
 ```
 
-即 `vitest run`，单次执行全部测试后退出（非 watch 模式）。现有测试文件样本包括：
+现有测试用例集中在组件层，文件命名均为 `*.test.ts`：
 
-| 测试文件锚点 |
-| --- |
-| `src/lib/backgroundImage.test.ts` |
-| `src/components/split/splitTree.test.ts` |
-| `src/components/terminal/searchFocus.test.ts` |
-| `src/components/titlebar/tabGroupLayout.test.ts` |
-| `src/components/titlebar/tabStripLayout.test.ts` |
+- `src/components/settings/groupDragSort.test.ts`
+- `src/components/split/splitTree.test.ts`
+- `src/components/terminal/searchFocus.test.ts`
+- `src/components/titlebar/tabGroupLayout.test.ts`
+- `src/components/titlebar/tabStripLayout.test.ts`
 
-从命名可见测试集中在纯逻辑/布局算法一侧（分割树、标签组与标签条布局、搜索焦点、背景图处理），这些逻辑不依赖 Tauri 运行时，因此可在普通 Node 环境下由 vitest 直接跑通。
-
-### 8.3 代码检查
+### 8.3 静态检查
 
 ```bash
-bun run lint
+bun run lint   # oxlint src
 ```
 
-对 `src` 目录执行 oxlint。建议在提交前与 CI 中执行。
+作用范围为 `src` 目录；`src-tauri` 下的 Rust 代码不在该检查范围内。
 
 ### 8.4 开发调试
 
-| 调试对象 | 方式 | 依据 |
-| --- | --- | --- |
-| 纯前端界面 | `bun run dev`，浏览器 DevTools | Vite 开发服务器 |
-| 需要 Tauri 能力的功能 | `bun run app:dev` | Rust 侧由 `src-tauri/build.rs`、`src-tauri/Cargo.toml` 参与构建；权限由 `src-tauri/capabilities/default.json` 约束 |
-| 通知功能 | 在 `app:dev` 模式下验证 | 调用点 `src/services/notifications.ts` 导入 `@tauri-apps/plugin-notification` |
-| 更新流程 | 在 `app:dev` 模式下验证 | 调用点 `src/services/updater.ts` 导入 `@tauri-apps/plugin-updater`、`@tauri-apps/plugin-process`；`src/components/settings/pages/AboutPage.vue` 亦导入更新插件 |
-| 终端渲染 | `bun run dev` 或 `app:dev` | 渲染器代码 `src/lib/frontends/xterm/renderer.ts` 导入 `@xterm/addon-canvas`、`@xterm/addon-webgl`；`@xterm/addon-fit` 用于尺寸适配（`src/lib/frontends/xterm/resize.ts`） |
-| 剪贴板交互 | `app:dev` 模式 | 调用点 `src/lib/frontendContext.ts` 导入 `@tauri-apps/plugin-clipboard-manager` |
-| 文件选择/打开 | `app:dev` 模式 | `@tauri-apps/plugin-dialog` 调用点 `src/components/settings/pages/AppearancePage.vue`、`src/components/settings/pages/BackupPage.vue`、`src/components/sftp/SftpBrowserPane.vue`；`@tauri-apps/plugin-opener` 调用点 `src/components/settings/pages/AboutPage.vue`、`src/components/sftp/SftpBrowserPane.vue`、`src/components/sftp/TransferPopover.vue`、`src/lib/frontends/xterm/support.ts` |
-
-### 8.5 状态与数据流开发注意点
-
-- 全局状态由 pinia 管理，store 分布在 `src/stores/config/store.ts`、`src/stores/forwarding.ts`、`src/stores/monitor.ts`、`src/stores/tabs.ts`，并在 `src/main.ts` 中注册。新增 store 建议遵循同一目录约定。
-- 配置的序列化/反序列化由 `src/stores/config/store.ts` 导入的 `yaml` 承担；配置模块入口为 `src/stores/config/index.ts`。
-- Rust 侧配置相关逻辑集中在 `src-tauri/src/config/`（`mod.rs`、`load.rs`、`groups.rs`、`legacy.rs`），其中 `legacy.rs` 表明存在旧版本配置兼容处理，改动配置结构时需一并核对。
-- 终端数据流涉及 rxjs 流式处理：调用点包括 `src/lib/frontends/frontend.ts`、`src/lib/frontends/xterm/frontend.ts`、`src/lib/frontends/xterm/support.ts`、`src/lib/middleware/middleware.ts`、`src/lib/middleware/oscProcessing.ts`。
+- 只调试前端渲染逻辑时使用 `bun run dev`（Vite Dev Server），启动更快。
+- 涉及 Tauri API（`@tauri-apps/api`）、插件能力（dialog / updater / notification / opener 等）或 `src-tauri/` 逻辑时，必须使用 `bun run app:dev`，因为 `bun run dev` 不会编译 Rust 侧。
+- `vite.config.ts` 中引用了 `TAURI_ENV_DEBUG` 与 `TAURI_ENV_HOST`，说明构建配置会区分 Tauri 调试模式与运行主机环境。
 
 ---
 
-## 9. 待确认事项
+## 9. 待确认
 
-| # | 事项 | 缺失证据 |
-| --- | --- | --- |
-| 1 | Node.js 最低/推荐版本 | 项目数据 `nodeVersion` 为空，未声明版本要求；仅能确定为 bun 包管理器 |
-| 2 | 自定义 CLI 命令 | `cliCommands` 为空数组，项目未提供自研命令行工具；初始化仅依赖 bun 脚本 |
-| 3 | Rust 工具链版本要求 | `src-tauri/Cargo.toml` 仅作为文件存在被列出，未提供 edition / toolchain 具体值 |
-
-除以上三点外，本页所述命令、目录职责、依赖调用点均有数据锚点支撑。
+| 项 | 缺失的证据 |
+| --- | --- |
+| Node.js 版本要求 | 数据中 `nodeVersion` 为空，未提供 `engines`、`.nvmrc` 等版本约束信息 |
+| Rust 侧入口组织方式 | `src-tauri/src/main.rs` / `lib.rs` 未出现在 `sourceDirFiles` 样本中，Tauri 命令注册与插件初始化的具体位置无法确定 |
+| 自定义 CLI 命令 | `cliCommands` 为空数组，若项目存在自建 CLI 入口，数据中未体现 |
+| Tauri 权限范围 | `src-tauri/capabilities/default.json` 的具体能力项未在数据中展开，无法列出启用的插件权限清单 |
 ## Related
 
 - 同目录：[testing.md](testing.md) · [troubleshooting.md](troubleshooting.md)
+- 共享 9 个源文件、共享 73 个符号：[overview.md](../01-overview/overview.md)
+- 共享 4 个源文件、共享 63 个符号：[tech-stack.md](../01-overview/tech-stack.md)
+- 共享 1 个源文件、共享 32 个符号：[environment.md](../01-overview/environment.md)
 - 总入口：[README](../README.md)
