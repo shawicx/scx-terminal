@@ -102,6 +102,31 @@ export interface QuickCommand {
     description?: string
 }
 
+/** 工作流步骤：quickCommand = 引用快捷命令；raw = 内联命令（支持 {{参数}} 占位符） */
+export interface WorkflowStep {
+    id: string
+    kind: 'quickCommand' | 'raw'
+    /** kind=quickCommand 时必填（引用快捷命令 id；删除快捷命令受引用保护拦截） */
+    quickCommandId?: string
+    /** kind=raw 时必填（内联命令文本） */
+    command?: string
+    /** 步骤级参数预设（运行时填参表单的默认值） */
+    paramValues?: Record<string, string>
+}
+
+/** 工作流：有序步骤列表；执行时渲染后发送到活动终端窗格 */
+export interface Workflow {
+    id: string
+    name: string
+    /** 描述（可选备注） */
+    description?: string
+    /** joined = 渲染后以 && 合并为一条发送；sequential = 逐步发送、步间延时 */
+    execution: 'joined' | 'sequential'
+    /** sequential 模式步间延时 ms（默认 500） */
+    stepIntervalMs: number
+    steps: WorkflowStep[]
+}
+
 export interface TerminalConfig {
     font: string
     fontSize: number
@@ -187,6 +212,7 @@ export interface ConfigStore {
     colorSchemes: TerminalColorScheme[]
     quickCommands: QuickCommand[]
     quickCommandGroups: QuickCommandGroup[]
+    workflows: Workflow[]
 }
 
 /** config_load 返回的库内快照（仅含已持久化的键，缺省由默认值兜底） */
@@ -204,4 +230,5 @@ export interface ConfigSnapshot {
     colorSchemes?: TerminalColorScheme[]
     quickCommands?: QuickCommand[]
     quickCommandGroups?: QuickCommandGroup[]
+    workflows?: Workflow[]
 }

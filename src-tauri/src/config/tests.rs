@@ -9,6 +9,7 @@ use super::profiles::*;
 use super::quick_commands::*;
 use super::settings::*;
 use super::state::{mark_initialized, ConfigState};
+use super::workflows::*;
 
 fn temp_state(tag: &str) -> ConfigState {
     let dir = std::env::temp_dir().join(format!("scx-config-test-{tag}-{}", std::process::id()));
@@ -50,7 +51,7 @@ fn schema_is_versioned() {
     let state = temp_state("version");
     let conn = state.lock_conn();
     let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 }
 
 #[test]
@@ -170,6 +171,46 @@ fn profile_crud_round_trip_and_order_stability() {
 fn profile_update_missing_id_fails() {
     let state = temp_state("profile-miss");
     assert!(profile_update_internal(&state, &profile_json("ghost", "x", "local", false)).is_err());
+}
+
+#[test]
+fn workflow_crud_round_trip() {
+    let state = temp_state("wf");
+    let steps: Vec<serde_json::Value> = serde_json::from_value(serde_json::json!([
+        { "id": "s1", "kind": "quickCommand", "quickCommandId": "qc-1" },
+        { "id": "s2", "kind": "raw", "command": "git status" },
+    ])).unwrap();
+    workflow_create_internal(&state, &WorkflowRecord {
+        id: "wf1".into(), name: "deploy".into(), description: String::new(),
+        execution: "joined".into(), step_interval_ms: 500, steps: steps.clone(),
+    }).unwrap();
+    workflow_create_internal(&state, &WorkflowRecord {
+        id: "wf2".into(), name: "release".into(), description: "发布流程".into(),
+        execution: "joined".into(), step_interval_ms: 500, steps: Vec::new(),
+    }).unwrap();
+
+    // 更新换执行模式 + 步骤，排序不变
+    workflow_update_internal(&state, &WorkflowRecord {
+        id: "wf2".into(), name: "release".into(), description: "发布流程".into(),
+        execution: "sequential".into(), step_interval_ms: 800, steps: steps.clone(),
+    }).unwrap();
+
+    let snapshot = load_internal(&state).unwrap().unwrap();
+    assert_eq!(snapshot.workflows.len(), 2);
+    assert_eq!(snapshot.workflows[0].id, "wf1");
+    assert_eq!(snapshot.workflows[0].execution, "joined");
+    assert_eq!(serde_json::to_value(&snapshot.workflows[0].steps).unwrap(), serde_json::to_value(&steps).unwrap());
+    assert_eq!(snapshot.workflows[1].execution, "sequential");
+    assert_eq!(snapshot.workflows[1].step_interval_ms, 800);
+
+    // 删除幂等；缺 id 更新被拒
+    workflow_delete_internal(&state, "wf1").unwrap();
+    workflow_delete_internal(&state, "wf1").unwrap();
+    assert!(workflow_update_internal(&state, &WorkflowRecord {
+        id: "wf1".into(), name: "x".into(), description: String::new(),
+        execution: "joined".into(), step_interval_ms: 500, steps: Vec::new(),
+    }).is_err());
+    assert_eq!(load_internal(&state).unwrap().unwrap().workflows.len(), 1);
 }
 
 #[test]

@@ -7,7 +7,7 @@ use crate::config::{mark_initialized, ConfigState};
 
 use super::model::{
     BackupConfig, ColorSchemeRow, GroupRow, LocalGroupRow, ProfileRow, QuickCommandRow,
-    BACKUP_SETTINGS_KEYS,
+    WorkflowRow, BACKUP_SETTINGS_KEYS,
 };
 
 /// 行级读取 config.db 纳入实体（保排序；settings 只取备份白名单键）
@@ -112,6 +112,29 @@ pub(super) fn read_config_rows(config: &ConfigState) -> Result<BackupConfig, Str
         }
     }
 
+    {
+        let mut stmt = conn
+            .prepare("SELECT id, name, description, execution, step_interval_ms, sort_order, steps FROM workflows ORDER BY sort_order")
+            .map_err(|e| format!("failed to read workflows: {e}"))?;
+        let result = stmt
+            .query_map([], |row| {
+                let steps_raw: String = row.get(6)?;
+                Ok(WorkflowRow {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    execution: row.get(3)?,
+                    step_interval_ms: row.get(4)?,
+                    sort_order: row.get(5)?,
+                    steps: serde_json::from_str(&steps_raw).unwrap_or(serde_json::Value::Array(Vec::new())),
+                })
+            })
+            .map_err(|e| format!("failed to read workflows: {e}"))?;
+        for row in result {
+            rows.workflows.push(row.map_err(|e| format!("failed to read workflows: {e}"))?);
+        }
+    }
+
     for (table, into) in [
         ("quick_command_groups", &mut rows.quick_command_groups),
         ("ssh_groups", &mut rows.ssh_groups),
@@ -156,6 +179,9 @@ pub(super) fn validate_backup_rows(rows: &BackupConfig) -> Result<(), String> {
     }
     if rows.local_groups.iter().any(|row| row.id.is_empty()) {
         return Err("invalid backup file: local group row missing id".to_string());
+    }
+    if rows.workflows.iter().any(|row| row.id.is_empty()) {
+        return Err("invalid backup file: workflow row missing id".to_string());
     }
     Ok(())
 }
@@ -242,6 +268,22 @@ pub(super) fn write_config_rows(config: &ConfigState, rows: &BackupConfig) -> Re
             rusqlite::params![row.id, row.name, row.sort_order],
         )
         .map_err(|e| format!("failed to import ssh group {}: {e}", row.id))?;
+    }
+    tx.execute("DELETE FROM workflows", []).map_err(|e| format!("failed to clear workflows: {e}"))?;
+    for row in &rows.workflows {
+        tx.execute(
+            "INSERT INTO workflows (id, name, description, execution, step_interval_ms, sort_order, steps) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                row.id,
+                row.name,
+                row.description,
+                row.execution,
+                row.step_interval_ms,
+                row.sort_order,
+                row.steps.to_string()
+            ],
+        )
+        .map_err(|e| format!("failed to import workflow {}: {e}", row.id))?;
     }
     mark_initialized(&tx).map_err(|e| format!("failed to mark config initialized: {e}"))?;
     tx.commit().map_err(|e| format!("failed to commit config import: {e}"))

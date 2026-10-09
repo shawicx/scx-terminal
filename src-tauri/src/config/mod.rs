@@ -17,6 +17,7 @@ mod model;
 pub(crate) mod profiles;
 pub(crate) mod quick_commands;
 pub(crate) mod settings;
+pub(crate) mod workflows;
 mod state;
 #[cfg(test)]
 mod tests;

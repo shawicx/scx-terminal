@@ -85,6 +85,19 @@ pub struct LocalGroupRow {
     pub sort_order: i64,
 }
 
+/// workflows 备份行（真实列存储；步骤列表整体为 steps JSON）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowRow {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub execution: String,
+    pub step_interval_ms: i64,
+    pub sort_order: i64,
+    pub steps: serde_json::Value,
+}
+
 /// config.db 纳入实体的行级全量
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,6 +112,9 @@ pub struct BackupConfig {
     #[serde(default)]
     pub local_groups: Vec<LocalGroupRow>,
     pub ssh_groups: Vec<GroupRow>,
+    /// 工作流（v6 新增；default 使旧备份缺字段仍可导入）
+    #[serde(default)]
+    pub workflows: Vec<WorkflowRow>,
 }
 
 /// 备份快照文件根结构

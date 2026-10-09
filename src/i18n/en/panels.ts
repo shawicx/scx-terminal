@@ -140,6 +140,7 @@ export const panels = {
         copyCurrentPath: 'Copy current path',
         selectAll: 'Select all',
         quickCommands: 'Open quick commands',
+        workflows: 'Open workflows',
         openSettings: 'Open settings',
         openStart: 'Open Start',
         toggleMonitor: 'Toggle monitor panel',

@@ -16,6 +16,7 @@ import Select from '@/components/ui/Select.vue'
 import GroupAccordion from '@/components/settings/GroupAccordion.vue'
 import { useConfigStore, reorderGroups, type QuickCommand } from '@/stores/config'
 import { groupQuickCommandSections, parseQuickCommandParams, previewQuickCommand } from '@/lib/quickCommands'
+import { findQuickCommandRefs, previewWorkflow } from '@/lib/workflows'
 import { confirmAction } from '@/components/settings/useConfirmAction'
 import { useDraftEditor } from '@/components/settings/useDraftEditor'
 import { openCreateQuickCommandGroup, openRenameQuickCommandGroup } from '@/components/settings/useGroupNameDialog'
@@ -203,13 +204,25 @@ function deleteQuickCommand (id: string): void {
 }
 
 /**
- * @description 删除快捷命令（经确认弹窗；未命名时以命令预览为名）
+ * @description 删除快捷命令（经弹窗）：被工作流引用时阻断删除并提示引用它的
+ *              工作流名称（需先在工作流中移除该步骤）；无引用时走删除确认
  * @param quickCommand 目标快捷命令
  * @returns void
  *
  */
 function confirmDeleteQuickCommand (quickCommand: QuickCommand): void {
     const name = quickCommand.name || previewQuickCommand(quickCommand.command)
+    const refs = findQuickCommandRefs(store.workflows, quickCommand.id)
+    if (refs.length) {
+        const refNames = refs.map(workflow => workflow.name || previewWorkflow(workflow, store.quickCommands)).join('、')
+        confirmAction(
+            t('settings.quickCommandReferencedBody', { name, workflows: refNames }),
+            () => {},
+            t('settings.confirm'),
+            t('settings.quickCommandReferencedTitle'),
+        )
+        return
+    }
     confirmAction(t('settings.deleteConfirmBody', { name }), () => deleteQuickCommand(quickCommand.id))
 }
 

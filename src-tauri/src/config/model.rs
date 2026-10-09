@@ -37,6 +37,34 @@ pub struct QuickCommandGroupRecord {
     pub description: String,
 }
 
+/// 工作流记录（真实列存储；步骤列表整体存 steps JSON 列，形状随前端演进，对齐 profiles data 先例）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowRecord {
+    pub id: String,
+    pub name: String,
+    /// 描述（可选备注，空串 = 未填写）
+    #[serde(default)]
+    pub description: String,
+    /// 执行模式：joined 合并为一条发送 / sequential 逐步发送
+    #[serde(default = "default_execution")]
+    pub execution: String,
+    /// sequential 模式步间延时 ms
+    #[serde(default = "default_step_interval_ms")]
+    pub step_interval_ms: i64,
+    /// 步骤列表（WorkflowStep 的 JSON 数组，形状由前端拥有）
+    #[serde(default)]
+    pub steps: Vec<Value>,
+}
+
+fn default_execution() -> String {
+    "joined".to_string()
+}
+
+fn default_step_interval_ms() -> i64 {
+    500
+}
+
 /// SSH 档案分组记录
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -91,6 +119,7 @@ pub struct ConfigSnapshot {
     pub color_schemes: Vec<Value>,
     pub quick_commands: Vec<QuickCommandRecord>,
     pub quick_command_groups: Vec<QuickCommandGroupRecord>,
+    pub workflows: Vec<WorkflowRecord>,
     pub local_groups: Vec<LocalGroupRecord>,
     pub ssh_groups: Vec<SshGroupRecord>,
     pub tab_groups: Vec<TabGroupRecord>,

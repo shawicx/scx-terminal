@@ -61,6 +61,7 @@ export function defaultConfig (): ConfigStore {
         colorSchemes: [],
         quickCommands: [],
         quickCommandGroups: [],
+        workflows: [],
         hotkeys: defaultHotkeys(),
     }
 }

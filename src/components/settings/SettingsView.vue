@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Terminal, Palette, Keyboard, Info, KeyRound, HardDriveDownload, Zap, Globe, Server, SquareTerminal, Layers } from 'lucide-vue-next'
+import { Terminal, Palette, Keyboard, Info, KeyRound, HardDriveDownload, Zap, Globe, Server, SquareTerminal, Layers, Workflow } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import Dialog from '@/components/ui/Dialog.vue'
 import Input from '@/components/ui/Input.vue'
@@ -14,6 +14,7 @@ import TerminalPage from '@/components/settings/pages/TerminalPage.vue'
 import LocalProfilesPage from '@/components/settings/pages/LocalProfilesPage.vue'
 import SshPage from '@/components/settings/pages/SshPage.vue'
 import QuickCommandsPage from '@/components/settings/pages/QuickCommandsPage.vue'
+import WorkflowsPage from '@/components/settings/pages/WorkflowsPage.vue'
 import KeysPage from '@/components/settings/pages/KeysPage.vue'
 import AppearancePage from '@/components/settings/pages/AppearancePage.vue'
 import ColorSchemesPage from '@/components/settings/pages/ColorSchemesPage.vue'
@@ -36,6 +37,7 @@ const pages = computed(() => [
     { id: 'profiles' as const, label: t('settings.localTerminalPage'), icon: SquareTerminal },
     { id: 'ssh' as const, label: t('settings.sshPage'), icon: Server },
     { id: 'quickCommands' as const, label: t('settings.quickCommands'), icon: Zap },
+    { id: 'workflows' as const, label: t('settings.workflows'), icon: Workflow },
     { id: 'keys' as const, label: t('settings.keychainPage'), icon: KeyRound },
     { id: 'terminal' as const, label: t('settings.terminal'), icon: Terminal },
     { id: 'appearance' as const, label: t('settings.appearance'), icon: Globe },
@@ -71,6 +73,7 @@ const { groupNameDialog, groupNameDialogTitle, groupNameDialogIsQuickCommand, co
             <LocalProfilesPage v-if="page === 'profiles'" key="profiles" />
             <SshPage v-else-if="page === 'ssh'" key="ssh" />
             <QuickCommandsPage v-else-if="page === 'quickCommands'" key="quickCommands" />
+            <WorkflowsPage v-else-if="page === 'workflows'" key="workflows" />
             <KeysPage v-else-if="page === 'keys'" key="keys" />
             <TerminalPage v-else-if="page === 'terminal'" key="terminal" />
             <AppearancePage v-else-if="page === 'appearance'" key="appearance" />

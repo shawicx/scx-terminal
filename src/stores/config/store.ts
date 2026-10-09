@@ -30,7 +30,7 @@ export const useConfigStore = defineStore('config', () => {
 
     // 持久化 watch 必须在 setup 同步流创建（load() 的 await 之后创建在 WKWebView 实测不触发）；
     // getter 数组 + deep 逐分片建依赖（theme store 同款模式）。loaded 门控在 scheduleSave 内。
-    watch(() => [store.terminal, store.appearance, store.advanced, store.recents, store.monitor, store.hotkeys, store.profiles, store.localGroups, store.sshGroups, store.tabGroups, store.colorSchemes, store.quickCommands, store.quickCommandGroups] as const, () => scheduleSave(), { deep: true })
+    watch(() => [store.terminal, store.appearance, store.advanced, store.recents, store.monitor, store.hotkeys, store.profiles, store.localGroups, store.sshGroups, store.tabGroups, store.colorSchemes, store.quickCommands, store.quickCommandGroups, store.workflows] as const, () => scheduleSave(), { deep: true })
 
     async function load (): Promise<void> {
         let userConfig: Record<string, unknown> | null = null
@@ -62,6 +62,7 @@ export const useConfigStore = defineStore('config', () => {
                 store.quickCommandGroups = normalizeGroupSortOrders(store.quickCommandGroups)
                 sanitizeProfiles()
                 sanitizeQuickCommands()
+                sanitizeWorkflows()
             }
         } catch (error) {
             console.error('could not load config', error)
@@ -132,6 +133,24 @@ export const useConfigStore = defineStore('config', () => {
         for (const quickCommand of store.quickCommands) {
             if (quickCommand.groupId && !groupIds.has(quickCommand.groupId)) {
                 delete quickCommand.groupId
+            }
+        }
+    }
+
+    /**
+     * @description 清理工作流中悬空的快捷命令引用步骤（正常路径由删除时的引用保护拦
+     *              截，此为旧数据/备份导入的兜底：引用的快捷命令不存在则丢弃该步骤）
+     * @returns void
+     *
+     * @example sanitizeWorkflows()
+     *
+     */
+    function sanitizeWorkflows (): void {
+        const commandIds = new Set(store.quickCommands.map(command => command.id))
+        for (const workflow of store.workflows) {
+            if (workflow.steps.some(step => step.kind === 'quickCommand' && !commandIds.has(step.quickCommandId ?? ''))) {
+                workflow.steps = workflow.steps.filter(step =>
+                    step.kind !== 'quickCommand' || commandIds.has(step.quickCommandId ?? ''))
             }
         }
     }

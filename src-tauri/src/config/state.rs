@@ -125,6 +125,21 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         )
         .map_err(|e| format!("failed to add quick command description columns: {e}"))?;
     }
+    if version < 6 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS workflows (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                execution TEXT NOT NULL DEFAULT 'joined',
+                step_interval_ms INTEGER NOT NULL DEFAULT 500,
+                sort_order INTEGER NOT NULL,
+                steps TEXT NOT NULL
+            );
+            PRAGMA user_version = 6;",
+        )
+        .map_err(|e| format!("failed to create workflows schema: {e}"))?;
+    }
     Ok(())
 }
 

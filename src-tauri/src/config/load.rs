@@ -6,7 +6,7 @@ use tauri::State;
 
 use super::model::{
     ConfigSnapshot, LocalGroupRecord, QuickCommandGroupRecord, QuickCommandRecord, SshGroupRecord,
-    TabGroupRecord,
+    TabGroupRecord, WorkflowRecord,
 };
 use super::{ConfigState, SETTINGS_KEYS};
 
@@ -107,6 +107,31 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
         .map_err(|e| format!("failed to read quick commands: {e}"))?;
     for row in rows {
         snapshot.quick_commands.push(row.map_err(|e| e.to_string())?);
+    }
+
+    {
+        let mut stmt = conn
+            .prepare("SELECT id, name, description, execution, step_interval_ms, steps FROM workflows ORDER BY sort_order")
+            .map_err(|e| format!("failed to read workflows: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(|e| format!("failed to read workflows: {e}"))?;
+        for row in rows {
+            let (id, name, description, execution, step_interval_ms, steps_raw) =
+                row.map_err(|e| format!("failed to read workflows: {e}"))?;
+            let steps = serde_json::from_str(&steps_raw)
+                .map_err(|e| format!("workflow/{id} steps is corrupted: {e}"))?;
+            snapshot.workflows.push(WorkflowRecord { id, name, description, execution, step_interval_ms, steps });
+        }
     }
 
     {

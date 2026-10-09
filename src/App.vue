@@ -14,6 +14,7 @@ import CredentialDialog from '@/components/terminal/CredentialDialog.vue'
 import TransferPopover from '@/components/sftp/TransferPopover.vue'
 import CommandPalette from '@/components/palette/CommandPalette.vue'
 import QuickCommandPalette from '@/components/palette/QuickCommandPalette.vue'
+import WorkflowPalette from '@/components/palette/WorkflowPalette.vue'
 import TabSwitcher from '@/components/titlebar/TabSwitcher.vue'
 import { useTabsStore } from '@/stores/tabs'
 import { useConfigStore } from '@/stores/config'
@@ -32,7 +33,7 @@ const config = useConfigStore()
 const transfersStore = useTransfersStore()
 const forwardingStore = useForwardingStore()
 const monitorStore = useMonitorStore()
-const { registerDefaults, registerProfileCommands, registerQuickCommandCommands, bindHotkeys } = useCommands()
+const { registerDefaults, registerProfileCommands, registerQuickCommandCommands, registerWorkflowCommands, bindHotkeys } = useCommands()
 const { locale } = useI18n()
 
 // 快照同步 watch 必须在 setup 同步流创建（WKWebView 下异步创建不触发，见 config store 注释先例）
@@ -70,6 +71,7 @@ onMounted(() => {
     registerDefaults()
     registerProfileCommands(config.store.profiles)
     registerQuickCommandCommands(config.store.quickCommands)
+    registerWorkflowCommands(config.store.workflows)
     bindHotkeys()
     void transfersStore.init()
     void forwardingStore.init()
@@ -97,6 +99,11 @@ watch(() => config.store.profiles, profiles => {
 // 快捷命令增删改后同步命令面板里的对应条目
 watch(() => config.store.quickCommands, quickCommands => {
     registerQuickCommandCommands(quickCommands)
+}, { deep: true })
+
+// 工作流增删改后同步命令面板里的对应条目
+watch(() => config.store.workflows, workflows => {
+    registerWorkflowCommands(workflows)
 }, { deep: true })
 
 // 标签栏位置（bottom 时标题栏不再内嵌标签条，由下方独立标签条接管）
@@ -160,6 +167,7 @@ watch(() => config.store.terminal.fontSize, size => {
         <TabStrip v-if="tabBarBottom" position="bottom" />
         <CommandPalette />
         <QuickCommandPalette />
+        <WorkflowPalette />
         <TabSwitcher />
         <TransferPopover />
         <HostKeyDialog

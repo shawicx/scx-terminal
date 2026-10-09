@@ -1,14 +1,17 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTabsStore } from '@/stores/tabs'
-import { useConfigStore, type QuickCommand, type TerminalProfile } from '@/stores/config'
+import { useConfigStore, type QuickCommand, type TerminalProfile, type Workflow } from '@/stores/config'
 import { terminalTabApi } from './terminalTabsApi'
 import { openQuickCommandPalette } from './quickCommandPalette'
+import { openWorkflowPalette } from './workflowPalette'
+import { runWorkflow } from './workflowRunner'
 import { openTabSwitcher } from './tabSwitcher'
 import { hotkeys } from './hotkeysSingleton'
 import { defaultDarkColorScheme, defaultLightColorScheme } from '@/lib/colorSchemes'
 import { writeClipboardText } from '@/lib/frontendContext'
 import { parseQuickCommandParams, previewQuickCommand } from '@/lib/quickCommands'
+import { collectWorkflowParams } from '@/lib/workflows'
 import { cycleVisibleTabId } from '@/components/titlebar/tabGroupLayout'
 
 export interface Command {
@@ -83,6 +86,7 @@ export function useCommands () {
     }
 
     const QUICK_COMMAND_PREFIX = 'quick-command:'
+    const WORKFLOW_PREFIX = 'workflow:'
 
     /**
      * 同步式注册"快捷命令"面板条目：先移除全部旧命令再按当前命令重建
@@ -102,6 +106,34 @@ export function useCommands () {
                         openQuickCommandPalette(quickCommand.id)
                     } else {
                         terminalTabApi.current?.sendTextToActivePane(quickCommand.command, quickCommand.autoRun)
+                    }
+                },
+            })
+        }
+    }
+
+    /**
+     * 同步式注册"工作流"面板条目：先移除全部旧命令再按当前工作流重建
+     * （增删改后由 App.vue 的 watch 调用）。无参数工作流直接执行；
+     * 有参数工作流打开选择器并直接进入填参态
+     */
+    function registerWorkflowCommands (workflows: Workflow[]): void {
+        commands.value = commands.value.filter(c => !c.id.startsWith(WORKFLOW_PREFIX))
+        for (const workflow of workflows) {
+            if (!workflow.steps.length) {
+                continue
+            }
+            const quickCommands = config.store.quickCommands
+            register({
+                id: `${WORKFLOW_PREFIX}${workflow.id}`,
+                group: 'workflow',
+                label: () => workflow.name,
+                enabled: () => !!terminalTabApi.current,
+                handler: () => {
+                    if (collectWorkflowParams(workflow.steps, quickCommands).length) {
+                        openWorkflowPalette(workflow.id)
+                    } else {
+                        void runWorkflow(workflow, quickCommands, {})
                     }
                 },
             })
@@ -248,6 +280,11 @@ export function useCommands () {
             handler: () => openQuickCommandPalette(),
         })
         register({
+            id: 'open-workflows', group: 'app',
+            label: () => t('commands.workflows'),
+            handler: () => openWorkflowPalette(),
+        })
+        register({
             id: 'open-settings', group: 'app',
             label: () => t('commands.openSettings'),
             handler: () => tabs.openSettingsTab(),
@@ -302,10 +339,10 @@ export function useCommands () {
     }
 
     const sortedCommands = computed(() => {
-        const groups = ['tab', 'terminal', 'sftp', 'quickCommand', 'app']
+        const groups = ['tab', 'terminal', 'sftp', 'quickCommand', 'workflow', 'app']
         return [...commands.value].sort((a, b) =>
             groups.indexOf(a.group) - groups.indexOf(b.group) || a.id.localeCompare(b.id))
     })
 
-    return { register, registerDefaults, registerProfileCommands, registerQuickCommandCommands, dispatchHotkey, bindHotkeys, sortedCommands, commands }
+    return { register, registerDefaults, registerProfileCommands, registerQuickCommandCommands, registerWorkflowCommands, dispatchHotkey, bindHotkeys, sortedCommands, commands }
 }

@@ -140,6 +140,7 @@ export const panels = {
         copyCurrentPath: '复制当前路径',
         selectAll: '全选',
         quickCommands: '打开快捷命令',
+        workflows: '打开工作流',
         openSettings: '打开设置',
         openStart: '打开连接中心',
         toggleMonitor: '切换监控栏',

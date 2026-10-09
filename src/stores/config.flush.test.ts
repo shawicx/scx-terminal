@@ -33,6 +33,7 @@ const db = {
     sshGroups: new Map<string, Record<string, unknown>>(),
     tabGroups: new Map<string, Record<string, unknown>>(),
     colorSchemes: new Map<string, Record<string, unknown>>(),
+    workflows: new Map<string, Record<string, unknown>>(),
 }
 
 function resetDb (): void {
@@ -46,6 +47,7 @@ function resetDb (): void {
     db.sshGroups.clear()
     db.tabGroups.clear()
     db.colorSchemes.clear()
+    db.workflows.clear()
 }
 
 beforeEach(() => {
@@ -73,6 +75,7 @@ function mockImplementationBody (): void {
                         localGroups: [...db.localGroups.values()],
                         sshGroups: [...db.sshGroups.values()],
                         tabGroups: [...db.tabGroups.values()],
+                        workflows: [...db.workflows.values()],
                     }
                     : null
             case 'config_load_legacy_yaml':
@@ -164,6 +167,14 @@ function mockImplementationBody (): void {
             case 'color_scheme_delete':
                 db.colorSchemes.delete(a.name as string)
                 return null
+            case 'workflow_create':
+            case 'workflow_update':
+                db.workflows.set((a.workflow as Record<string, unknown>).id as string, a.workflow as Record<string, unknown>)
+                db.initialized = true
+                return null
+            case 'workflow_delete':
+                db.workflows.delete(a.id as string)
+                return null
             case 'dev_log':
                 return null
             case 'list_shells':
@@ -225,6 +236,35 @@ describe('config store diff-flush integration', () => {
         expect(mockInvoke).toHaveBeenCalledWith('quick_command_group_delete', { id: 'g1' })
         expect(mockInvoke).toHaveBeenCalledWith('profile_delete', { id: 'p2' })
         expect(db.profiles.has('p2')).toBe(false)
+    })
+
+    it('flushes workflow CRUD via entity-level commands', async () => {
+        db.initialized = true
+        setActivePinia(createPinia())
+        const config = useConfigStore()
+        await config.load()
+        expect(config.store.workflows).toHaveLength(0)
+
+        config.store.workflows.push({
+            id: 'wf1', name: 'deploy', execution: 'joined', stepIntervalMs: 500,
+            steps: [{ id: 's1', kind: 'raw', command: 'git pull' }],
+        })
+        await new Promise(resolve => setTimeout(resolve, 700))
+        expect(mockInvoke).toHaveBeenCalledWith('workflow_create', {
+            workflow: expect.objectContaining({ id: 'wf1', execution: 'joined' }),
+        })
+        expect(db.workflows.has('wf1')).toBe(true)
+
+        config.store.workflows[0]!.execution = 'sequential'
+        await new Promise(resolve => setTimeout(resolve, 700))
+        expect(mockInvoke).toHaveBeenCalledWith('workflow_update', {
+            workflow: expect.objectContaining({ id: 'wf1', execution: 'sequential' }),
+        })
+
+        config.store.workflows.splice(0, 1)
+        await new Promise(resolve => setTimeout(resolve, 700))
+        expect(mockInvoke).toHaveBeenCalledWith('workflow_delete', { id: 'wf1' })
+        expect(db.workflows.has('wf1')).toBe(false)
     })
 
     it('flushes ssh group CRUD and cascades ungroup on delete', async () => {
