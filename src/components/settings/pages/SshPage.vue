@@ -1,6 +1,7 @@
 <!--
   @description 设置·SSH 页：SSH 档案主从管理（分组列表 + 连接/认证/密码编辑器 +
-              档案级端口转发卡片）；密钥下拉数据由本页挂载时拉取（页面互斥挂载，
+              档案级端口转发卡片）；编辑器走草稿模式（改动经「保存」按钮提交，
+              不再实时写入 store）；密钥下拉数据由本页挂载时拉取（页面互斥挂载，
               密钥页改动后切回即重载）。
 -->
 <script setup lang="ts">
@@ -21,6 +22,7 @@ import { builtinColorSchemes } from '@/lib/colorSchemes'
 import { groupQuickCommandSections } from '@/lib/quickCommands'
 import { listSshKeys, setProfilePassword, removeProfilePassword, hasProfilePassword, type SshKeyMeta } from '@/services/secrets'
 import { confirmAction } from '@/components/settings/useConfirmAction'
+import { useDraftEditor } from '@/components/settings/useDraftEditor'
 import { openCreateSshGroup, openRenameSshGroup } from '@/components/settings/useGroupNameDialog'
 
 const { t } = useI18n()
@@ -34,6 +36,59 @@ const selectedSshProfile = computed<SshProfile | null>(() =>
     sshProfiles.value.find(p => p.id === selectedSshProfileId.value)
     ?? sshProfiles.value[0]
     ?? null)
+
+/** 草稿编辑器：表单（含端口转发卡片）只改草稿副本，「保存」时统一提交 store */
+const sshEditor = useDraftEditor<SshProfile>({
+    create: buildSshProfile,
+    persist: (draft, isNew) => {
+        if (isNew) {
+            store.profiles.push(draft)
+            selectedSshProfileId.value = draft.id
+            return
+        }
+        const target = store.profiles.find(p => p.id === draft.id)
+        if (target) {
+            Object.assign(target, draft)
+        }
+    },
+})
+const { draft: sshDraft, isNew: isNewSshDraft, dirty: isSshDraftDirty } = sshEditor
+
+/**
+ * @description 把编辑器同步到当前选中项（选中变化/删除后的兜底收敛均走这里）
+ * @returns void
+ *
+ * @example syncEditorToSelection()
+ *
+ */
+function syncEditorToSelection (): void {
+    if (selectedSshProfile.value) {
+        sshEditor.edit(selectedSshProfile.value)
+    } else {
+        sshEditor.clear()
+    }
+}
+
+watch(selectedSshProfile, syncEditorToSelection, { immediate: true })
+
+/**
+ * @description 选中左侧列表档案（有未保存修改时经确认弹窗放行）
+ * @param profile 目标档案
+ * @returns void
+ *
+ * @example selectSshProfile(profile)
+ *
+ */
+function selectSshProfile (profile: SshProfile): void {
+    sshEditor.guard(t('settings.unsavedChangesBody'), () => {
+        if (profile.id !== selectedSshProfileId.value) {
+            selectedSshProfileId.value = profile.id
+        } else {
+            // 新建草稿打开时点回当前选中项：直接回到该档案
+            sshEditor.edit(profile)
+        }
+    }, t('settings.unsavedChangesDiscard'), t('settings.unsavedChangesTitle'))
+}
 
 /** SSH 左列表分段：默认分组置顶（固定标题、不可改名/删除），其余按手动顺序带小节头 */
 const sshSections = computed(() => {
@@ -63,16 +118,16 @@ const sshAccordionSections = computed(() => sshSections.value.map(section => ({
 const selectedSshSectionKey = computed(() =>
     sshAccordionSections.value.find(section => section.data.items.some(p => p.id === selectedSshProfile.value?.id))?.key)
 
-/** 编辑器分组下拉：默认分组 + 各分组 */
+/** 编辑器分组下拉：默认分组 + 各分组（新建草稿未保存时也可选择，保存时一并提交） */
 const sshGroupOptions = computed(() => [
     { value: '', label: t('settings.sshDefaultGroup') },
     ...store.sshGroups.map(group => ({ value: group.id, label: group.name })),
 ])
 
 const sshGroupModel = computed({
-    get: () => selectedSshProfile.value?.groupId ?? '',
+    get: () => sshDraft.value?.groupId ?? '',
     set: (value: string) => {
-        const profile = selectedSshProfile.value
+        const profile = sshDraft.value
         if (!profile) {
             return
         }
@@ -91,9 +146,9 @@ const profileColorSchemeOptions = computed(() => [
 ])
 
 const sshColorSchemeModel = computed({
-    get: () => selectedSshProfile.value?.colorScheme ?? '',
+    get: () => sshDraft.value?.colorScheme ?? '',
     set: (value: string) => {
-        const profile = selectedSshProfile.value
+        const profile = sshDraft.value
         if (profile) {
             profile.colorScheme = value || null
         }
@@ -119,9 +174,9 @@ onMounted(async () => {
 })
 
 const keyIdModel = computed({
-    get: () => selectedSshProfile.value?.keyId ?? '',
+    get: () => sshDraft.value?.keyId ?? '',
     set: (value: string) => {
-        const profile = selectedSshProfile.value
+        const profile = sshDraft.value
         if (profile) {
             profile.keyId = value || null
         }
@@ -136,19 +191,19 @@ const sshKeyOptions = computed(() => [
     })),
 ])
 
-// ---- 档案密码（加密存 SQLite；表单只显示"已设置"状态） ----
+// ---- 档案密码（加密存 SQLite；表单只显示"已设置"状态；随草稿切换档案） ----
 const profilePasswordSet = ref(false)
 const passwordEditorOpen = ref(false)
 const passwordDraft = ref('')
 
-watch(selectedSshProfile, async (profile: SshProfile | null) => {
+watch(sshDraft, async (profile: SshProfile | null) => {
     passwordEditorOpen.value = false
     passwordDraft.value = ''
     profilePasswordSet.value = profile ? await hasProfilePassword(profile.id).catch(() => false) : false
 })
 
 async function saveProfilePassword (): Promise<void> {
-    const profile = selectedSshProfile.value
+    const profile = sshDraft.value
     if (!profile) {
         return
     }
@@ -161,7 +216,7 @@ async function saveProfilePassword (): Promise<void> {
 }
 
 async function clearProfilePassword (): Promise<void> {
-    const profile = selectedSshProfile.value
+    const profile = sshDraft.value
     if (!profile) {
         return
     }
@@ -224,14 +279,14 @@ function confirmDeleteSshGroup (id: string): void {
 }
 
 /**
- * @description 新建 SSH 档案并选中（落在默认分组）
- * @returns void
+ * @description 构造一条全新 SSH 档案草稿（落在默认分组；不进入 store）
+ * @returns SshProfile 新档案对象
  *
- * @example createSshProfile() // 列表默认分组下新增并选中
+ * @example buildSshProfile()
  *
  */
-function createSshProfile (): void {
-    const profile: SshProfile = {
+function buildSshProfile (): SshProfile {
+    return {
         id: `ssh-${nanoid(8)}`,
         type: 'ssh',
         name: `${t('settings.profileTypeSsh')} ${sshProfiles.value.length + 1}`,
@@ -243,8 +298,44 @@ function createSshProfile (): void {
         colorScheme: null,
         isDefault: false,
     }
-    store.profiles.push(profile)
-    selectedSshProfileId.value = profile.id
+}
+
+/**
+ * @description 新建 SSH 档案：打开全新草稿编辑器（有未保存修改时经确认放行），
+ *              点「保存」后才进入列表并持久化
+ * @returns void
+ *
+ * @example createSshProfile() // 编辑器切换为未保存的新档案草稿
+ *
+ */
+function createSshProfile (): void {
+    sshEditor.guard(t('settings.unsavedChangesBody'), sshEditor.createNew, t('settings.unsavedChangesDiscard'), t('settings.unsavedChangesTitle'))
+}
+
+/**
+ * @description 保存当前草稿并同步选中态
+ * @returns void
+ *
+ * @example saveSshDraft()
+ *
+ */
+function saveSshDraft (): void {
+    sshEditor.save()
+}
+
+/**
+ * @description 取消当前草稿：全新草稿关闭并回到选中项，既有档案还原为基线
+ * @returns void
+ *
+ * @example cancelSshDraft()
+ *
+ */
+function cancelSshDraft (): void {
+    if (isNewSshDraft.value) {
+        syncEditorToSelection()
+        return
+    }
+    sshEditor.discard()
 }
 
 /**
@@ -266,6 +357,7 @@ function deleteSshProfile (id: string): void {
     if (selectedSshProfileId.value === id) {
         selectedSshProfileId.value = sshProfiles.value[0]?.id ?? null
     }
+    syncEditorToSelection()
 }
 
 /**
@@ -310,8 +402,8 @@ function confirmDeleteProfile (profile: SshProfile): void {
                         v-for="p in data.items"
                         :key="p.id"
                         class="profile-item"
-                        :class="{ active: p.id === selectedSshProfile?.id }"
-                        @click="selectedSshProfileId = p.id"
+                        :class="{ active: p.id === sshDraft?.id }"
+                        @click="selectSshProfile(p)"
                     >
                         <span class="profile-item-head">
                             <span class="profile-item-name">{{ p.name }}</span>
@@ -325,13 +417,13 @@ function confirmDeleteProfile (profile: SshProfile): void {
                 {{ t('settings.sshEmptyHint') }}
             </p>
         </div>
-        <div v-if="selectedSshProfile" class="detail-content">
+        <div v-if="sshDraft" class="detail-content">
             <div class="settings-section">
                 <h3 class="settings-section-title">{{ t('settings.profileSectionBasic') }}</h3>
                 <div class="settings-card">
                     <div class="settings-card-row">
                         <Label>{{ t('settings.profileName') }}</Label>
-                        <Input v-model="selectedSshProfile.name" class="w-60" />
+                        <Input v-model="sshDraft.name" class="w-60" />
                     </div>
                     <div class="settings-card-row">
                         <Label>{{ t('settings.profileColorScheme') }}</Label>
@@ -354,25 +446,25 @@ function confirmDeleteProfile (profile: SshProfile): void {
                 <div class="settings-card">
                     <div class="settings-card-row">
                         <Label>{{ t('settings.sshHost') }}</Label>
-                        <Input v-model="selectedSshProfile.host" class="w-60" placeholder="example.com" />
+                        <Input v-model="sshDraft.host" class="w-60" placeholder="example.com" />
                     </div>
                     <div class="settings-card-row">
                         <Label>{{ t('settings.sshPort') }}</Label>
-                        <Input v-model.number="selectedSshProfile.port" type="number" class="w-24" />
+                        <Input v-model.number="sshDraft.port" type="number" class="w-24" />
                     </div>
                     <div class="settings-card-row">
                         <Label>{{ t('settings.sshUser') }}</Label>
-                        <Input v-model="selectedSshProfile.user" class="w-60" />
+                        <Input v-model="sshDraft.user" class="w-60" />
                     </div>
                     <div class="settings-card-row">
                         <Label>{{ t('settings.sshAuth') }}</Label>
-                        <Select v-model="selectedSshProfile.auth" :options="sshAuthOptions" class="w-44" />
+                        <Select v-model="sshDraft.auth" :options="sshAuthOptions" class="w-44" />
                     </div>
-                    <div v-if="selectedSshProfile.auth === 'publicKey' || selectedSshProfile.auth === 'auto'" class="settings-card-row">
+                    <div v-if="sshDraft.auth === 'publicKey' || sshDraft.auth === 'auto'" class="settings-card-row">
                         <Label>{{ t('settings.keychain') }} <span class="value-hint">{{ t('settings.keychainHint') }}</span></Label>
                         <Select v-model="keyIdModel" :options="sshKeyOptions" class="w-60" />
                     </div>
-                    <div v-if="selectedSshProfile.auth === 'password' || selectedSshProfile.auth === 'auto'" class="settings-card-row">
+                    <div v-if="sshDraft.auth === 'password' || sshDraft.auth === 'auto'" class="settings-card-row">
                         <Label>{{ t('settings.sshPassword') }}</Label>
                         <div class="ssh-password-row">
                             <Button variant="outline" size="sm" @click="passwordEditorOpen = !passwordEditorOpen">
@@ -384,7 +476,7 @@ function confirmDeleteProfile (profile: SshProfile): void {
                             </Button>
                         </div>
                     </div>
-                    <div v-if="passwordEditorOpen && (selectedSshProfile.auth === 'password' || selectedSshProfile.auth === 'auto')" class="settings-card-row stacked">
+                    <div v-if="passwordEditorOpen && (sshDraft.auth === 'password' || sshDraft.auth === 'auto')" class="settings-card-row stacked">
                         <Label>{{ t('settings.sshPassword') }}</Label>
                         <div class="ssh-password-editor">
                             <Input v-model="passwordDraft" type="password" class="w-60" :placeholder="t('settings.sshPasswordPlaceholder')" />
@@ -394,21 +486,34 @@ function confirmDeleteProfile (profile: SshProfile): void {
                 </div>
             </div>
 
-            <ProfileForwardingsCard :profile="selectedSshProfile" />
+            <ProfileForwardingsCard :profile="sshDraft" />
 
             <div class="profile-actions">
+                <Button size="sm" :disabled="!isSshDraftDirty" @click="saveSshDraft">
+                    {{ t('settings.profileSave') }}
+                </Button>
                 <Button
+                    v-if="isSshDraftDirty || isNewSshDraft"
                     variant="outline"
                     size="sm"
-                    :disabled="selectedSshProfile.isDefault"
-                    @click="config.setDefaultProfile(selectedSshProfile.id)"
+                    @click="cancelSshDraft"
                 >
-                    {{ t('settings.profileSetDefault') }}
+                    {{ t('settings.cancel') }}
                 </Button>
-                <Button variant="destructive-outline" size="sm" @click="confirmDeleteProfile(selectedSshProfile)">
-                    <Trash2 :size="14" />
-                    {{ t('settings.profileDelete') }}
-                </Button>
+                <template v-if="!isNewSshDraft">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        :disabled="sshDraft.isDefault"
+                        @click="config.setDefaultProfile(sshDraft.id)"
+                    >
+                        {{ t('settings.profileSetDefault') }}
+                    </Button>
+                    <Button variant="destructive-outline" size="sm" @click="confirmDeleteProfile(sshDraft)">
+                        <Trash2 :size="14" />
+                        {{ t('settings.profileDelete') }}
+                    </Button>
+                </template>
             </div>
         </div>
     </div>

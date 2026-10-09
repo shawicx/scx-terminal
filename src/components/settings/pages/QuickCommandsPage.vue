@@ -1,9 +1,10 @@
 <!--
   @description 设置·快捷命令页：命令主从管理（分组手风琴 + 名称/命令/参数模板/
-              自动执行编辑器）；分组弹窗经共享 useGroupNameDialog。
+              自动执行编辑器）；编辑器走草稿模式（改动经「保存」按钮提交，不再
+              实时写入 store）；分组弹窗经共享 useGroupNameDialog。
 -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { nanoid } from 'nanoid'
 import { Plus, Trash2 } from 'lucide-vue-next'
@@ -16,6 +17,7 @@ import GroupAccordion from '@/components/settings/GroupAccordion.vue'
 import { useConfigStore, reorderGroups, type QuickCommand } from '@/stores/config'
 import { groupQuickCommandSections, parseQuickCommandParams, previewQuickCommand } from '@/lib/quickCommands'
 import { confirmAction } from '@/components/settings/useConfirmAction'
+import { useDraftEditor } from '@/components/settings/useDraftEditor'
 import { openCreateQuickCommandGroup, openRenameQuickCommandGroup } from '@/components/settings/useGroupNameDialog'
 
 const { t } = useI18n()
@@ -27,6 +29,59 @@ const selectedQuickCommand = computed(() =>
     store.quickCommands.find(qc => qc.id === selectedQuickCommandId.value)
     ?? store.quickCommands[0]
     ?? null)
+
+/** 草稿编辑器：表单只改草稿副本，「保存」时统一提交 store（store 防抖落库不变） */
+const quickCommandEditor = useDraftEditor<QuickCommand>({
+    create: buildQuickCommand,
+    persist: (draft, isNew) => {
+        if (isNew) {
+            store.quickCommands.push(draft)
+            selectedQuickCommandId.value = draft.id
+            return
+        }
+        const target = store.quickCommands.find(qc => qc.id === draft.id)
+        if (target) {
+            Object.assign(target, draft)
+        }
+    },
+})
+const { draft: qcDraft, isNew: isNewQcDraft, dirty: isQcDraftDirty } = quickCommandEditor
+
+/**
+ * @description 把编辑器同步到当前选中项（选中变化/删除后的兜底收敛均走这里）
+ * @returns void
+ *
+ * @example syncEditorToSelection()
+ *
+ */
+function syncEditorToSelection (): void {
+    if (selectedQuickCommand.value) {
+        quickCommandEditor.edit(selectedQuickCommand.value)
+    } else {
+        quickCommandEditor.clear()
+    }
+}
+
+watch(selectedQuickCommand, syncEditorToSelection, { immediate: true })
+
+/**
+ * @description 选中左侧列表命令（有未保存修改时经确认弹窗放行）
+ * @param quickCommand 目标命令
+ * @returns void
+ *
+ * @example selectQuickCommand(quickCommand)
+ *
+ */
+function selectQuickCommand (quickCommand: QuickCommand): void {
+    quickCommandEditor.guard(t('settings.unsavedChangesBody'), () => {
+        if (quickCommand.id !== selectedQuickCommandId.value) {
+            selectedQuickCommandId.value = quickCommand.id
+        } else {
+            // 新建草稿打开时点回当前选中项：直接回到该命令
+            quickCommandEditor.edit(quickCommand)
+        }
+    }, t('settings.unsavedChangesDiscard'), t('settings.unsavedChangesTitle'))
+}
 
 /** 左列表分段：未分组置顶无标题，其余按手动顺序带小节头 */
 const quickCommandSections = computed(() =>
@@ -56,9 +111,9 @@ const quickCommandGroupOptions = computed(() => [
 ])
 
 const quickCommandGroupModel = computed({
-    get: () => selectedQuickCommand.value?.groupId ?? '',
+    get: () => qcDraft.value?.groupId ?? '',
     set: (value: string) => {
-        const quickCommand = selectedQuickCommand.value
+        const quickCommand = qcDraft.value
         if (quickCommand) {
             if (value) {
                 quickCommand.groupId = value
@@ -71,24 +126,60 @@ const quickCommandGroupModel = computed({
 
 /** 编辑器底部实时提示：当前模板检测到的占位参数 */
 const selectedQuickCommandParams = computed(() =>
-    selectedQuickCommand.value ? parseQuickCommandParams(selectedQuickCommand.value.command) : [])
+    qcDraft.value ? parseQuickCommandParams(qcDraft.value.command) : [])
 
 /**
- * @description 新建快捷命令并选中（名称/命令留空，填好后自动持久化）
- * @returns void
+ * @description 构造一条全新快捷命令草稿（不进入 store）
+ * @returns QuickCommand 新命令对象
  *
- * @example createQuickCommand()
+ * @example buildQuickCommand()
  *
  */
-function createQuickCommand (): void {
-    const quickCommand: QuickCommand = {
+function buildQuickCommand (): QuickCommand {
+    return {
         id: `qc-${nanoid(8)}`,
         name: `${t('settings.quickCommands')} ${store.quickCommands.length + 1}`,
         command: '',
         autoRun: false,
     }
-    store.quickCommands.push(quickCommand)
-    selectedQuickCommandId.value = quickCommand.id
+}
+
+/**
+ * @description 新建快捷命令：打开全新草稿编辑器（有未保存修改时经确认放行），
+ *              点「保存」后才进入列表并持久化
+ * @returns void
+ *
+ * @example createQuickCommand() // 编辑器切换为未保存的新命令草稿
+ *
+ */
+function createQuickCommand (): void {
+    quickCommandEditor.guard(t('settings.unsavedChangesBody'), quickCommandEditor.createNew, t('settings.unsavedChangesDiscard'), t('settings.unsavedChangesTitle'))
+}
+
+/**
+ * @description 保存当前草稿并同步选中态
+ * @returns void
+ *
+ * @example saveQuickCommandDraft()
+ *
+ */
+function saveQuickCommandDraft (): void {
+    quickCommandEditor.save()
+}
+
+/**
+ * @description 取消当前草稿：全新草稿关闭并回到选中项，既有命令还原为基线
+ * @returns void
+ *
+ * @example cancelQuickCommandDraft()
+ *
+ */
+function cancelQuickCommandDraft (): void {
+    if (isNewQcDraft.value) {
+        syncEditorToSelection()
+        return
+    }
+    quickCommandEditor.discard()
 }
 
 /**
@@ -108,6 +199,7 @@ function deleteQuickCommand (id: string): void {
     if (selectedQuickCommandId.value === id) {
         selectedQuickCommandId.value = store.quickCommands[0]?.id ?? null
     }
+    syncEditorToSelection()
 }
 
 /**
@@ -205,8 +297,8 @@ function reorderQuickCommandGroups (sourceKey: string, targetKey: string): void 
                         v-for="qc in data.items"
                         :key="qc.id"
                         class="profile-item"
-                        :class="{ active: qc.id === selectedQuickCommand?.id }"
-                        @click="selectedQuickCommandId = qc.id"
+                        :class="{ active: qc.id === qcDraft?.id }"
+                        @click="selectQuickCommand(qc)"
                     >
                         <span class="profile-item-head">
                             <span class="profile-item-name">{{ qc.name || previewQuickCommand(qc.command) }}</span>
@@ -220,17 +312,17 @@ function reorderQuickCommandGroups (sourceKey: string, targetKey: string): void 
                 {{ t('settings.quickCommandEmptyHint') }}
             </p>
         </div>
-        <div v-if="selectedQuickCommand" class="detail-content">
+        <div v-if="qcDraft" class="detail-content">
             <div class="settings-section">
                 <div class="settings-card">
                     <div class="settings-card-row">
                         <Label>{{ t('settings.quickCommandName') }}</Label>
-                        <Input v-model="selectedQuickCommand.name" class="w-60" />
+                        <Input v-model="qcDraft.name" class="w-60" />
                     </div>
                     <div class="settings-card-row">
                         <Label>{{ t('settings.quickCommandDescription') }}</Label>
                         <Input
-                            v-model="selectedQuickCommand.description"
+                            v-model="qcDraft.description"
                             class="w-60"
                             :placeholder="t('settings.quickCommandDescriptionPlaceholder')"
                         />
@@ -245,7 +337,7 @@ function reorderQuickCommandGroups (sourceKey: string, targetKey: string): void 
                             <span class="value-hint">{{ t('settings.quickCommandCommandHint') }}</span>
                         </Label>
                         <textarea
-                            v-model="selectedQuickCommand.command"
+                            v-model="qcDraft.command"
                             class="qc-command-input"
                             rows="6"
                             spellcheck="false"
@@ -260,10 +352,21 @@ function reorderQuickCommandGroups (sourceKey: string, targetKey: string): void 
                             {{ t('settings.quickCommandAutoRun') }}
                             <span class="value-hint">{{ t('settings.quickCommandAutoRunHint') }}</span>
                         </Label>
-                        <Switch v-model="selectedQuickCommand.autoRun" />
+                        <Switch v-model="qcDraft.autoRun" />
                     </div>
                     <div class="settings-card-row actions">
-                        <Button variant="destructive-outline" size="sm" @click="confirmDeleteQuickCommand(selectedQuickCommand)">
+                        <Button size="sm" :disabled="!isQcDraftDirty" @click="saveQuickCommandDraft">
+                            {{ t('settings.profileSave') }}
+                        </Button>
+                        <Button
+                            v-if="isQcDraftDirty || isNewQcDraft"
+                            variant="outline"
+                            size="sm"
+                            @click="cancelQuickCommandDraft"
+                        >
+                            {{ t('settings.cancel') }}
+                        </Button>
+                        <Button v-if="!isNewQcDraft" variant="destructive-outline" size="sm" @click="confirmDeleteQuickCommand(qcDraft)">
                             <Trash2 :size="14" />
                             {{ t('settings.quickCommandDelete') }}
                         </Button>

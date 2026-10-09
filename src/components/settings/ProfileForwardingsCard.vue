@@ -1,7 +1,7 @@
 <!--
   @description SSH 档案编辑器的「端口转发规则」卡片：规则列表（autoStart 开关/编辑/删除确认）；
               添加/编辑表单复用共享的 ForwardRuleFormDialog（与隧道管理器/窗格面板同源）。
-              直接编辑档案对象（与 SettingsView 既有编辑器一致的响应式直改模式）。
+              直接编辑传入的档案对象（草稿模式下为编辑器草稿，经「保存」按钮统一提交）。
 -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
@@ -15,7 +15,7 @@ import { describeForward, type PortForwarding } from '@/lib/portForwarding'
 import type { SshProfile } from '@/stores/config'
 
 const props = defineProps<{
-    /** 正在编辑的 SSH 档案（直接变更其 forwardings 字段） */
+    /** 正在编辑的 SSH 档案（直接变更其 forwardings 字段；草稿模式下为草稿副本） */
     profile: SshProfile
 }>()
 
@@ -37,7 +37,7 @@ function openEdit (rule: PortForwarding): void {
 }
 
 /**
- * @description 提交规则表单：写回档案 forwardings（新增或原位替换；config store watch 持久化）
+ * @description 提交规则表单：写回档案 forwardings（新增或原位替换；草稿模式下随「保存」按钮提交）
  * @param rule 归一化后的规则
  * @returns void
  *

@@ -82,11 +82,11 @@ const { groupNameDialog, groupNameDialogTitle, groupNameDialogIsQuickCommand, co
             </Transition>
         </div>
 
-        <Dialog v-if="confirmState" :title="t('settings.deleteConfirmTitle')" :width="380" @cancel="dismissConfirm">
+        <Dialog v-if="confirmState" :title="confirmState.title ?? t('settings.deleteConfirmTitle')" :width="380" @cancel="dismissConfirm">
             <p class="confirm-text">{{ confirmState.message }}</p>
             <template #footer>
                 <Button variant="outline" size="sm" @click="dismissConfirm">{{ t('settings.cancel') }}</Button>
-                <Button variant="destructive" size="sm" @click="runConfirmed">{{ t('settings.deleteConfirmButton') }}</Button>
+                <Button variant="destructive" size="sm" @click="runConfirmed">{{ confirmState.confirmLabel ?? t('settings.deleteConfirmButton') }}</Button>
             </template>
         </Dialog>
 

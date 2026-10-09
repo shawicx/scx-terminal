@@ -1,9 +1,10 @@
 <!--
   @description 设置·本地终端页：local 档案主从管理（手风琴分组列表 + 编辑器），
+              编辑器走草稿模式（改动经「保存」按钮提交，不再实时写入 store）；
               分组弹窗经共享 useGroupNameDialog，删除经共享确认弹窗。
 -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { nanoid } from 'nanoid'
 import { Plus, Trash2 } from 'lucide-vue-next'
@@ -17,6 +18,7 @@ import GroupAccordion, { type AccordionSection } from '@/components/settings/Gro
 import { useConfigStore, defaultFirstProfiles, defaultShellCommand, groupLocalProfiles, reorderGroups, type LocalProfile, type LocalProfileSection } from '@/stores/config'
 import { builtinColorSchemes } from '@/lib/colorSchemes'
 import { confirmAction } from '@/components/settings/useConfirmAction'
+import { useDraftEditor } from '@/components/settings/useDraftEditor'
 import { openCreateLocalGroup, openRenameLocalGroup } from '@/components/settings/useGroupNameDialog'
 
 const { t } = useI18n()
@@ -29,6 +31,59 @@ const selectedLocalProfile = computed<LocalProfile | null>(() =>
     localProfiles.value.find(p => p.id === selectedLocalProfileId.value)
     ?? localProfiles.value[0]
     ?? null)
+
+/** 草稿编辑器：表单只改草稿副本，「保存」时统一提交 store（store 防抖落库不变） */
+const localEditor = useDraftEditor<LocalProfile>({
+    create: buildLocalProfile,
+    persist: (draft, isNew) => {
+        if (isNew) {
+            store.profiles.push(draft)
+            selectedLocalProfileId.value = draft.id
+            return
+        }
+        const target = store.profiles.find(p => p.id === draft.id)
+        if (target) {
+            Object.assign(target, draft)
+        }
+    },
+})
+const { draft: localDraft, isNew: isNewLocalDraft, dirty: isLocalDraftDirty } = localEditor
+
+/**
+ * @description 把编辑器同步到当前选中项（选中变化/删除后的兜底收敛均走这里）
+ * @returns void
+ *
+ * @example syncEditorToSelection()
+ *
+ */
+function syncEditorToSelection (): void {
+    if (selectedLocalProfile.value) {
+        localEditor.edit(selectedLocalProfile.value)
+    } else {
+        localEditor.clear()
+    }
+}
+
+watch(selectedLocalProfile, syncEditorToSelection, { immediate: true })
+
+/**
+ * @description 选中左侧列表档案（有未保存修改时经确认弹窗放行）
+ * @param profile 目标档案
+ * @returns void
+ *
+ * @example selectLocalProfile(profile)
+ *
+ */
+function selectLocalProfile (profile: LocalProfile): void {
+    localEditor.guard(t('settings.unsavedChangesBody'), () => {
+        if (profile.id !== selectedLocalProfileId.value) {
+            selectedLocalProfileId.value = profile.id
+        } else {
+            // 新建草稿打开时点回当前选中项：直接回到该档案
+            localEditor.edit(profile)
+        }
+    }, t('settings.unsavedChangesDiscard'), t('settings.unsavedChangesTitle'))
+}
 
 /** 左列表分段：默认分组（未分组）置顶 + 各分组按定义序；没有未分组档案时默认分组段
  *  也常驻置顶（空段可见，对齐 SSH 页空段常驻） */
@@ -66,9 +121,9 @@ const localGroupOptions = computed(() => [
 ])
 
 const localGroupModel = computed({
-    get: () => selectedLocalProfile.value?.groupId ?? '',
+    get: () => localDraft.value?.groupId ?? '',
     set: (value: string) => {
-        const profile = selectedLocalProfile.value
+        const profile = localDraft.value
         if (!profile) {
             return
         }
@@ -81,9 +136,9 @@ const localGroupModel = computed({
 })
 
 const argsText = computed({
-    get: () => selectedLocalProfile.value?.args.join(' ') ?? '',
+    get: () => localDraft.value?.args.join(' ') ?? '',
     set: (value: string) => {
-        const profile = selectedLocalProfile.value
+        const profile = localDraft.value
         if (profile) {
             profile.args = value.split(/\s+/).filter(Boolean)
         }
@@ -91,9 +146,9 @@ const argsText = computed({
 })
 
 const cwdModel = computed({
-    get: () => selectedLocalProfile.value?.cwd ?? '',
+    get: () => localDraft.value?.cwd ?? '',
     set: (value: string) => {
-        const profile = selectedLocalProfile.value
+        const profile = localDraft.value
         if (profile) {
             profile.cwd = value.trim() || null
         }
@@ -101,9 +156,9 @@ const cwdModel = computed({
 })
 
 const envText = computed({
-    get: () => Object.entries(selectedLocalProfile.value?.env ?? {}).map(([key, value]) => `${key}=${value}`).join('\n'),
+    get: () => Object.entries(localDraft.value?.env ?? {}).map(([key, value]) => `${key}=${value}`).join('\n'),
     set: (value: string) => {
-        const profile = selectedLocalProfile.value
+        const profile = localDraft.value
         if (!profile) {
             return
         }
@@ -126,9 +181,9 @@ const profileColorSchemeOptions = computed(() => [
 ])
 
 const localColorSchemeModel = computed({
-    get: () => selectedLocalProfile.value?.colorScheme ?? '',
+    get: () => localDraft.value?.colorScheme ?? '',
     set: (value: string) => {
-        const profile = selectedLocalProfile.value
+        const profile = localDraft.value
         if (profile) {
             profile.colorScheme = value || null
         }
@@ -190,15 +245,15 @@ function confirmDeleteLocalGroup (id: string): void {
 }
 
 /**
- * @description 新建本地终端档案并选中（以首个 local 档案为模板）
- * @returns void
+ * @description 构造一条全新本地终端档案草稿（以首个 local 档案为模板；不进入 store）
+ * @returns LocalProfile 新档案对象
  *
- * @example createLocalProfile() // 列表新增并选中新档案
+ * @example buildLocalProfile()
  *
  */
-function createLocalProfile (): void {
+function buildLocalProfile (): LocalProfile {
     const template = localProfiles.value[0]
-    const profile: LocalProfile = {
+    return {
         id: `local-${nanoid(8)}`,
         type: 'local',
         name: `${t('settings.localTerminalPage')} ${localProfiles.value.length + 1}`,
@@ -211,8 +266,44 @@ function createLocalProfile (): void {
         isDefault: false,
         builtin: false,
     }
-    store.profiles.push(profile)
-    selectedLocalProfileId.value = profile.id
+}
+
+/**
+ * @description 新建本地终端档案：打开全新草稿编辑器（有未保存修改时经确认放行），
+ *              点「保存」后才进入列表并持久化
+ * @returns void
+ *
+ * @example createLocalProfile() // 编辑器切换为未保存的新档案草稿
+ *
+ */
+function createLocalProfile (): void {
+    localEditor.guard(t('settings.unsavedChangesBody'), localEditor.createNew, t('settings.unsavedChangesDiscard'), t('settings.unsavedChangesTitle'))
+}
+
+/**
+ * @description 保存当前草稿并同步选中态
+ * @returns void
+ *
+ * @example saveLocalDraft()
+ *
+ */
+function saveLocalDraft (): void {
+    localEditor.save()
+}
+
+/**
+ * @description 取消当前草稿：全新草稿关闭并回到选中项，既有档案还原为基线
+ * @returns void
+ *
+ * @example cancelLocalDraft()
+ *
+ */
+function cancelLocalDraft (): void {
+    if (isNewLocalDraft.value) {
+        syncEditorToSelection()
+        return
+    }
+    localEditor.discard()
 }
 
 /**
@@ -235,6 +326,7 @@ function deleteLocalProfile (id: string): void {
     if (selectedLocalProfileId.value === id) {
         selectedLocalProfileId.value = localProfiles.value[0]?.id ?? null
     }
+    syncEditorToSelection()
 }
 
 /**
@@ -279,8 +371,8 @@ function confirmDeleteProfile (profile: LocalProfile): void {
                         v-for="p in data.profiles"
                         :key="p.id"
                         class="profile-item"
-                        :class="{ active: p.id === selectedLocalProfile?.id }"
-                        @click="selectedLocalProfileId = p.id"
+                        :class="{ active: p.id === localDraft?.id }"
+                        @click="selectLocalProfile(p)"
                     >
                         <span class="profile-item-head">
                             <span class="profile-item-name">{{ p.name }}</span>
@@ -294,13 +386,13 @@ function confirmDeleteProfile (profile: LocalProfile): void {
                 {{ t('settings.localEmptyHint') }}
             </p>
         </div>
-        <div v-if="selectedLocalProfile" class="detail-content">
+        <div v-if="localDraft" class="detail-content">
             <div class="settings-section">
                 <h3 class="settings-section-title">{{ t('settings.profileSectionBasic') }}</h3>
                 <div class="settings-card">
                     <div class="settings-card-row">
                         <Label>{{ t('settings.profileName') }}</Label>
-                        <Input v-model="selectedLocalProfile.name" class="w-60" />
+                        <Input v-model="localDraft.name" class="w-60" />
                     </div>
                     <div class="settings-card-row">
                         <Label>{{ t('settings.profileColorScheme') }}</Label>
@@ -317,7 +409,7 @@ function confirmDeleteProfile (profile: LocalProfile): void {
                             v-model="localGroupModel"
                             :options="localGroupOptions"
                             class="w-60"
-                            :disabled="selectedLocalProfile.builtin"
+                            :disabled="localDraft.builtin"
                         />
                     </div>
                 </div>
@@ -328,7 +420,7 @@ function confirmDeleteProfile (profile: LocalProfile): void {
                 <div class="settings-card">
                     <div class="settings-card-row">
                         <Label>{{ t('settings.profileCommand') }}</Label>
-                        <Input v-model="selectedLocalProfile.command" class="w-60" />
+                        <Input v-model="localDraft.command" class="w-60" />
                     </div>
                     <div class="settings-card-row">
                         <Label>{{ t('settings.profileArgs') }} <span class="value-hint">{{ t('settings.profileArgsHint') }}</span></Label>
@@ -337,9 +429,9 @@ function confirmDeleteProfile (profile: LocalProfile): void {
                     <div class="settings-card-row">
                         <Label>
                             {{ t('settings.profileCwd') }}
-                            <span v-if="selectedLocalProfile.builtin" class="value-hint">{{ t('settings.profileCwdLockedHint') }}</span>
+                            <span v-if="localDraft.builtin" class="value-hint">{{ t('settings.profileCwdLockedHint') }}</span>
                         </Label>
-                        <Input v-model="cwdModel" class="w-60" :disabled="selectedLocalProfile.builtin" />
+                        <Input v-model="cwdModel" class="w-60" :disabled="localDraft.builtin" />
                     </div>
                     <div class="settings-card-row stacked">
                         <Label>{{ t('settings.profileEnv') }} <span class="value-hint">{{ t('settings.profileEnvHint') }}</span></Label>
@@ -347,30 +439,43 @@ function confirmDeleteProfile (profile: LocalProfile): void {
                     </div>
                     <div class="settings-card-row">
                         <Label>{{ t('settings.profileLoginShell') }}</Label>
-                        <Switch v-model="selectedLocalProfile.loginShell" />
+                        <Switch v-model="localDraft.loginShell" />
                     </div>
                 </div>
             </div>
 
             <div class="profile-actions">
+                <Button size="sm" :disabled="!isLocalDraftDirty" @click="saveLocalDraft">
+                    {{ t('settings.profileSave') }}
+                </Button>
                 <Button
+                    v-if="isLocalDraftDirty || isNewLocalDraft"
                     variant="outline"
                     size="sm"
-                    :disabled="selectedLocalProfile.isDefault"
-                    @click="config.setDefaultProfile(selectedLocalProfile.id)"
+                    @click="cancelLocalDraft"
                 >
-                    {{ t('settings.profileSetDefault') }}
+                    {{ t('settings.cancel') }}
                 </Button>
-                <Button
-                    variant="destructive-outline"
-                    size="sm"
-                    :disabled="selectedLocalProfile.builtin"
-                    :title="selectedLocalProfile.builtin ? t('settings.profileDeleteLockedHint') : undefined"
-                    @click="confirmDeleteProfile(selectedLocalProfile)"
-                >
-                    <Trash2 :size="14" />
-                    {{ t('settings.profileDelete') }}
-                </Button>
+                <template v-if="!isNewLocalDraft">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        :disabled="localDraft.isDefault"
+                        @click="config.setDefaultProfile(localDraft.id)"
+                    >
+                        {{ t('settings.profileSetDefault') }}
+                    </Button>
+                    <Button
+                        variant="destructive-outline"
+                        size="sm"
+                        :disabled="localDraft.builtin"
+                        :title="localDraft.builtin ? t('settings.profileDeleteLockedHint') : undefined"
+                        @click="confirmDeleteProfile(localDraft)"
+                    >
+                        <Trash2 :size="14" />
+                        {{ t('settings.profileDelete') }}
+                    </Button>
+                </template>
             </div>
         </div>
     </div>
