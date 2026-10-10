@@ -14,7 +14,7 @@ import { pageEnter, pageLeave } from '@/lib/motion'
 import { buildGroupViews, buildLocalSections, filterGroupViews, filterLocalSections, recentEntries, relativeTimeBucket } from '@/lib/startPage'
 import { startCardMonitoring, stopCardMonitoring } from '@/services/monitor'
 import { connectionErrors, connectionStates, type ProfileConnectionStatus } from '@/services/sshConnections'
-import { useConfigStore, defaultFirstProfiles, type LocalProfile, type SshProfile } from '@/stores/config'
+import { useConfigStore, defaultFirstProfiles, type LocalProfile, type RemoteProfile } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
 
 const props = defineProps<{ tabId: string, tabActive: boolean }>()
@@ -107,7 +107,8 @@ const filteredViews = computed(() => filterGroupViews(groupViews.value, searchQu
 const visibleViews = computed(() => selectedGroup.value === 'all'
     ? filteredViews.value
     : filteredViews.value.filter(view => view.id === selectedGroup.value))
-const sshProfiles = computed(() => config.store.profiles.filter((p): p is SshProfile => p.type === 'ssh'))
+// 连接中心状态计数涵盖 SSH 与 Mosh 档案（连接态由 pane session 注册表上报）
+const sshProfiles = computed(() => config.store.profiles.filter((p): p is RemoteProfile => p.type === 'ssh' || p.type === 'mosh'))
 const activeCount = computed(() => sshProfiles.value.filter(p => connectionStates[p.id] === 'connected').length)
 const recents = computed(() => recentEntries(config.store.recents, config.store.profiles))
 const localProfiles = computed(() => defaultFirstProfiles(config.store.profiles).filter((p): p is LocalProfile => p.type === 'local'))

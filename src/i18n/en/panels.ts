@@ -147,6 +147,7 @@ export const panels = {
         toggleColorScheme: 'Toggle light/dark theme',
         newTabWithProfile: 'New tab: {name}',
         newTabWithSshProfile: 'Connect: {name}',
+        newTabWithMoshProfile: 'Mosh connect: {name}',
         openSftp: 'Open SFTP (current host)',
         openSftpWithProfile: 'Open in SFTP: {name}',
         openForwarding: 'Open port forwarding manager',

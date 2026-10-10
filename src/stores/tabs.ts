@@ -64,8 +64,8 @@ export const useTabsStore = defineStore('tabs', {
                 : (config.defaultProfile() ?? undefined)
             // cwd 继承仅对 local 档案有意义（SSH 档案的 cwd 是远端路径概念，忽略）
             const inheritsCwd = cwd && profile?.type === 'local' && !profile.cwd ? cwd : null
-            // SSH 连接记录到最近连接（连接中心起始页消费；本地档案不记）
-            if (profile?.type === 'ssh') {
+            // SSH/Mosh 连接记录到最近连接（连接中心起始页消费；本地档案不记）
+            if (profile?.type === 'ssh' || profile?.type === 'mosh') {
                 useConfigStore().noteRecentConnection(profile.id)
             }
             const group = groupId ? config.store.tabGroups.find(g => g.id === groupId) : undefined

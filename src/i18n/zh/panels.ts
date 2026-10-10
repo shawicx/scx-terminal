@@ -147,6 +147,7 @@ export const panels = {
         toggleColorScheme: '切换深色/浅色主题',
         newTabWithProfile: '新建标签页：{name}',
         newTabWithSshProfile: '连接：{name}',
+        newTabWithMoshProfile: 'Mosh 连接：{name}',
         openSftp: '打开 SFTP（当前主机）',
         openSftpWithProfile: '在 SFTP 中打开：{name}',
         openForwarding: '打开端口转发管理',

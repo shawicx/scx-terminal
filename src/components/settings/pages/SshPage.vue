@@ -16,7 +16,7 @@ import Select from '@/components/ui/Select.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ProfileForwardingsCard from '@/components/settings/ProfileForwardingsCard.vue'
 import GroupAccordion from '@/components/settings/GroupAccordion.vue'
-import { useConfigStore, reorderGroups, type SshProfile } from '@/stores/config'
+import { useConfigStore, reorderGroups, type SshProfile, type MoshProfile, type RemoteProfile } from '@/stores/config'
 import { useMonitorStore } from '@/stores/monitor'
 import { builtinColorSchemes } from '@/lib/colorSchemes'
 import { groupQuickCommandSections } from '@/lib/quickCommands'
@@ -30,16 +30,19 @@ const config = useConfigStore()
 const store = config.store
 const monitorStore = useMonitorStore()
 
-const sshProfiles = computed(() => store.profiles.filter((p): p is SshProfile => p.type === 'ssh'))
+const sshProfiles = computed(() => store.profiles.filter((p): p is RemoteProfile => p.type === 'ssh' || p.type === 'mosh'))
 const selectedSshProfileId = ref<string | null>(null)
-const selectedSshProfile = computed<SshProfile | null>(() =>
+const selectedSshProfile = computed<RemoteProfile | null>(() =>
     sshProfiles.value.find(p => p.id === selectedSshProfileId.value)
     ?? sshProfiles.value[0]
     ?? null)
 
+/** 新建草稿的协议类型（create 回调读取；点「新建 SSH/Mosh」按钮时设置） */
+const nextCreateKind = ref<'ssh' | 'mosh'>('ssh')
+
 /** 草稿编辑器：表单（含端口转发卡片）只改草稿副本，「保存」时统一提交 store */
-const sshEditor = useDraftEditor<SshProfile>({
-    create: buildSshProfile,
+const sshEditor = useDraftEditor<RemoteProfile>({
+    create: () => nextCreateKind.value === 'mosh' ? buildMoshProfile() : buildSshProfile(),
     persist: (draft, isNew) => {
         if (isNew) {
             store.profiles.push(draft)
@@ -79,7 +82,7 @@ watch(selectedSshProfile, syncEditorToSelection, { immediate: true })
  * @example selectSshProfile(profile)
  *
  */
-function selectSshProfile (profile: SshProfile): void {
+function selectSshProfile (profile: RemoteProfile): void {
     sshEditor.guard(t('settings.unsavedChangesBody'), () => {
         if (profile.id !== selectedSshProfileId.value) {
             selectedSshProfileId.value = profile.id
@@ -162,6 +165,18 @@ const sshAuthOptions = computed(() => [
     { value: 'password', label: t('settings.sshAuthPassword') },
 ])
 
+/** Mosh UDP 端口表单模型：空串 ↔ null（60000-61000 默认范围） */
+const moshPortModel = computed({
+    get: () => (sshDraft.value?.type === 'mosh' ? sshDraft.value.moshPort : null)?.toString() ?? '',
+    set: (value: string) => {
+        const profile = sshDraft.value
+        if (profile && profile.type === 'mosh') {
+            const parsed = Number.parseInt(value, 10)
+            profile.moshPort = Number.isFinite(parsed) && value !== '' ? parsed : null
+        }
+    },
+})
+
 // ---- 密钥链下拉（密钥页管理条目；本页仅消费元数据列表） ----
 const sshKeys = ref<SshKeyMeta[]>([])
 
@@ -174,10 +189,10 @@ onMounted(async () => {
 })
 
 const keyIdModel = computed({
-    get: () => sshDraft.value?.keyId ?? '',
+    get: () => (sshDraft.value?.type === 'ssh' ? sshDraft.value.keyId : '') ?? '',
     set: (value: string) => {
         const profile = sshDraft.value
-        if (profile) {
+        if (profile && profile.type === 'ssh') {
             profile.keyId = value || null
         }
     },
@@ -196,15 +211,18 @@ const profilePasswordSet = ref(false)
 const passwordEditorOpen = ref(false)
 const passwordDraft = ref('')
 
-watch(sshDraft, async (profile: SshProfile | null) => {
+watch(sshDraft, async (profile: RemoteProfile | null) => {
     passwordEditorOpen.value = false
     passwordDraft.value = ''
-    profilePasswordSet.value = profile ? await hasProfilePassword(profile.id).catch(() => false) : false
+    // 密码仅 SSH 档案支持（mosh 认证由其内部 ssh 完成）
+    profilePasswordSet.value = profile && profile.type === 'ssh'
+        ? await hasProfilePassword(profile.id).catch(() => false)
+        : false
 })
 
 async function saveProfilePassword (): Promise<void> {
     const profile = sshDraft.value
-    if (!profile) {
+    if (!profile || profile.type !== 'ssh') {
         return
     }
     if (passwordDraft.value) {
@@ -217,7 +235,7 @@ async function saveProfilePassword (): Promise<void> {
 
 async function clearProfilePassword (): Promise<void> {
     const profile = sshDraft.value
-    if (!profile) {
+    if (!profile || profile.type !== 'ssh') {
         return
     }
     await removeProfilePassword(profile.id)
@@ -241,7 +259,7 @@ function deleteSshGroup (id: string): void {
     }
     store.sshGroups.splice(index, 1)
     for (const profile of store.profiles) {
-        if (profile.type === 'ssh' && profile.groupId === id) {
+        if ((profile.type === 'ssh' || profile.type === 'mosh') && profile.groupId === id) {
             delete profile.groupId
         }
     }
@@ -289,12 +307,33 @@ function buildSshProfile (): SshProfile {
     return {
         id: `ssh-${nanoid(8)}`,
         type: 'ssh',
-        name: `${t('settings.profileTypeSsh')} ${sshProfiles.value.length + 1}`,
+        name: `${t('settings.profileTypeSsh')} ${sshProfiles.value.filter(p => p.type === 'ssh').length + 1}`,
         host: '',
         port: 22,
         user: 'root',
         auth: 'auto',
         keyId: null,
+        colorScheme: null,
+        isDefault: false,
+    }
+}
+
+/**
+ * @description 构造一条全新 Mosh 档案草稿（落在默认分组；不进入 store）
+ * @returns MoshProfile 新档案对象
+ *
+ * @example buildMoshProfile()
+ *
+ */
+function buildMoshProfile (): MoshProfile {
+    return {
+        id: `mosh-${nanoid(8)}`,
+        type: 'mosh',
+        name: `${t('settings.profileTypeMosh')} ${sshProfiles.value.filter(p => p.type === 'mosh').length + 1}`,
+        host: '',
+        port: 22,
+        user: 'root',
+        moshPort: null,
         colorScheme: null,
         isDefault: false,
     }
@@ -309,6 +348,20 @@ function buildSshProfile (): SshProfile {
  *
  */
 function createSshProfile (): void {
+    nextCreateKind.value = 'ssh'
+    sshEditor.guard(t('settings.unsavedChangesBody'), sshEditor.createNew, t('settings.unsavedChangesDiscard'), t('settings.unsavedChangesTitle'))
+}
+
+/**
+ * @description 新建 Mosh 档案：打开全新草稿编辑器（有未保存修改时经确认放行），
+ *              点「保存」后才进入列表并持久化
+ * @returns void
+ *
+ * @example createMoshProfile() // 编辑器切换为未保存的 Mosh 新档案草稿
+ *
+ */
+function createMoshProfile (): void {
+    nextCreateKind.value = 'mosh'
     sshEditor.guard(t('settings.unsavedChangesBody'), sshEditor.createNew, t('settings.unsavedChangesDiscard'), t('settings.unsavedChangesTitle'))
 }
 
@@ -366,7 +419,7 @@ function deleteSshProfile (id: string): void {
  * @returns void
  *
  */
-function confirmDeleteProfile (profile: SshProfile): void {
+function confirmDeleteProfile (profile: RemoteProfile): void {
     confirmAction(t('settings.deleteConfirmBody', { name: profile.name }), () => deleteSshProfile(profile.id))
 }
 </script>
@@ -380,6 +433,10 @@ function confirmDeleteProfile (profile: SshProfile): void {
                 <button class="profile-new-button" @click="createSshProfile">
                     <Plus :size="14" />
                     <span>{{ t('settings.sshNew') }}</span>
+                </button>
+                <button class="profile-new-button" @click="createMoshProfile">
+                    <Plus :size="14" />
+                    <span>{{ t('settings.moshNew') }}</span>
                 </button>
                 <button class="profile-new-button" @click="openCreateSshGroup">
                     <Plus :size="14" />
@@ -407,6 +464,7 @@ function confirmDeleteProfile (profile: SshProfile): void {
                     >
                         <span class="profile-item-head">
                             <span class="profile-item-name">{{ p.name }}</span>
+                            <span class="profile-protocol-badge" :class="p.type">{{ p.type === 'mosh' ? 'Mosh' : 'SSH' }}</span>
                             <span v-if="p.isDefault" class="profile-default-badge">{{ t('tab.defaultProfile') }}</span>
                         </span>
                         <span class="profile-item-command">{{ `${p.user}@${p.host}${p.port === 22 ? '' : `:${p.port}`}` }}</span>
@@ -456,37 +514,49 @@ function confirmDeleteProfile (profile: SshProfile): void {
                         <Label>{{ t('settings.sshUser') }}</Label>
                         <Input v-model="sshDraft.user" class="w-60" />
                     </div>
-                    <div class="settings-card-row">
-                        <Label>{{ t('settings.sshAuth') }}</Label>
-                        <Select v-model="sshDraft.auth" :options="sshAuthOptions" class="w-44" />
-                    </div>
-                    <div v-if="sshDraft.auth === 'publicKey' || sshDraft.auth === 'auto'" class="settings-card-row">
-                        <Label>{{ t('settings.keychain') }} <span class="value-hint">{{ t('settings.keychainHint') }}</span></Label>
-                        <Select v-model="keyIdModel" :options="sshKeyOptions" class="w-60" />
-                    </div>
-                    <div v-if="sshDraft.auth === 'password' || sshDraft.auth === 'auto'" class="settings-card-row">
-                        <Label>{{ t('settings.sshPassword') }}</Label>
-                        <div class="ssh-password-row">
-                            <Button variant="outline" size="sm" @click="passwordEditorOpen = !passwordEditorOpen">
-                                {{ profilePasswordSet ? t('settings.sshPasswordReplace') : t('settings.sshPasswordSet') }}
-                            </Button>
-                            <span v-if="profilePasswordSet" class="value-hint">{{ t('settings.sshPasswordStored') }}</span>
-                            <Button v-if="profilePasswordSet" variant="ghost" size="sm" class="profile-delete" @click="clearProfilePassword">
-                                {{ t('settings.sshPasswordClear') }}
-                            </Button>
+                    <template v-if="sshDraft.type === 'ssh'">
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.sshAuth') }}</Label>
+                            <Select v-model="sshDraft.auth" :options="sshAuthOptions" class="w-44" />
                         </div>
-                    </div>
-                    <div v-if="passwordEditorOpen && (sshDraft.auth === 'password' || sshDraft.auth === 'auto')" class="settings-card-row stacked">
-                        <Label>{{ t('settings.sshPassword') }}</Label>
-                        <div class="ssh-password-editor">
-                            <Input v-model="passwordDraft" type="password" class="w-60" :placeholder="t('settings.sshPasswordPlaceholder')" />
-                            <Button size="sm" @click="saveProfilePassword">{{ t('settings.sshPasswordSave') }}</Button>
+                        <div v-if="sshDraft.auth === 'publicKey' || sshDraft.auth === 'auto'" class="settings-card-row">
+                            <Label>{{ t('settings.keychain') }} <span class="value-hint">{{ t('settings.keychainHint') }}</span></Label>
+                            <Select v-model="keyIdModel" :options="sshKeyOptions" class="w-60" />
                         </div>
-                    </div>
+                        <div v-if="sshDraft.auth === 'password' || sshDraft.auth === 'auto'" class="settings-card-row">
+                            <Label>{{ t('settings.sshPassword') }}</Label>
+                            <div class="ssh-password-row">
+                                <Button variant="outline" size="sm" @click="passwordEditorOpen = !passwordEditorOpen">
+                                    {{ profilePasswordSet ? t('settings.sshPasswordReplace') : t('settings.sshPasswordSet') }}
+                                </Button>
+                                <span v-if="profilePasswordSet" class="value-hint">{{ t('settings.sshPasswordStored') }}</span>
+                                <Button v-if="profilePasswordSet" variant="ghost" size="sm" class="profile-delete" @click="clearProfilePassword">
+                                    {{ t('settings.sshPasswordClear') }}
+                                </Button>
+                            </div>
+                        </div>
+                        <div v-if="passwordEditorOpen && (sshDraft.auth === 'password' || sshDraft.auth === 'auto')" class="settings-card-row stacked">
+                            <Label>{{ t('settings.sshPassword') }}</Label>
+                            <div class="ssh-password-editor">
+                                <Input v-model="passwordDraft" type="password" class="w-60" :placeholder="t('settings.sshPasswordPlaceholder')" />
+                                <Button size="sm" @click="saveProfilePassword">{{ t('settings.sshPasswordSave') }}</Button>
+                            </div>
+                        </div>
+                    </template>
+                    <template v-else>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.moshPort') }} <span class="value-hint">{{ t('settings.moshPortHint') }}</span></Label>
+                            <Input v-model="moshPortModel" type="number" class="w-24" :placeholder="t('settings.moshPortPlaceholder')" />
+                        </div>
+                        <div class="settings-card-row stacked">
+                            <Label>{{ t('settings.moshAuthLabel') }}</Label>
+                            <span class="value-hint">{{ t('settings.moshAuthHint') }}</span>
+                        </div>
+                    </template>
                 </div>
             </div>
 
-            <ProfileForwardingsCard :profile="sshDraft" />
+            <ProfileForwardingsCard v-if="sshDraft.type === 'ssh'" :profile="sshDraft" />
 
             <div class="profile-actions">
                 <Button size="sm" :disabled="!isSshDraftDirty" @click="saveSshDraft">
@@ -532,5 +602,20 @@ function confirmDeleteProfile (profile: SshProfile): void {
     align-items: center;
     gap: 8px;
     margin-top: 8px;
+}
+
+.profile-protocol-badge {
+    flex: none;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    line-height: 1.4;
+    color: var(--muted-foreground);
+    border: 1px solid var(--border);
+}
+
+.profile-protocol-badge.mosh {
+    color: var(--primary);
+    border-color: var(--primary);
 }
 </style>

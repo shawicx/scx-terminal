@@ -48,8 +48,29 @@ export interface SshProfile {
     forwardings?: PortForwarding[]
 }
 
-/** 终端配置档案：type 为判别字段（local 本地 shell / ssh 远程连接） */
-export type TerminalProfile = LocalProfile | SshProfile
+/** Mosh 远程档案：认证由 mosh 内部 ssh 完成（agent / ~/.ssh / PTY 密码提示），无应用侧凭据字段 */
+export interface MoshProfile {
+    id: string
+    type: 'mosh'
+    name: string
+    host: string
+    /** SSH 端口（mosh bootstrap 阶段使用） */
+    port: number
+    user: string
+    /** mosh-server UDP 端口；null = 60000-61000 默认范围 */
+    moshPort: number | null
+    /** 档案专属配色名；null 跟随全局 */
+    colorScheme: string | null
+    isDefault: boolean
+    /** 所属分组 id（见 SshGroup；Mosh 与 SSH 档案共列同一分组体系） */
+    groupId?: string
+}
+
+/** 终端配置档案：type 为判别字段（local 本地 shell / ssh 远程连接 / mosh roaming 连接） */
+export type TerminalProfile = LocalProfile | SshProfile | MoshProfile
+
+/** 远程档案（SSH / Mosh 共用分组体系与连接中心展示） */
+export type RemoteProfile = SshProfile | MoshProfile
 
 /** 本地档案分组（管理用实体，本地档案以 groupId 单选引用；无引用 = 未分组） */
 export interface LocalGroup {

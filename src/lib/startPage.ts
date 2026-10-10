@@ -2,13 +2,13 @@
  * @description 连接中心（起始页）纯逻辑：SSH 档案分组视图构建、本地终端分组过滤、
  *              全局搜索过滤、最近连接排序与相对时间分桶。UI 无关，便于单测。
  */
-import { groupLocalProfiles, type LocalGroup, type LocalProfile, type LocalProfileSection, type SshGroup, type SshProfile, type TerminalProfile } from '@/stores/config'
+import { groupLocalProfiles, type LocalGroup, type LocalProfile, type LocalProfileSection, type RemoteProfile, type SshGroup, type TerminalProfile } from '@/stores/config'
 
 /** 起始页一组的展示视图（'default' 为内置默认组 id，展示名由组件按 i18n 解析） */
 export interface StartGroupView {
     id: 'default' | string
     name: string
-    profiles: SshProfile[]
+    profiles: RemoteProfile[]
 }
 
 /** 分组 id → 名称索引（搜索按组名匹配用） */
@@ -16,7 +16,7 @@ export type GroupNameIndex = Map<string, string>
 
 /** 最近连接条目（已过滤悬空档案） */
 export interface RecentEntry {
-    profile: SshProfile
+    profile: RemoteProfile
     ts: number
 }
 
@@ -33,8 +33,9 @@ export interface RelativeTimeBucket {
 
 /**
  * @description 构建 SSH 档案分组视图：无 groupId 或 groupId 悬空的档案归「默认」组
- *              （排最前，为空则不出现）；自定义组按 groups 顺序保留（空组也保留供侧栏计数）
- * @param profiles 全部档案（取其中 ssh 类型）
+ *              （排最前，为空则不出现）；自定义组按 groups 顺序保留（空组也保留供侧栏计数）。
+ *              Mosh 档案共用 SSH 分组体系，一并纳入连接中心列表
+ * @param profiles 全部档案（取其中 ssh / mosh 类型）
  * @param groups SSH 分组列表（config 顺序）
  * @returns StartGroupView[] 分组视图
  *
@@ -42,7 +43,7 @@ export interface RelativeTimeBucket {
  *
  */
 export function buildGroupViews (profiles: TerminalProfile[], groups: SshGroup[]): StartGroupView[] {
-    const sshProfiles = profiles.filter((p): p is SshProfile => p.type === 'ssh')
+    const sshProfiles = profiles.filter((p): p is RemoteProfile => p.type === 'ssh' || p.type === 'mosh')
     const defaultProfiles = sshProfiles.filter(p => !p.groupId || !groups.some(g => g.id === p.groupId))
     const views: StartGroupView[] = defaultProfiles.length > 0
         ? [{ id: 'default', name: '', profiles: defaultProfiles }]
@@ -69,7 +70,7 @@ export function filterGroupViews (views: StartGroupView[], query: string, groupN
     if (!q) {
         return views
     }
-    const match = (p: SshProfile): boolean =>
+    const match = (p: RemoteProfile): boolean =>
         p.name.toLowerCase().includes(q) ||
         p.host.toLowerCase().includes(q) ||
         p.user.toLowerCase().includes(q) ||
@@ -135,7 +136,7 @@ export function recentEntries (recents: Record<string, number>, profiles: Termin
     return Object.entries(recents)
         .flatMap(([id, ts]) => {
             const profile = byId.get(id)
-            return profile && profile.type === 'ssh' ? [{ profile, ts }] : []
+            return profile && (profile.type === 'ssh' || profile.type === 'mosh') ? [{ profile: profile as RemoteProfile, ts }] : []
         })
         .sort((a, b) => b.ts - a.ts)
         .slice(0, limit)

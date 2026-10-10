@@ -297,7 +297,18 @@ async function start (): Promise<void> {
         // 启动参数按档案类型组装：local 走 shell 命令（登录 shell 追加 -l，
         // 初始目录 = 档案 cwd > 继承 cwd > HOME 兜底）；ssh 走远端连接
         // （russh：连接/认证/PTY 由 Rust 完成，cwd 继承对远端无意义、忽略）
-        if (props.profile.type === 'ssh') {
+        if (props.profile.type === 'mosh') {
+            // mosh：本地 PTY 拉起 mosh 客户端（认证/引导由 mosh 内部 ssh 完成），
+            // 无 SFTP/转发注册（type === 'ssh' 判别已天然隔离这些入口）
+            await session.start({
+                host: props.profile.host,
+                port: props.profile.port,
+                user: props.profile.user,
+                moshPort: props.profile.moshPort,
+                width: null,
+                height: null,
+            })
+        } else if (props.profile.type === 'ssh') {
             await session.start({
                 host: props.profile.host,
                 port: props.profile.port,

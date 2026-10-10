@@ -13,6 +13,7 @@ mod snapshot;
 mod s3sync;
 mod shells;
 mod monitor;
+mod mosh;
 mod ssh;
 mod transfers;
 
@@ -90,6 +91,7 @@ pub fn run() {
             pty::pty_exists,
             pty::pty_get_cwd,
             shells::list_shells,
+            mosh::mosh_detect,
             fonts::list_fonts,
             forward::forward_start,
             forward::forward_stop,

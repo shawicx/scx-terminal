@@ -112,9 +112,14 @@ export const useConfigStore = defineStore('config', () => {
             if (profile.groupId && !groupIds.has(profile.groupId)) {
                 delete legacy.groupId
             }
-            const forwardings = sanitizeForwardings(legacy.forwardings)
-            if (forwardings && forwardings.length > 0) {
-                profile.forwardings = forwardings
+            // 端口转发仅 SSH 档案支持；mosh 档案残留的 forwardings 一律清除
+            if (profile.type === 'ssh') {
+                const forwardings = sanitizeForwardings(legacy.forwardings)
+                if (forwardings && forwardings.length > 0) {
+                    profile.forwardings = forwardings
+                } else {
+                    delete legacy.forwardings
+                }
             } else {
                 delete legacy.forwardings
             }

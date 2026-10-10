@@ -8,13 +8,13 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Activity, ArrowLeftRight, ArrowUpDown, Pencil } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
-import type { SshProfile } from '@/stores/config'
+import type { RemoteProfile } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
 import { useMonitorStore, MONITOR_ERROR_UNSUPPORTED } from '@/stores/monitor'
 import { MONITOR_ERROR_RECONNECTING } from '@/lib/monitorOrchestrator'
 
 const props = defineProps<{
-    profile: SshProfile
+    profile: RemoteProfile
     status: 'idle' | 'connecting' | 'connected' | 'failed'
     error?: string
 }>()
@@ -73,13 +73,14 @@ const metricErrorTitle = computed(() =>
             </span>
         </div>
         <div class="host-actions" @click.stop>
-            <Button variant="ghost" size="icon" class="h-7 w-7" :title="t('monitor.actionMonitor')" @click="tabs.openSshWithMonitor(profile.id)">
+            <!-- 监控/SFTP/隧道依赖 SSH russh 连接：Mosh 档案不显示 -->
+            <Button v-if="profile.type === 'ssh'" variant="ghost" size="icon" class="h-7 w-7" :title="t('monitor.actionMonitor')" @click="tabs.openSshWithMonitor(profile.id)">
                 <Activity class="h-5 w-5" />
             </Button>
-            <Button variant="ghost" size="icon" class="h-7 w-7" :title="t('start.actionSftp')" @click="tabs.openSftpTab(profile.id)">
+            <Button v-if="profile.type === 'ssh'" variant="ghost" size="icon" class="h-7 w-7" :title="t('start.actionSftp')" @click="tabs.openSftpTab(profile.id)">
                 <ArrowUpDown class="h-5 w-5" />
             </Button>
-            <Button variant="ghost" size="icon" class="h-7 w-7" :title="t('start.actionTunnel')" @click="tabs.openForwardingTab()">
+            <Button v-if="profile.type === 'ssh'" variant="ghost" size="icon" class="h-7 w-7" :title="t('start.actionTunnel')" @click="tabs.openForwardingTab()">
                 <ArrowLeftRight class="h-5 w-5" />
             </Button>
             <Button variant="ghost" size="icon" class="h-7 w-7" :title="t('start.actionEdit')" @click="tabs.openSettingsTab('ssh')">

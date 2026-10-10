@@ -63,7 +63,7 @@ export function useCommands () {
         commands.value = commands.value.filter(c =>
             !c.id.startsWith(PROFILE_COMMAND_PREFIX) && !c.id.startsWith(SFTP_PROFILE_COMMAND_PREFIX))
         for (const profile of profiles) {
-            if (profile.type !== 'local' && profile.type !== 'ssh') {
+            if (profile.type !== 'local' && profile.type !== 'ssh' && profile.type !== 'mosh') {
                 continue
             }
             register({
@@ -71,7 +71,9 @@ export function useCommands () {
                 group: 'tab',
                 label: () => profile.type === 'ssh'
                     ? t('commands.newTabWithSshProfile', { name: profile.name })
-                    : t('commands.newTabWithProfile', { name: profile.name }),
+                    : profile.type === 'mosh'
+                        ? t('commands.newTabWithMoshProfile', { name: profile.name })
+                        : t('commands.newTabWithProfile', { name: profile.name }),
                 handler: () => void openNewTerminalTabWithCwd(profile.id),
             })
             if (profile.type === 'ssh') {
