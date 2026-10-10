@@ -6,10 +6,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowDownToLine, ArrowUpFromLine, Ban, Check, FolderSearch, X } from 'lucide-vue-next'
+import { ArrowDownToLine, ArrowUpFromLine, Ban, Check, FolderSearch, Pause, Play, RotateCcw, X } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import { useTransfersStore } from '@/stores/transfers'
-import { cancelTransfer, clearTransfers, type TransferSnapshot } from '@/services/sftp'
+import { cancelTransfer, clearTransfers, pauseTransfer, resumeTransfer, retryTransfer, type TransferSnapshot } from '@/services/sftp'
 import { transferCenterOpen } from '@/services/transferCenter'
 import { etaSeconds, formatBytes, formatEta, formatSpeed } from '@/lib/sftpTransferMath'
 import { panelEnter } from '@/lib/motion'
@@ -39,13 +39,43 @@ function close (): void {
 }
 
 /**
- * @description 请求取消一条进行中的传输
+ * @description 请求取消一条进行中/已暂停的传输（部分文件保留，可重试续传）
  * @param transfer 目标任务
  * @returns void
  *
  */
 function onCancel (transfer: TransferSnapshot): void {
     void cancelTransfer(transfer.id).catch(() => {})
+}
+
+/**
+ * @description 请求暂停一条排队/进行中的传输（部分文件保留在目标侧）
+ * @param transfer 目标任务
+ * @returns void
+ *
+ */
+function onPause (transfer: TransferSnapshot): void {
+    void pauseTransfer(transfer.id).catch(() => {})
+}
+
+/**
+ * @description 继续一条已暂停的传输（从断点续传）
+ * @param transfer 目标任务
+ * @returns void
+ *
+ */
+function onResume (transfer: TransferSnapshot): void {
+    void resumeTransfer(transfer.id).catch(() => {})
+}
+
+/**
+ * @description 重试一条失败/已取消的传输（已完成部分不重传）
+ * @param transfer 目标任务
+ * @returns void
+ *
+ */
+function onRetry (transfer: TransferSnapshot): void {
+    void retryTransfer(transfer.id).catch(() => {})
 }
 
 /**
@@ -79,6 +109,7 @@ function statusLabel (transfer: TransferSnapshot): string {
     switch (transfer.status) {
         case 'queued': return t('transfer.queued')
         case 'running': return `${percent(transfer)}%`
+        case 'paused': return t('transfer.paused')
         case 'done': return t('transfer.done')
         case 'canceled': return t('transfer.canceled')
         case 'error': return t('transfer.failed')
@@ -121,8 +152,24 @@ function etaLabel (transfer: TransferSnapshot): string {
                             <Check v-if="transfer.status === 'done'" class="transfer-state-icon ok" :size="13" />
                             <span class="transfer-status">{{ statusLabel(transfer) }}</span>
                             <template v-if="transfer.status === 'queued' || transfer.status === 'running'">
+                                <button v-if="transfer.status === 'running'" class="transfer-action" :title="t('transfer.pause')" @click="onPause(transfer)">
+                                    <Pause :size="12" />
+                                </button>
                                 <button class="transfer-action" :title="t('transfer.cancel')" @click="onCancel(transfer)">
                                     <Ban :size="12" />
+                                </button>
+                            </template>
+                            <template v-else-if="transfer.status === 'paused'">
+                                <button class="transfer-action" :title="t('transfer.resume')" @click="onResume(transfer)">
+                                    <Play :size="12" />
+                                </button>
+                                <button class="transfer-action" :title="t('transfer.cancel')" @click="onCancel(transfer)">
+                                    <Ban :size="12" />
+                                </button>
+                            </template>
+                            <template v-else-if="transfer.status === 'error' || transfer.status === 'canceled'">
+                                <button class="transfer-action" :title="t('transfer.retry')" @click="onRetry(transfer)">
+                                    <RotateCcw :size="12" />
                                 </button>
                             </template>
                             <template v-else-if="transfer.status === 'done'">
@@ -134,7 +181,7 @@ function etaLabel (transfer: TransferSnapshot): string {
                         <div class="transfer-bar">
                             <div
                                 class="transfer-fill"
-                                :class="{ indeterminate: transfer.status === 'running' && transfer.totalBytes <= 0, error: transfer.status === 'error' || transfer.status === 'canceled' }"
+                                :class="{ indeterminate: transfer.status === 'running' && transfer.totalBytes <= 0, error: transfer.status === 'error' || transfer.status === 'canceled', paused: transfer.status === 'paused' }"
                                 :style="{ width: transfer.totalBytes > 0 ? `${percent(transfer)}%` : undefined }"
                             ></div>
                         </div>
@@ -295,6 +342,11 @@ export default { name: 'TransferPopover' }
     color: var(--color-destructive);
 }
 
+/* 暂停态：琥珀色提示（无全局 warning token，局部取值） */
+.transfer-row.paused .transfer-status {
+    color: #d97706;
+}
+
 .transfer-action {
     display: inline-flex;
     align-items: center;
@@ -331,6 +383,10 @@ export default { name: 'TransferPopover' }
 
 .transfer-fill.error {
     background: var(--color-destructive);
+}
+
+.transfer-fill.paused {
+    background: #d97706;
 }
 
 /* 总量未知（目录统计中）：流光不定进度 */

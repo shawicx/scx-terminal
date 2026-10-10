@@ -1,11 +1,9 @@
 //! @description 传输计划构建：远端（SFTP）/本地（tokio fs）递归 walk 收集目录与文件条目，
 //!              单文件直传短路；symlink 跳过避免环；远端建目录沿用「已存在即成功」语义。
 
-use std::sync::atomic::Ordering;
-
 use russh_sftp::client::SftpSession;
 
-use super::{failed, join_local, join_remote, PlanItem, PumpError, TransferEntry};
+use super::{failed, join_local, join_remote, stop_reason, PlanItem, PumpError, TransferEntry};
 
 /// 下载计划：单文件直传；目录递归 walk（远端侧收集，本地侧映射路径）
 pub(super) async fn build_download_plan (
@@ -46,8 +44,8 @@ async fn walk_remote (
         .await
         .map_err(|e| failed(format!("failed to list {remote_dir}: {e}")))?;
     for dir_entry in read_dir {
-        if entry.cancel.load(Ordering::Acquire) {
-            return Err(PumpError::Canceled);
+        if let Some(err) = stop_reason(entry) {
+            return Err(err);
         }
         let name = dir_entry.file_name();
         let meta = dir_entry.metadata();

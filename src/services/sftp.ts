@@ -32,7 +32,7 @@ export interface TransferSnapshot {
     remotePath: string
     totalBytes: number
     transferredBytes: number
-    status: 'queued' | 'running' | 'done' | 'error' | 'canceled'
+    status: 'queued' | 'running' | 'paused' | 'done' | 'error' | 'canceled'
     error: string | null
     startedAt: number
     finishedAt: number | null
@@ -179,6 +179,42 @@ export function listTransfers (sshId: string | null): Promise<TransferSnapshot[]
  */
 export function cancelTransfer (id: string): Promise<void> {
     return invoke<void>('sftp_transfer_cancel', { id })
+}
+
+/**
+ * @description 请求暂停一条传输任务（排队/进行中可暂停；`.scxpart` 部分文件保留）
+ * @param id 传输任务 id
+ * @returns Promise<void> 任务不存在/已终态时抛错
+ *
+ * @example await pauseTransfer(id)
+ *
+ */
+export function pauseTransfer (id: string): Promise<void> {
+    return invoke<void>('sftp_transfer_pause', { id })
+}
+
+/**
+ * @description 继续一条已暂停的传输任务（从部分文件断点续传）
+ * @param id 传输任务 id
+ * @returns Promise<void> 任务不存在/非 paused 时抛错
+ *
+ * @example await resumeTransfer(id)
+ *
+ */
+export function resumeTransfer (id: string): Promise<void> {
+    return invoke<void>('sftp_transfer_resume', { id })
+}
+
+/**
+ * @description 重试一条失败/已取消的传输任务（已完成部分不重传）
+ * @param id 传输任务 id
+ * @returns Promise<void> 任务不存在/非 error|canceled 时抛错
+ *
+ * @example await retryTransfer(id)
+ *
+ */
+export function retryTransfer (id: string): Promise<void> {
+    return invoke<void>('sftp_transfer_retry', { id })
 }
 
 /**

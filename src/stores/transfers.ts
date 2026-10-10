@@ -27,7 +27,7 @@ export const useTransfersStore = defineStore('transfers', {
     }),
     getters: {
         activeTransfers (state): TransferSnapshot[] {
-            return state.transfers.filter(t => t.status === 'queued' || t.status === 'running')
+            return state.transfers.filter(t => t.status === 'queued' || t.status === 'running' || t.status === 'paused')
         },
         hasFailure (state): boolean {
             return state.transfers.some(t => t.status === 'error' || t.status === 'canceled')
@@ -73,7 +73,8 @@ export const useTransfersStore = defineStore('transfers', {
                     const sample: SpeedSample = { at: Date.now(), transferred: snapshot.transferredBytes }
                     tracker.smoothed = smoothSpeed(tracker.smoothed, instantSpeed(tracker.last ?? sample, sample))
                     tracker.last = sample
-                } else if (isTerminal(snapshot.status)) {
+                } else if (isTerminal(snapshot.status) || snapshot.status === 'paused') {
+                    // 终态或暂停：清空速度样本，避免继续/重试后 EMA 从旧样本跳变
                     tracker.last = null
                     tracker.smoothed = null
                 }

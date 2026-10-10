@@ -66,6 +66,67 @@ fn cancel_sets_flag_and_status_only_for_active () {
 }
 
 #[test]
+fn pause_sets_flag_and_status_for_active_only () {
+    let manager = TransferManager::new();
+    let (id, entry) = make_entry(&manager, "running");
+    assert!(manager.pause(&id));
+    assert!(entry.pause.load(Ordering::Acquire));
+    assert_eq!(entry.snapshot.lock().unwrap().status, "paused");
+    assert_eq!(entry.snapshot.lock().unwrap().finished_at, None);
+    // 终态后再暂停：返回 false 且状态不变
+    let (done_id, _) = make_entry(&manager, "done");
+    assert!(!manager.pause(&done_id));
+    // 不存在的任务
+    assert!(!manager.pause("tr-none"));
+}
+
+#[test]
+fn pause_is_not_terminal_so_cancel_still_works () {
+    let manager = TransferManager::new();
+    let (id, entry) = make_entry(&manager, "paused");
+    assert!(manager.cancel(&id));
+    assert!(entry.cancel.load(Ordering::Acquire));
+    assert_eq!(entry.snapshot.lock().unwrap().status, "canceled");
+}
+
+#[test]
+fn requeue_requires_allowed_status_inactive_loop_and_job () {
+    let manager = TransferManager::new();
+    // paused 但未挂执行参数（job 缺失）→ 复活失败
+    let (id, entry) = make_entry(&manager, "paused");
+    assert!(manager.requeue(&id, &["paused"]).is_none());
+    assert_eq!(entry.snapshot.lock().unwrap().status, "paused");
+    // done 不在允许集合
+    let (done_id, _) = make_entry(&manager, "done");
+    assert!(manager.requeue(&done_id, &["paused"]).is_none());
+    // 旧循环未退出（active=true）→ 拒绝
+    entry.active.store(true, Ordering::Release);
+    assert!(manager.requeue(&id, &["paused"]).is_none());
+}
+
+#[test]
+fn permit_is_shared_per_ssh_and_capped () {
+    let manager = TransferManager::new();
+    let a1 = manager.permit("ssh-a");
+    let a2 = manager.permit("ssh-a");
+    let b = manager.permit("ssh-b");
+    assert!(Arc::ptr_eq(&a1, &a2)); // 同连接复用同一信号量
+    assert!(!Arc::ptr_eq(&a1, &b)); // 不同连接各自限流
+    assert_eq!(a1.available_permits(), MAX_CONCURRENT_PER_SSH);
+}
+
+#[test]
+fn stop_reason_prefers_cancel_over_pause () {
+    let manager = TransferManager::new();
+    let (_, entry) = make_entry(&manager, "running");
+    assert!(stop_reason(&entry).is_none());
+    entry.pause.store(true, Ordering::Release);
+    assert!(matches!(stop_reason(&entry), Some(PumpError::Paused)));
+    entry.cancel.store(true, Ordering::Release);
+    assert!(matches!(stop_reason(&entry), Some(PumpError::Canceled)));
+}
+
+#[test]
 fn clear_removes_only_terminal_entries () {
     let manager = TransferManager::new();
     make_entry(&manager, "running");
