@@ -56,6 +56,8 @@ const mountError = ref('')
 let session: BaseSession | null = null
 let frontend: XTermWebGLFrontend | null = null
 let disposed = false
+/** 窗格稳定标识（工作流运行绑定校验用；窗格销毁重建后 key 变化即视为运行失效） */
+const paneKey = `pane-${props.profile.id}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     /** 已登记进连接注册表的会话 id（destroyed$ 注销用） */
     let registeredSshId: string | null = null
 
@@ -193,6 +195,23 @@ async function getWorkingDirectory (): Promise<string | null> {
     return session.getWorkingDirectory()
 }
 
+/**
+ * @description 订阅本窗格会话的原始输出流（工作流 expect 等待/输出捕获用）；
+ *              会话未启动时订阅挂起（noop 退订）
+ * @param cb 输出 chunk 回调（raw PTY 文本，含转义序列）
+ * @returns () => void 退订函数
+ *
+ * @example const stop = paneRef.value?.tapOutput(chunk => ...)
+ *
+ */
+function tapOutput (cb: (chunk: string) => void): () => void {
+    if (!session) {
+        return () => {}
+    }
+    const subscription = session.output$.subscribe(cb)
+    return () => subscription.unsubscribe()
+}
+
 defineExpose({
     focus: () => frontend?.focus(),
     copy: () => frontend?.copySelection(),
@@ -202,6 +221,8 @@ defineExpose({
     triggerSuggestions: () => triggerManually(),
     getWorkingDirectory,
     sendText,
+    paneKey: () => paneKey,
+    tapOutput,
     openSftpTab: () => {
         if (props.profile.type === 'ssh') {
             tabsStore.openSftpTab(props.profile.id)

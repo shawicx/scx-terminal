@@ -114,7 +114,7 @@ pub(super) fn read_config_rows(config: &ConfigState) -> Result<BackupConfig, Str
 
     {
         let mut stmt = conn
-            .prepare("SELECT id, name, description, execution, step_interval_ms, sort_order, steps FROM workflows ORDER BY sort_order")
+            .prepare("SELECT id, name, description, execution, step_interval_ms, sort_order, steps, stop_on_error FROM workflows ORDER BY sort_order")
             .map_err(|e| format!("failed to read workflows: {e}"))?;
         let result = stmt
             .query_map([], |row| {
@@ -127,6 +127,7 @@ pub(super) fn read_config_rows(config: &ConfigState) -> Result<BackupConfig, Str
                     step_interval_ms: row.get(4)?,
                     sort_order: row.get(5)?,
                     steps: serde_json::from_str(&steps_raw).unwrap_or(serde_json::Value::Array(Vec::new())),
+                    stop_on_error: row.get::<_, i64>(7)? != 0,
                 })
             })
             .map_err(|e| format!("failed to read workflows: {e}"))?;
@@ -272,7 +273,7 @@ pub(super) fn write_config_rows(config: &ConfigState, rows: &BackupConfig) -> Re
     tx.execute("DELETE FROM workflows", []).map_err(|e| format!("failed to clear workflows: {e}"))?;
     for row in &rows.workflows {
         tx.execute(
-            "INSERT INTO workflows (id, name, description, execution, step_interval_ms, sort_order, steps) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO workflows (id, name, description, execution, step_interval_ms, sort_order, steps, stop_on_error) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![
                 row.id,
                 row.name,
@@ -280,7 +281,8 @@ pub(super) fn write_config_rows(config: &ConfigState, rows: &BackupConfig) -> Re
                 row.execution,
                 row.step_interval_ms,
                 row.sort_order,
-                row.steps.to_string()
+                row.steps.to_string(),
+                row.stop_on_error
             ],
         )
         .map_err(|e| format!("failed to import workflow {}: {e}", row.id))?;

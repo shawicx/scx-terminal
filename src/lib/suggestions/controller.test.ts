@@ -32,7 +32,7 @@ function makeHost (overrides: Partial<SuggestionsControllerHost> = {}): Suggesti
     let line: LogicalLine = { text: 'user@mac ~ % git che', cursorOffset: 20 }
     const host: SuggestionsControllerHost & { sent: string[] } = {
         sent,
-        config: () => ({ enabled: true, trigger: 'auto', delay: 200, sources: { history: true, quickCommands: true, paths: true } }),
+        config: () => ({ enabled: true, trigger: 'auto', delay: 200, sources: { history: true, quickCommands: true, paths: true, workflows: true } }),
         isAlternateScreen: () => false,
         isFocusedPane: () => true,
         readLine: () => line,
@@ -44,8 +44,10 @@ function makeHost (overrides: Partial<SuggestionsControllerHost> = {}): Suggesti
         sshId: () => null,
         listDir: async () => [],
         quickCommands: () => [],
+        workflows: () => [],
         sendInput: text => { sent.push(text) },
         openQuickCommandForm: () => {},
+        openWorkflowForm: () => {},
         onState: () => {},
         ...overrides,
     }
@@ -91,7 +93,7 @@ describe('SuggestionsController', () => {
         const { SuggestionsController: Controller } = await import('./controller')
         const states: boolean[] = []
         const host = makeHost({
-            config: () => ({ enabled: true, trigger: 'auto', delay: 60, sources: { history: true, quickCommands: true, paths: true } }),
+            config: () => ({ enabled: true, trigger: 'auto', delay: 60, sources: { history: true, quickCommands: true, paths: true, workflows: true } }),
             onState: state => states.push(state.open),
         })
         const controller = new Controller(host)

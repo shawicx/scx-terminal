@@ -11,6 +11,7 @@ import type { Suggestion, SuggestionContext } from './types'
 const MAX_HISTORY_SAME_SOURCE = 8
 const MAX_HISTORY_GLOBAL = 4
 const MAX_QUICK_COMMANDS = 4
+const MAX_WORKFLOWS = 3
 const MAX_PATHS = 8
 const MAX_TOTAL = 16
 
@@ -28,6 +29,11 @@ export interface QuickCommandSource {
     groupName: string | null
 }
 
+export interface WorkflowSource {
+    id: string
+    name: string
+}
+
 export interface DirEntry {
     name: string
     isDir: boolean
@@ -36,6 +42,7 @@ export interface DirEntry {
 export interface SuggestionSources {
     history?: HistoryIndexItem[]
     quickCommands?: QuickCommandSource[]
+    workflows?: WorkflowSource[]
     listDir?: (dir: string) => Promise<DirEntry[]>
 }
 
@@ -53,14 +60,15 @@ export async function computeSuggestions (context: SuggestionContext, sources: S
     if (!typed.trim()) {
         return []
     }
-    const [history, quickCommands, paths] = await Promise.all([
+    const [history, quickCommands, workflows, paths] = await Promise.all([
         sources.history ? historySuggestions(typed, context, sources.history) : [],
         sources.quickCommands ? quickCommandSuggestions(typed, sources.quickCommands) : [],
+        sources.workflows ? workflowSuggestions(typed, sources.workflows) : [],
         sources.listDir ? pathSuggestions(context, sources.listDir) : [],
     ])
     const seen = new Set<string>()
     const merged: Suggestion[] = []
-    for (const suggestion of [...quickCommands, ...history, ...paths]) {
+    for (const suggestion of [...quickCommands, ...workflows, ...history, ...paths]) {
         if (seen.has(suggestion.label)) {
             continue
         }
@@ -142,6 +150,23 @@ function quickCommandSuggestions (typed: string, quickCommands: QuickCommandSour
             detail: quickCommand.groupName,
             quickCommandId: quickCommand.id,
             hasParams: /\{\{[^}]*\}\}/.test(quickCommand.command),
+        }))
+}
+
+/** 工作流：对名称做模糊匹配，最多 3 条；接受时打开工作流选择器执行（非文本插入） */
+function workflowSuggestions (typed: string, workflows: WorkflowSource[]): Suggestion[] {
+    return workflows
+        .map(workflow => ({ workflow, score: fuzzyMatch(typed, workflow.name) }))
+        .filter(entry => entry.score !== null)
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+        .slice(0, MAX_WORKFLOWS)
+        .map(({ workflow }) => ({
+            kind: 'workflow' as const,
+            label: workflow.name,
+            detail: null,
+            quickCommandId: null,
+            hasParams: false,
+            workflowId: workflow.id,
         }))
 }
 

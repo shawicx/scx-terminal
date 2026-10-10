@@ -102,6 +102,19 @@ export interface QuickCommand {
     description?: string
 }
 
+/** 步骤等待策略：fixed = 固定延时；expect = 匹配输出（缺省 pattern = 学习到的提示符） */
+export type StepWait =
+    | { kind: 'fixed'; ms: number }
+    | { kind: 'expect'; pattern?: string; timeoutMs: number; onTimeout: 'abort' | 'continue' }
+
+/** 步骤输出捕获：把本步输出提取为变量，供后续步骤 {{占位符}} 引用 */
+export interface StepCapture {
+    /** 存入运行时上下文的变量名 */
+    var: string
+    /** 提取正则（首个捕获组；缺省 = 整段输出 trim） */
+    pattern?: string
+}
+
 /** 工作流步骤：quickCommand = 引用快捷命令；raw = 内联命令（支持 {{参数}} 占位符） */
 export interface WorkflowStep {
     id: string
@@ -112,6 +125,10 @@ export interface WorkflowStep {
     command?: string
     /** 步骤级参数预设（运行时填参表单的默认值） */
     paramValues?: Record<string, string>
+    /** 本步发送后的等待策略；缺省 = 沿用工作流级 stepIntervalMs（一期行为） */
+    wait?: StepWait
+    /** 本步输出捕获定义；缺省 = 不捕获 */
+    capture?: StepCapture
 }
 
 /** 工作流：有序步骤列表；执行时渲染后发送到活动终端窗格 */
@@ -125,6 +142,8 @@ export interface Workflow {
     /** sequential 模式步间延时 ms（默认 500） */
     stepIntervalMs: number
     steps: WorkflowStep[]
+    /** 任一步骤等待超时/窗格丢失时中止整个运行（默认 true） */
+    stopOnError: boolean
 }
 
 export interface TerminalConfig {
@@ -154,7 +173,7 @@ export interface TerminalConfig {
         enabled: boolean
         trigger: 'auto' | 'manual'
         delay: number
-        sources: { history: boolean, quickCommands: boolean, paths: boolean }
+        sources: { history: boolean, quickCommands: boolean, paths: boolean, workflows: boolean }
     }
 }
 

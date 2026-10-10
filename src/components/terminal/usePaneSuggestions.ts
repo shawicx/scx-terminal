@@ -13,6 +13,7 @@ import type { TerminalProfile } from '@/stores/config'
 import type { ConfigStore } from '@/stores/config/types'
 import { listLocalDir, SshPathLister } from '@/services/pathCompletion'
 import { openQuickCommandPalette } from '@/services/quickCommandPalette'
+import { openWorkflowPalette } from '@/services/workflowPalette'
 
 /** usePaneSuggestions 的依赖集（全部现读访问器，配置/会话变更即时生效） */
 export interface PaneSuggestionsDeps {
@@ -58,7 +59,7 @@ export function usePaneSuggestions (deps: PaneSuggestionsDeps) {
             enabled: conf?.enabled ?? true,
             trigger: conf?.trigger ?? 'auto',
             delay: conf?.delay ?? 200,
-            sources: conf?.sources ?? { history: true, quickCommands: true, paths: true },
+            sources: conf?.sources ?? { history: true, quickCommands: true, paths: true, workflows: true },
         }
     }
 
@@ -114,8 +115,12 @@ export function usePaneSuggestions (deps: PaneSuggestionsDeps) {
                 command: qc.command,
                 groupName: deps.config().quickCommandGroups.find(group => group.id === qc.groupId)?.name ?? null,
             })),
+            workflows: () => deps.config().workflows
+                .filter(workflow => workflow.steps.length > 0 && workflow.name)
+                .map(workflow => ({ id: workflow.id, name: workflow.name })),
             sendInput: text => deps.session()?.feedFromTerminal(encodeUTF8(text)),
             openQuickCommandForm: quickCommandId => openQuickCommandPalette(quickCommandId),
+            openWorkflowForm: workflowId => openWorkflowPalette(workflowId),
             onState: state => {
                 suggestionState.value = state
                 if (state.open) {

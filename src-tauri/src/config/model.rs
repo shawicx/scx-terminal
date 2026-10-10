@@ -55,6 +55,9 @@ pub struct WorkflowRecord {
     /// 步骤列表（WorkflowStep 的 JSON 数组，形状由前端拥有）
     #[serde(default)]
     pub steps: Vec<Value>,
+    /// 任一步骤等待超时/窗格丢失时中止整个运行（默认 true）
+    #[serde(default = "default_stop_on_error")]
+    pub stop_on_error: bool,
 }
 
 fn default_execution() -> String {
@@ -63,6 +66,10 @@ fn default_execution() -> String {
 
 fn default_step_interval_ms() -> i64 {
     500
+}
+
+fn default_stop_on_error() -> bool {
+    true
 }
 
 /// SSH 档案分组记录

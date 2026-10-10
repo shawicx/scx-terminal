@@ -248,6 +248,7 @@ describe('config store diff-flush integration', () => {
         config.store.workflows.push({
             id: 'wf1', name: 'deploy', execution: 'joined', stepIntervalMs: 500,
             steps: [{ id: 's1', kind: 'raw', command: 'git pull' }],
+            stopOnError: true,
         })
         await new Promise(resolve => setTimeout(resolve, 700))
         expect(mockInvoke).toHaveBeenCalledWith('workflow_create', {

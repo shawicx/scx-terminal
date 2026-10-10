@@ -5,14 +5,14 @@
  */
 import { ensureHistoryLoaded, getHistorySnapshot, recordHistory } from '@/services/history'
 import { PromptTracker, type LogicalLine } from './promptTracker'
-import { computeSuggestions, type DirEntry, type QuickCommandSource } from './suggestionEngine'
+import { computeSuggestions, type DirEntry, type QuickCommandSource, type WorkflowSource } from './suggestionEngine'
 import type { Suggestion, SuggestionContext } from './types'
 
 export interface SuggestionsRuntimeConfig {
     enabled: boolean
     trigger: 'auto' | 'manual'
     delay: number
-    sources: { history: boolean, quickCommands: boolean, paths: boolean }
+    sources: { history: boolean, quickCommands: boolean, paths: boolean, workflows: boolean }
 }
 
 export interface SuggestionsUiState {
@@ -37,9 +37,11 @@ export interface SuggestionsControllerHost {
     sshId (): string | null
     listDir (dir: string): Promise<DirEntry[]>
     quickCommands (): QuickCommandSource[]
+    workflows (): WorkflowSource[]
     /** 动作 */
     sendInput (text: string): void
     openQuickCommandForm (quickCommandId: string): void
+    openWorkflowForm (workflowId: string): void
     /** UI 状态回调（TerminalPane 持 ref 驱动 SuggestionMenu） */
     onState (state: SuggestionsUiState): void
 }
@@ -198,6 +200,20 @@ export class SuggestionsController {
             return
         }
         const typed = this.promptTracker.getTypedLine()
+        if (suggestion.kind === 'workflow') {
+            // 工作流不接受为文本：清空当前输入行后打开工作流选择器（有参直接进填参态）
+            if (typed) {
+                let clear = ''
+                if (typed.cursorOffset < typed.text.length) {
+                    clear += '\x05'
+                }
+                clear += '\x7f'.repeat(typed.text.length)
+                this.host.sendInput(clear)
+            }
+            this.host.openWorkflowForm(suggestion.workflowId!)
+            this.close(false)
+            return
+        }
         if (suggestion.kind === 'quickCommand' && suggestion.hasParams) {
             // 清空当前输入行（逐退格，不用 Ctrl+U 避免 kill ring 污染），再进填参表单；
             // 表单确认后经 sendText 整行发送 = 「整行替换后发送」
@@ -308,6 +324,7 @@ export class SuggestionsController {
             const items = await computeSuggestions(context, {
                 history: config.sources.history ? getHistorySnapshot() : undefined,
                 quickCommands: config.sources.quickCommands ? this.host.quickCommands() : undefined,
+                workflows: config.sources.workflows ? this.host.workflows() : undefined,
                 listDir: config.sources.paths ? dir => this.host.listDir(dir) : undefined,
             })
             this.setState({ open: items.length > 0, items, selectedIndex: 0 })

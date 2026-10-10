@@ -15,8 +15,8 @@ pub(super) fn workflow_create_internal(state: &ConfigState, workflow: &WorkflowR
     let steps = serde_json::to_string(&workflow.steps)
         .map_err(|e| format!("failed to serialize workflow {} steps: {e}", workflow.id))?;
     tx.execute(
-        "INSERT INTO workflows (id, name, description, execution, step_interval_ms, sort_order, steps)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO workflows (id, name, description, execution, step_interval_ms, sort_order, steps, stop_on_error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         rusqlite::params![
             workflow.id,
             workflow.name,
@@ -24,7 +24,8 @@ pub(super) fn workflow_create_internal(state: &ConfigState, workflow: &WorkflowR
             workflow.execution,
             workflow.step_interval_ms,
             sort_order,
-            steps
+            steps,
+            workflow.stop_on_error
         ],
     )
     .map_err(|e| format!("failed to create workflow {}: {e}", workflow.id))?;
@@ -40,13 +41,14 @@ pub(super) fn workflow_update_internal(state: &ConfigState, workflow: &WorkflowR
         .map_err(|e| format!("failed to serialize workflow {} steps: {e}", workflow.id))?;
     let changed = tx
         .execute(
-            "UPDATE workflows SET name = ?1, description = ?2, execution = ?3, step_interval_ms = ?4, steps = ?5 WHERE id = ?6",
+            "UPDATE workflows SET name = ?1, description = ?2, execution = ?3, step_interval_ms = ?4, steps = ?5, stop_on_error = ?6 WHERE id = ?7",
             rusqlite::params![
                 workflow.name,
                 workflow.description,
                 workflow.execution,
                 workflow.step_interval_ms,
                 steps,
+                workflow.stop_on_error,
                 workflow.id
             ],
         )

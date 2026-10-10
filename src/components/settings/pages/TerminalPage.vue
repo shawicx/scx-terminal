@@ -249,6 +249,10 @@ const outputNewlinesModel = newlineModel('outputNewlines')
                 <Switch v-model="store.terminal.suggestions.sources.paths" />
             </div>
             <div class="settings-card-row">
+                <Label>{{ t('settings.suggestionsSourceWorkflows') }}</Label>
+                <Switch v-model="store.terminal.suggestions.sources.workflows" />
+            </div>
+            <div class="settings-card-row">
                 <Label>{{ t('settings.suggestionsHistoryLabel') }}</Label>
                 <Button variant="outline" size="sm" @click="onClearHistory">{{ t('settings.clear') }}</Button>
             </div>

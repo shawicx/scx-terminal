@@ -139,6 +139,20 @@ const tabApi = {
         rootContainer.value?.sendTextToLeaf(activeLeafId.value, text, execute),
     getActivePaneCwd: async (): Promise<string | null> =>
         (await rootContainer.value?.getLeafCwd(activeLeafId.value)) ?? null,
+    captureActivePane: () => {
+        const leafId = activeLeafId.value
+        const container = rootContainer.value
+        const key = container?.getLeafPaneKey(leafId)
+        if (!container || !key) {
+            return null
+        }
+        return {
+            key,
+            sendText: (text: string, execute?: boolean) => container.sendTextToLeaf(leafId, text, execute),
+            tapOutput: (cb: (chunk: string) => void) => container.tapLeafOutput(leafId, cb) ?? (() => {}),
+            isAlive: () => container.getLeafPaneKey(leafId) === key,
+        }
+    },
 }
 
 watch(() => props.tabActive, active => {

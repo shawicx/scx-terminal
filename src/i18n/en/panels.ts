@@ -155,6 +155,15 @@ export const panels = {
     palette: {
         placeholder: 'Type a command name…',
         noResults: 'No matching commands',
+        workflowRunRunning: 'Running…',
+        workflowRunCompleted: 'Completed',
+        workflowRunCancelled: 'Cancelled',
+        workflowRunFailed: 'Failed: step {step} timed out',
+        workflowRunAborted: 'Aborted (pane closed)',
+        workflowRunStep: 'Current step',
+        workflowRunElapsed: 'Elapsed',
+        workflowRunEscHint: 'Esc to go back (run continues) · Cancel stops remaining steps',
+        workflowRunCancel: 'Cancel run',
     },
 
     tabSwitcher: {

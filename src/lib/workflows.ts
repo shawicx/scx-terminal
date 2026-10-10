@@ -3,7 +3,7 @@
  *              复用快捷命令的 {{参数}} 占位符体系（parseQuickCommandParams/renderQuickCommand）。
  */
 import { nanoid } from 'nanoid'
-import type { QuickCommand, Workflow, WorkflowStep } from '@/stores/config'
+import type { QuickCommand, StepCapture, Workflow, WorkflowStep } from '@/stores/config'
 import { parseQuickCommandParams, previewQuickCommand, renderQuickCommand } from '@/lib/quickCommands'
 
 /**
@@ -20,6 +20,7 @@ export function buildWorkflow (): Workflow {
         execution: 'joined',
         stepIntervalMs: 500,
         steps: [],
+        stopOnError: true,
     }
 }
 
@@ -162,4 +163,144 @@ export function previewWorkflow (workflow: Workflow, quickCommands: QuickCommand
     }
     const flat = parts.filter(part => part !== '').join(' && ')
     return flat.length > maxLength ? flat.slice(0, maxLength - 1) + '…' : flat
+}
+
+/** ANSI 转义序列剥离：CSI（ESC[...终字节）与 OSC（ESC]...BEL/ST）两段式 */
+// eslint-disable-next-line no-control-regex -- ESC/BEL 本身即控制字符，匹配转义序列必须使用
+const ANSI_PATTERN = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g
+
+/**
+ * @description 剥离 PTY 输出中的 ANSI 转义序列（CSI/OSC），得到可匹配的纯文本
+ * @param text 原始输出 chunk
+ * @returns string 纯文本
+ *
+ * @example stripAnsi('\x1b[32mok\x1b[0m') // 'ok'
+ *
+ */
+export function stripAnsi (text: string): string {
+    return text.replace(ANSI_PATTERN, '')
+}
+
+/**
+ * @description 解析步骤占位符取值：优先级 运行参数 > 已捕获变量 > 步骤预设
+ *              （捕获变量优先于预设，使后续步骤能覆盖同名默认值）
+ * @param step 工作流步骤
+ * @param captured 运行中已捕获的变量上下文
+ * @param runParams 运行时填参值
+ * @returns Record<string, string> 该步骤的取值表
+ *
+ * @example resolveStepValues(step, { v: '1' }, { v: '2' }).v // '2'
+ *
+ */
+export function resolveStepValues (
+    step: WorkflowStep,
+    captured: Record<string, string>,
+    runParams: Record<string, string>,
+): Record<string, string> {
+    return { ...step.paramValues, ...captured, ...runParams }
+}
+
+/**
+ * @description expect 等待匹配：pattern 缺省时用学习到的提示符正则；两者皆无返回 false
+ *              （由调用方降级为固定超时）
+ * @param accumulated 本步发送后累计的纯文本输出
+ * @param pattern 用户填写的匹配正则源文本；null = 未填
+ * @param promptRegex 学习到的提示符正则源文本；null = 不可用
+ * @returns boolean 是否命中
+ *
+ * @example matchExpect('done\n$ ', null, '^\\$ ') // true
+ *
+ */
+export function matchExpect (accumulated: string, pattern: string | null, promptRegex: string | null): boolean {
+    const source = pattern ?? promptRegex
+    if (source === null || source === '') {
+        return false
+    }
+    try {
+        return new RegExp(source, 'm').test(accumulated)
+    } catch {
+        // 非法正则按不命中处理（编辑器保存前有 validateWorkflowV2 拦截，此处兜底）
+        return false
+    }
+}
+
+/**
+ * @description 从本步输出窗口提取捕获变量：有 pattern 取首个捕获组（无捕获组取整段
+ *              匹配），无 pattern 取整段 trim
+ * @param accumulated 本步发送后累计的纯文本输出
+ * @param capture 捕获定义
+ * @returns string 提取值（无匹配返回空串）
+ *
+ * @example extractCapture('version 1.2.3', { var: 'v', pattern: 'version (\\S+)' }) // '1.2.3'
+ *
+ */
+export function extractCapture (accumulated: string, capture: StepCapture): string {
+    if (!capture.pattern) {
+        return accumulated.trim()
+    }
+    try {
+        const match = new RegExp(capture.pattern, 'm').exec(accumulated)
+        if (!match) {
+            return ''
+        }
+        return match[1] ?? match[0]
+    } catch {
+        return ''
+    }
+}
+
+/** 二期校验错误码（编辑器据此翻译展示） */
+export type WorkflowValidationError =
+    | { code: 'joinedNoWait'; stepIndex: number }
+    | { code: 'badExpectPattern'; stepIndex: number }
+    | { code: 'badExpectTimeout'; stepIndex: number }
+    | { code: 'badFixedDelay'; stepIndex: number }
+    | { code: 'badCaptureVar'; stepIndex: number }
+    | { code: 'badCapturePattern'; stepIndex: number }
+
+/**
+ * @description 校验工作流二期配置（编辑器保存前调用）：expect/capture 正则合法性、
+ *              捕获变量名合法性（须匹配 \w-，防注入占位符命名空间）、joined 模式下
+ *              不允许 wait/capture（与合并语义冲突）；返回错误码由调用方翻译
+ * @param workflow 工作流
+ * @returns WorkflowValidationError[] 错误列表（空 = 通过）
+ *
+ * @example validateWorkflowV2(workflow) // []
+ *
+ */
+export function validateWorkflowV2 (workflow: Workflow): WorkflowValidationError[] {
+    const errors: WorkflowValidationError[] = []
+    for (const [index, step] of workflow.steps.entries()) {
+        if (workflow.execution === 'joined' && (step.wait || step.capture)) {
+            errors.push({ code: 'joinedNoWait', stepIndex: index })
+        }
+        if (step.wait?.kind === 'expect') {
+            if (step.wait.pattern) {
+                try {
+                    new RegExp(step.wait.pattern)
+                } catch {
+                    errors.push({ code: 'badExpectPattern', stepIndex: index })
+                }
+            }
+            if (step.wait.timeoutMs <= 0) {
+                errors.push({ code: 'badExpectTimeout', stepIndex: index })
+            }
+        }
+        if (step.wait?.kind === 'fixed' && step.wait.ms < 0) {
+            errors.push({ code: 'badFixedDelay', stepIndex: index })
+        }
+        if (step.capture) {
+            if (!/^[\w-]+$/.test(step.capture.var)) {
+                errors.push({ code: 'badCaptureVar', stepIndex: index })
+            }
+            if (step.capture.pattern) {
+                try {
+                    new RegExp(step.capture.pattern)
+                } catch {
+                    errors.push({ code: 'badCapturePattern', stepIndex: index })
+                }
+            }
+        }
+    }
+    return errors
 }

@@ -22,9 +22,9 @@ const emit = defineEmits<{
 }>()
 
 const branchEl = ref<HTMLElement>()
-type PaneHandle = { focus (): void, copy (): void, paste (): void, clear (): void, find (): void, triggerSuggestions (): void, toggleForward (): void, getWorkingDirectory (): Promise<string | null>, sendText (text: string, execute?: boolean): void }
+type PaneHandle = { focus (): void, copy (): void, paste (): void, clear (): void, find (): void, triggerSuggestions (): void, toggleForward (): void, getWorkingDirectory (): Promise<string | null>, sendText (text: string, execute?: boolean): void, paneKey (): string, tapOutput (cb: (chunk: string) => void): () => void }
 const paneRefs = new Map<string, PaneHandle>()
-type ContainerHandle = { focusLeaf (id: string): void, invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find' | 'triggerSuggestions' | 'toggleForward'): void, getLeafCwd (id: string): Promise<string | null | undefined>, sendTextToLeaf (id: string, text: string, execute?: boolean): void }
+type ContainerHandle = { focusLeaf (id: string): void, invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find' | 'triggerSuggestions' | 'toggleForward'): void, getLeafCwd (id: string): Promise<string | null | undefined>, sendTextToLeaf (id: string, text: string, execute?: boolean): void, getLeafPaneKey (id: string): string | null | undefined, tapLeafOutput (id: string, cb: (chunk: string) => void): (() => void) | undefined }
 const containerRefs = new Map<string, ContainerHandle>()
 
 function registerPane (id: string, comp: unknown) {
@@ -97,7 +97,52 @@ async function getLeafCwd (id: string): Promise<string | null | undefined> {
     return undefined
 }
 
-defineExpose({ focusLeaf, invokeOnLeaf, getLeafCwd, sendTextToLeaf })
+/**
+ * @description 查询叶窗格的稳定标识（工作流运行绑定校验用；递归下钻子容器）
+ * @param id 叶节点 id
+ * @returns string | null | undefined key；null = 叶存在但会话未启动；undefined = 叶不在本子树
+ *
+ * @example getLeafPaneKey(activeLeafId)
+ *
+ */
+function getLeafPaneKey (id: string): string | null | undefined {
+    const pane = paneRefs.get(id)
+    if (pane) {
+        return pane.paneKey()
+    }
+    for (const container of containerRefs.values()) {
+        const key = container.getLeafPaneKey(id)
+        if (key !== undefined) {
+            return key
+        }
+    }
+    return undefined
+}
+
+/**
+ * @description 订阅叶窗格会话的输出流（工作流 expect/捕获用；递归下钻子容器）
+ * @param id 叶节点 id
+ * @param cb 输出 chunk 回调
+ * @returns (() => void) | undefined 退订函数；undefined = 叶不在本子树
+ *
+ * @example tapLeafOutput(activeLeafId, chunk => ...)
+ *
+ */
+function tapLeafOutput (id: string, cb: (chunk: string) => void): (() => void) | undefined {
+    const pane = paneRefs.get(id)
+    if (pane) {
+        return pane.tapOutput(cb)
+    }
+    for (const container of containerRefs.values()) {
+        const stop = container.tapLeafOutput(id, cb)
+        if (stop !== undefined) {
+            return stop
+        }
+    }
+    return undefined
+}
+
+defineExpose({ focusLeaf, invokeOnLeaf, getLeafCwd, sendTextToLeaf, getLeafPaneKey, tapLeafOutput })
 
 function onSpannerResize (index: number, delta: number) {
     const node = props.node.type === 'branch' ? props.node : null

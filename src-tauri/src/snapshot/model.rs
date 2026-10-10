@@ -96,6 +96,13 @@ pub struct WorkflowRow {
     pub step_interval_ms: i64,
     pub sort_order: i64,
     pub steps: serde_json::Value,
+    /// v7 新增；default 使 v6 备份缺字段仍可导入
+    #[serde(default = "default_stop_on_error")]
+    pub stop_on_error: bool,
+}
+
+fn default_stop_on_error() -> bool {
+    true
 }
 
 /// config.db 纳入实体的行级全量

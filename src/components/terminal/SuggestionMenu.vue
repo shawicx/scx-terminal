@@ -5,7 +5,7 @@
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Folder, History as HistoryIcon, Star } from 'lucide-vue-next'
+import { Folder, History as HistoryIcon, Star, Workflow as WorkflowIcon } from 'lucide-vue-next'
 import type { Suggestion } from '@/lib/suggestions/types'
 import { panelEnter } from '@/lib/motion'
 
@@ -53,14 +53,14 @@ const menuStyle = computed(() => ({
 
 /**
  * @description 建议类型对应的图标组件
- * @param kind 建议类型（history/quickCommand/path）
- * @returns typeof HistoryIcon | typeof Star | typeof Folder 图标组件
+ * @param kind 建议类型（history/quickCommand/path/workflow）
+ * @returns 图标组件
  *
  * @example iconFor('history') // HistoryIcon
  *
  */
 function iconFor (kind: Suggestion['kind']) {
-    return kind === 'history' ? HistoryIcon : kind === 'quickCommand' ? Star : Folder
+    return kind === 'history' ? HistoryIcon : kind === 'quickCommand' ? Star : kind === 'workflow' ? WorkflowIcon : Folder
 }
 </script>
 

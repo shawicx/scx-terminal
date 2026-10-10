@@ -1,15 +1,19 @@
 <script setup lang="ts">
 /**
  * @description 工作流选择器（overlay）：搜索/选中/执行工作流。有占位参数时进入填参态
- *              （默认值取步骤级 paramValues 预设），确认后经 workflowRunner 发送。
- *              交互骨架克隆自 QuickCommandPalette（扁平列表，无分组小节）。
+ *              （默认值取步骤级 paramValues 预设），确认后经 workflowRunService 执行；
+ *              二期增加进度态——sequential 运行期间展示当前步骤/耗时/取消，终态短暂
+ *              展示后自动关闭。交互骨架克隆自 QuickCommandPalette（扁平列表）。
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConfigStore, type Workflow } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
 import { closeWorkflowPalette, pendingWorkflowId, workflowPaletteOpen } from '@/services/workflowPalette'
-import { runWorkflow } from '@/services/workflowRunner'
+import {
+    cancelWorkflowRun, isWorkflowRunning, runWorkflowV2,
+    type WorkflowRun,
+} from '@/services/workflowRunService'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { fuzzyMatch } from '@/lib/utils/fuzzy'
 import { collectWorkflowParams, previewWorkflow } from '@/lib/workflows'
@@ -31,6 +35,34 @@ let exitTween: ReturnType<typeof overlayExit> | null = null
 const editing = ref<Workflow | null>(null)
 const paramValues = ref<Record<string, string>>({})
 const firstParamInputEl = ref<HTMLInputElement>()
+/** 进度态跟踪的运行记录（registry 内对象的响应式引用）；null = 非进度态 */
+const progressRun = ref<WorkflowRun | null>(null)
+/** 进度态已结束（短暂展示终态，Esc/点击关闭前为 true） */
+const progressSettled = ref(false)
+let progressDismissTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 耗时滚动时钟（运行中每秒跳动，驱动 progressElapsed 重算） */
+const nowTick = ref(Date.now())
+watch(() => progressRun.value?.status === 'running', running => {
+    if (running) {
+        const timer = setInterval(() => {
+            nowTick.value = Date.now()
+            if (progressRun.value?.status !== 'running') {
+                clearInterval(timer)
+            }
+        }, 1000)
+    }
+})
+
+/** 进度态耗时（秒） */
+const progressElapsed = computed(() => {
+    const run = progressRun.value
+    if (!run) {
+        return 0
+    }
+    void nowTick.value
+    return Math.round(((run.endedAt ?? nowTick.value) - run.startedAt) / 100) / 10
+})
 
 interface VisibleItem {
     workflow: Workflow
@@ -121,6 +153,12 @@ function finishClose (): void {
     query.value = ''
     editing.value = null
     paramValues.value = {}
+    progressRun.value = null
+    progressSettled.value = false
+    if (progressDismissTimer) {
+        clearTimeout(progressDismissTimer)
+        progressDismissTimer = null
+    }
 }
 
 /**
@@ -166,7 +204,8 @@ function enterFillParams (workflow: Workflow): void {
 }
 
 /**
- * @description 渲染步骤并按执行模式发送（joined 合并 / sequential 逐步），随后关闭选择器
+ * @description 执行工作流并进入进度态：joined（瞬时完成）直接关闭；sequential 跟踪
+ *              运行记录展示当前步骤/耗时/取消，终态展示 1.5s 后自动关闭
  * @param workflow 目标工作流
  * @returns Promise<void>
  *
@@ -174,8 +213,89 @@ function enterFillParams (workflow: Workflow): void {
  *
  */
 async function send (workflow: Workflow): Promise<void> {
-    close()
-    await runWorkflow(workflow, config.store.quickCommands, paramValues.value)
+    const params = { ...paramValues.value }
+    if (workflow.execution === 'joined') {
+        close()
+        await runWorkflowV2(workflow, config.store.quickCommands, params)
+        return
+    }
+    editing.value = null
+    paramValues.value = {}
+    progressSettled.value = false
+    progressRun.value = null
+    // 启动运行（不 await 完成）；注册表条目可能晚于本帧（无终端标签时先开终端，
+    // ensureTerminalTab 有秒级等待），轮询最多 3.5s 取运行记录进入进度态
+    const running = runWorkflowV2(workflow, config.store.quickCommands, params)
+    const run = await waitForRunEntry(workflow.id, 3500)
+    if (!run) {
+        // 未能启动（无终端/窗格被占）：等执行结果兜底后回到选择态
+        await running
+        finishClose()
+        return
+    }
+    progressRun.value = run
+    void running.then(() => {
+        progressSettled.value = true
+        progressDismissTimer = setTimeout(() => {
+            progressDismissTimer = null
+            if (progressRun.value?.status !== 'running') {
+                close()
+            }
+        }, 1500)
+    })
+}
+
+/**
+ * @description 轮询等待工作流的运行记录出现在注册表（运行启动含开终端的秒级等待）
+ * @param workflowId 工作流 id
+ * @param timeoutMs 最长等待
+ * @returns Promise<WorkflowRun | null> 运行记录；超时返回 null
+ *
+ * @example await waitForRunEntry('wf-1', 3500)
+ *
+ */
+async function waitForRunEntry (workflowId: string, timeoutMs: number): Promise<WorkflowRun | null> {
+    const started = Date.now()
+    for (;;) {
+        const run = isWorkflowRunning(workflowId)
+        if (run) {
+            return run
+        }
+        if (Date.now() - started >= timeoutMs) {
+            return null
+        }
+        await new Promise(resolve => setTimeout(resolve, 100))
+    }
+}
+
+/**
+ * @description 取消进度态跟踪的运行
+ * @returns void
+ *
+ * @example cancelProgressRun()
+ *
+ */
+function cancelProgressRun (): void {
+    const run = progressRun.value
+    if (run && run.status === 'running') {
+        cancelWorkflowRun(run.id)
+    }
+}
+
+/**
+ * @description 终态状态文案映射
+ * @param run 运行记录
+ * @returns string 文案
+ *
+ */
+function runStatusText (run: WorkflowRun): string {
+    switch (run.status) {
+        case 'completed': return t('palette.workflowRunCompleted')
+        case 'cancelled': return t('palette.workflowRunCancelled')
+        case 'failed': return t('palette.workflowRunFailed', { step: run.note.split(':')[1] ?? '' })
+        case 'aborted': return t('palette.workflowRunAborted')
+        default: return t('palette.workflowRunRunning')
+    }
 }
 
 /**
@@ -186,7 +306,7 @@ async function send (workflow: Workflow): Promise<void> {
  */
 function pick (index: number): void {
     const item = visibleItems.value[index]
-    if (!item) {
+    if (!item || isWorkflowRunning(item.workflow.id)) {
         return
     }
     if (collectWorkflowParams(item.workflow.steps, config.store.quickCommands).length) {
@@ -211,6 +331,10 @@ function onInputKeydown (event: KeyboardEvent): void {
     } else if (event.key === 'Enter') {
         event.preventDefault()
         pick(selectedIndex.value)
+    } else if (event.key.toLowerCase() === 'w' && (event.metaKey || event.ctrlKey) && event.shiftKey) {
+        // toggle closed with the same combo that opened it
+        event.preventDefault()
+        close()
     }
 }
 
@@ -250,7 +374,33 @@ watch(workflowPaletteOpen, value => {
     <Teleport to="body">
         <div v-if="workflowPaletteOpen" ref="backdropEl" class="palette-backdrop" @mousedown.self="close">
             <div ref="panelEl" class="palette">
-                <template v-if="!editing">
+                <template v-if="progressRun">
+                    <div class="palette-fill-header">
+                        <div class="palette-fill-title">{{ progressRun.workflowName }}</div>
+                        <div class="wf-progress-status">{{ runStatusText(progressRun) }}</div>
+                    </div>
+                    <div class="palette-fill-body">
+                        <div class="wf-progress-step">
+                            <span class="wf-progress-label">{{ t('palette.workflowRunStep') }}</span>
+                            <span class="wf-progress-value">{{ progressRun.currentStepIndex + 1 }} / {{ progressRun.totalSteps }}</span>
+                        </div>
+                        <div class="wf-progress-step">
+                            <span class="wf-progress-label">{{ t('palette.workflowRunElapsed') }}</span>
+                            <span class="wf-progress-value">{{ progressElapsed }}s</span>
+                        </div>
+                    </div>
+                    <div class="palette-fill-footer wf-progress-footer">
+                        <span v-if="!progressSettled">{{ t('palette.workflowRunEscHint') }}</span>
+                        <button
+                            v-if="progressRun.status === 'running'"
+                            class="palette-empty-action wf-progress-cancel"
+                            @click="cancelProgressRun"
+                        >
+                            {{ t('palette.workflowRunCancel') }}
+                        </button>
+                    </div>
+                </template>
+                <template v-else-if="!editing">
                     <input
                         ref="inputEl"
                         v-model="query"
@@ -273,7 +423,8 @@ watch(workflowPaletteOpen, value => {
                                 <span v-if="item.description" class="palette-item-description">{{ item.description }}</span>
                                 <span class="palette-item-preview">{{ item.preview }}</span>
                             </span>
-                            <span class="palette-item-hotkey">{{ item.workflow.execution === 'joined' ? '&&' : '⇥' }}</span>
+                            <span v-if="isWorkflowRunning(item.workflow.id)" class="palette-item-hotkey wf-running-badge">▶</span>
+                            <span v-else class="palette-item-hotkey">{{ item.workflow.execution === 'joined' ? '&&' : '⇥' }}</span>
                         </button>
                         <div v-if="visibleItems.length === 0" class="palette-empty">
                             <span>{{ config.store.workflows.length ? t('palette.noResults') : t('settings.workflowEmptyHint') }}</span>
@@ -433,5 +584,40 @@ watch(workflowPaletteOpen, value => {
     border-top: 1px solid var(--color-border);
     color: var(--color-muted-foreground);
     font-size: 11px;
+}
+
+.wf-progress-status {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--color-muted-foreground);
+}
+
+.wf-progress-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.wf-progress-label {
+    flex-shrink: 0;
+    width: 130px;
+    color: var(--color-muted-foreground);
+    font-size: 12px;
+}
+
+.wf-progress-value {
+    font-family: var(--font-mono);
+    font-size: 13px;
+}
+
+.wf-progress-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.wf-running-badge {
+    color: var(--color-primary);
 }
 </style>

@@ -51,7 +51,7 @@ fn schema_is_versioned() {
     let state = temp_state("version");
     let conn = state.lock_conn();
     let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 }
 
 #[test]
@@ -183,16 +183,19 @@ fn workflow_crud_round_trip() {
     workflow_create_internal(&state, &WorkflowRecord {
         id: "wf1".into(), name: "deploy".into(), description: String::new(),
         execution: "joined".into(), step_interval_ms: 500, steps: steps.clone(),
+        stop_on_error: true,
     }).unwrap();
     workflow_create_internal(&state, &WorkflowRecord {
         id: "wf2".into(), name: "release".into(), description: "发布流程".into(),
         execution: "joined".into(), step_interval_ms: 500, steps: Vec::new(),
+        stop_on_error: true,
     }).unwrap();
 
-    // 更新换执行模式 + 步骤，排序不变
+    // 更新换执行模式 + 步骤 + 关 stopOnError，排序不变
     workflow_update_internal(&state, &WorkflowRecord {
         id: "wf2".into(), name: "release".into(), description: "发布流程".into(),
         execution: "sequential".into(), step_interval_ms: 800, steps: steps.clone(),
+        stop_on_error: false,
     }).unwrap();
 
     let snapshot = load_internal(&state).unwrap().unwrap();
@@ -202,6 +205,7 @@ fn workflow_crud_round_trip() {
     assert_eq!(serde_json::to_value(&snapshot.workflows[0].steps).unwrap(), serde_json::to_value(&steps).unwrap());
     assert_eq!(snapshot.workflows[1].execution, "sequential");
     assert_eq!(snapshot.workflows[1].step_interval_ms, 800);
+    assert!(!snapshot.workflows[1].stop_on_error);
 
     // 删除幂等；缺 id 更新被拒
     workflow_delete_internal(&state, "wf1").unwrap();
@@ -209,6 +213,7 @@ fn workflow_crud_round_trip() {
     assert!(workflow_update_internal(&state, &WorkflowRecord {
         id: "wf1".into(), name: "x".into(), description: String::new(),
         execution: "joined".into(), step_interval_ms: 500, steps: Vec::new(),
+        stop_on_error: true,
     }).is_err());
     assert_eq!(load_internal(&state).unwrap().unwrap().workflows.len(), 1);
 }

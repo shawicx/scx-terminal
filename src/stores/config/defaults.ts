@@ -36,7 +36,7 @@ export function defaultConfig (): ConfigStore {
                 enabled: true,
                 trigger: 'auto',
                 delay: 200,
-                sources: { history: true, quickCommands: true, paths: true },
+                sources: { history: true, quickCommands: true, paths: true, workflows: true },
             },
         },
         appearance: {
@@ -317,6 +317,7 @@ export function defaultHotkeys (): HotkeysConfig {
             // Ctrl-Space 被 macOS 输入法切换占用，mac 用 ⌥Space
             'suggestions-trigger': [['⌥-Space']],
             'quick-commands-palette': [['⌘-Shift-R']],
+            'workflows-palette': [['⌘-Shift-W']],
             // 默认不绑定（与 Tabby 一致），可在设置页快捷键录制
             'copy-current-path': [],
         }
@@ -339,6 +340,7 @@ export function defaultHotkeys (): HotkeysConfig {
         'find': [['Ctrl-Shift-F']],
         'suggestions-trigger': [['Ctrl-Space']],
         'quick-commands-palette': [['Ctrl-Shift-R']],
+        'workflows-palette': [['Ctrl-Shift-G']],
         'copy-current-path': [],
     }
 }

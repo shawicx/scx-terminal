@@ -140,6 +140,13 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         )
         .map_err(|e| format!("failed to create workflows schema: {e}"))?;
     }
+    if version < 7 {
+        conn.execute_batch(
+            "ALTER TABLE workflows ADD COLUMN stop_on_error INTEGER NOT NULL DEFAULT 1;
+             PRAGMA user_version = 7;",
+        )
+        .map_err(|e| format!("failed to add workflows stop_on_error column: {e}"))?;
+    }
     Ok(())
 }
 

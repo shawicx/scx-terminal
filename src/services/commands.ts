@@ -280,7 +280,7 @@ export function useCommands () {
             handler: () => openQuickCommandPalette(),
         })
         register({
-            id: 'open-workflows', group: 'app',
+            id: 'open-workflows', group: 'app', hotkeyId: 'workflows-palette',
             label: () => t('commands.workflows'),
             handler: () => openWorkflowPalette(),
         })

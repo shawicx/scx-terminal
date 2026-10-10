@@ -111,7 +111,7 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
 
     {
         let mut stmt = conn
-            .prepare("SELECT id, name, description, execution, step_interval_ms, steps FROM workflows ORDER BY sort_order")
+            .prepare("SELECT id, name, description, execution, step_interval_ms, steps, stop_on_error FROM workflows ORDER BY sort_order")
             .map_err(|e| format!("failed to read workflows: {e}"))?;
         let rows = stmt
             .query_map([], |row| {
@@ -122,15 +122,16 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
                     row.get::<_, String>(3)?,
                     row.get::<_, i64>(4)?,
                     row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)? != 0,
                 ))
             })
             .map_err(|e| format!("failed to read workflows: {e}"))?;
         for row in rows {
-            let (id, name, description, execution, step_interval_ms, steps_raw) =
+            let (id, name, description, execution, step_interval_ms, steps_raw, stop_on_error) =
                 row.map_err(|e| format!("failed to read workflows: {e}"))?;
             let steps = serde_json::from_str(&steps_raw)
                 .map_err(|e| format!("workflow/{id} steps is corrupted: {e}"))?;
-            snapshot.workflows.push(WorkflowRecord { id, name, description, execution, step_interval_ms, steps });
+            snapshot.workflows.push(WorkflowRecord { id, name, description, execution, step_interval_ms, steps, stop_on_error });
         }
     }
 

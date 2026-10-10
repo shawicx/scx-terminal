@@ -155,6 +155,15 @@ export const panels = {
     palette: {
         placeholder: '输入命令名称…',
         noResults: '没有匹配的命令',
+        workflowRunRunning: '运行中…',
+        workflowRunCompleted: '已完成',
+        workflowRunCancelled: '已取消',
+        workflowRunFailed: '失败：步骤 {step} 等待超时',
+        workflowRunAborted: '已中止（窗格已关闭）',
+        workflowRunStep: '当前步骤',
+        workflowRunElapsed: '耗时',
+        workflowRunEscHint: 'Esc 返回（运行继续）· 取消将停止剩余步骤',
+        workflowRunCancel: '取消运行',
     },
 
     tabSwitcher: {

@@ -21,6 +21,20 @@ export interface TerminalTabApi {
     sendTextToActivePane (text: string, execute?: boolean): void
     /** 活动窗格会话的当前工作目录（新标签继承与「复制当前路径」用） */
     getActivePaneCwd (): Promise<string | null>
+    /** 捕获活动窗格的运行句柄（工作流 expect/捕获用；绑定捕获时刻的窗格，不受后续切换影响） */
+    captureActivePane (): PaneCapture | null
+}
+
+/** 窗格运行句柄：发送/输出订阅均绑定捕获时刻的叶窗格 */
+export interface PaneCapture {
+    /** 窗格稳定标识（存活校验用） */
+    key: string
+    /** 向该窗格会话写入文本 */
+    sendText (text: string, execute?: boolean): void
+    /** 订阅该窗格会话的原始输出流；返回退订函数 */
+    tapOutput (cb: (chunk: string) => void): () => void
+    /** 窗格是否仍存活（叶未被关闭/重建） */
+    isAlive (): boolean
 }
 
 export const terminalTabApi = {

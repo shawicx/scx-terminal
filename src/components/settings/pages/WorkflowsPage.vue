@@ -1,21 +1,23 @@
 <!--
   @description 设置·工作流页：工作流主从管理（扁平列表 + 名称/描述/执行模式/步骤
-              编辑器）。步骤可引用快捷命令或内联 raw 命令；编辑器走草稿模式
-              （改动经「保存」按钮提交，不实时写入 store）。
+              编辑器）。步骤可引用快捷命令或内联 raw 命令；二期步骤支持等待策略
+              （固定延时/等待输出）与输出捕获（变量注入后续步骤）；编辑器走草稿模式
+              （改动经「保存」按钮提交，保存前经 validateWorkflowV2 校验）。
 -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import Label from '@/components/ui/Label.vue'
 import Select from '@/components/ui/Select.vue'
+import Switch from '@/components/ui/Switch.vue'
 import { useConfigStore, type Workflow, type WorkflowStep } from '@/stores/config'
 import { previewQuickCommand } from '@/lib/quickCommands'
 import {
     buildWorkflow, buildWorkflowStep, collectWorkflowParams, previewWorkflow,
-    stepCommandTemplate,
+    stepCommandTemplate, validateWorkflowV2,
 } from '@/lib/workflows'
 import { confirmAction } from '@/components/settings/useConfirmAction'
 import { useDraftEditor } from '@/components/settings/useDraftEditor'
@@ -207,7 +209,110 @@ function moveStep (index: number, offset: number): void {
  *
  */
 function removeStep (index: number): void {
+    const step = wfDraft.value?.steps[index]
+    if (step) {
+        expandedStepIds.value.delete(step.id)
+    }
     wfDraft.value?.steps.splice(index, 1)
+}
+
+// ---- 步骤高级配置（二期：等待策略 / 输出捕获） ----
+
+/** 展开高级配置的步骤 id 集合 */
+const expandedStepIds = ref(new Set<string>())
+
+/**
+ * @description 切换步骤高级配置折叠态
+ * @param step 目标步骤
+ * @returns void
+ *
+ * @example toggleStepAdvanced(step)
+ *
+ */
+function toggleStepAdvanced (step: WorkflowStep): void {
+    if (expandedStepIds.value.has(step.id)) {
+        expandedStepIds.value.delete(step.id)
+    } else {
+        expandedStepIds.value.add(step.id)
+    }
+}
+
+/** 等待策略下拉选项（'' = 默认延时） */
+const waitKindOptions = computed(() => [
+    { value: '', label: t('settings.workflowWaitDefault') },
+    { value: 'fixed', label: t('settings.workflowWaitFixed') },
+    { value: 'expect', label: t('settings.workflowWaitExpect') },
+])
+
+/** 超时策略下拉选项 */
+const onTimeoutOptions = computed(() => [
+    { value: 'abort', label: t('settings.workflowOnTimeoutAbort') },
+    { value: 'continue', label: t('settings.workflowOnTimeoutContinue') },
+])
+
+/**
+ * @description 步骤等待策略下拉的 model 工厂（每步一个 model）
+ * @param step 目标步骤
+ * @returns { get, set } 等待 kind 的读写 model（'' = 未配置）
+ *
+ * @example :model="stepWaitModel(step)"
+ *
+ */
+function stepWaitModel (step: WorkflowStep) {
+    return {
+        get: () => step.wait?.kind ?? '',
+        set: (value: string) => {
+            if (value === '') {
+                delete step.wait
+                return
+            }
+            if (value === 'fixed') {
+                step.wait = { kind: 'fixed', ms: 500 }
+            } else {
+                step.wait = { timeoutMs: 5000, onTimeout: 'abort', kind: 'expect' }
+            }
+        },
+    }
+}
+
+/**
+ * @description 启用/清除步骤输出捕获
+ * @param step 目标步骤
+ * @param enabled 是否启用
+ * @returns void
+ *
+ * @example setStepCapture(step, true)
+ *
+ */
+function setStepCapture (step: WorkflowStep, enabled: boolean): void {
+    if (enabled) {
+        step.capture = step.capture ?? { var: '' }
+    } else {
+        delete step.capture
+    }
+}
+
+/** 保存前校验错误（翻译后的文案列表；空 = 通过） */
+const draftValidationErrors = computed(() => {
+    if (!wfDraft.value) {
+        return []
+    }
+    return validateWorkflowV2(wfDraft.value).map(error =>
+        t(`settings.workflowValidation.${error.code}`, { step: error.stepIndex + 1 }))
+})
+
+/**
+ * @description 保存当前草稿：二期校验通过才提交（错误展示在编辑器底部）
+ * @returns void
+ *
+ * @example saveWorkflowDraft()
+ *
+ */
+function saveWorkflowDraft (): void {
+    if (draftValidationErrors.value.length) {
+        return
+    }
+    workflowEditor.save()
 }
 
 /**
@@ -311,19 +416,82 @@ function confirmDeleteWorkflow (workflow: Workflow): void {
                             <span class="value-hint">{{ t('settings.workflowStepsHint') }}</span>
                         </Label>
                         <div v-for="(step, index) in wfDraft.steps" :key="step.id" class="wf-step">
-                            <span class="wf-step-index">{{ index + 1 }}</span>
-                            <span class="wf-step-preview">{{ stepPreview(step) }}</span>
-                            <span class="wf-step-actions">
-                                <button class="wf-step-button" :title="t('settings.groupMoveUp')" :disabled="index === 0" @click="moveStep(index, -1)">
-                                    <ArrowUp :size="13" />
-                                </button>
-                                <button class="wf-step-button" :title="t('settings.groupMoveDown')" :disabled="index === wfDraft.steps.length - 1" @click="moveStep(index, 1)">
-                                    <ArrowDown :size="13" />
-                                </button>
-                                <button class="wf-step-button wf-step-remove" :title="t('settings.workflowStepRemove')" @click="removeStep(index)">
-                                    <Trash2 :size="13" />
-                                </button>
-                            </span>
+                            <div class="wf-step-head">
+                                <span class="wf-step-index">{{ index + 1 }}</span>
+                                <span class="wf-step-preview">{{ stepPreview(step) }}</span>
+                                <span class="wf-step-actions">
+                                    <button
+                                        class="wf-step-button"
+                                        :class="{ active: expandedStepIds.has(step.id) }"
+                                        :title="t('settings.workflowStepAdvanced')"
+                                        @click="toggleStepAdvanced(step)"
+                                    >
+                                        <component :is="expandedStepIds.has(step.id) ? ChevronDown : ChevronRight" :size="13" />
+                                    </button>
+                                    <button class="wf-step-button" :title="t('settings.groupMoveUp')" :disabled="index === 0" @click="moveStep(index, -1)">
+                                        <ArrowUp :size="13" />
+                                    </button>
+                                    <button class="wf-step-button" :title="t('settings.groupMoveDown')" :disabled="index === wfDraft.steps.length - 1" @click="moveStep(index, 1)">
+                                        <ArrowDown :size="13" />
+                                    </button>
+                                    <button class="wf-step-button wf-step-remove" :title="t('settings.workflowStepRemove')" @click="removeStep(index)">
+                                        <Trash2 :size="13" />
+                                    </button>
+                                </span>
+                            </div>
+                            <div v-if="expandedStepIds.has(step.id)" class="wf-step-advanced">
+                                <div class="wf-step-advanced-row" v-if="wfDraft.execution === 'sequential'">
+                                    <Label>
+                                        {{ t('settings.workflowWaitLabel') }}
+                                        <span class="value-hint">{{ t('settings.workflowWaitHint') }}</span>
+                                    </Label>
+                                    <Select :model="stepWaitModel(step)" :options="waitKindOptions" class="wf-advanced-select" />
+                                </div>
+                                <p v-else class="hint">{{ t('settings.workflowWaitJoinedHint') }}</p>
+                                <template v-if="step.wait?.kind === 'fixed'">
+                                    <div class="wf-step-advanced-row">
+                                        <Label>{{ t('settings.workflowWaitFixedMs') }}</Label>
+                                        <Input v-model.number="step.wait.ms" type="number" min="0" step="100" class="wf-advanced-input" />
+                                    </div>
+                                </template>
+                                <template v-if="step.wait?.kind === 'expect'">
+                                    <div class="wf-step-advanced-row">
+                                        <Label>
+                                            {{ t('settings.workflowWaitPattern') }}
+                                            <span class="value-hint">{{ t('settings.workflowWaitPatternHint') }}</span>
+                                        </Label>
+                                        <Input v-model="step.wait.pattern" class="wf-advanced-input" :placeholder="t('settings.workflowWaitPatternPlaceholder')" />
+                                    </div>
+                                    <div class="wf-step-advanced-row">
+                                        <Label>{{ t('settings.workflowWaitTimeout') }}</Label>
+                                        <Input v-model.number="step.wait.timeoutMs" type="number" min="100" step="500" class="wf-advanced-input" />
+                                    </div>
+                                    <div class="wf-step-advanced-row">
+                                        <Label>{{ t('settings.workflowOnTimeout') }}</Label>
+                                        <Select v-model="step.wait.onTimeout" :options="onTimeoutOptions" class="wf-advanced-select" />
+                                    </div>
+                                </template>
+                                <div class="wf-step-advanced-row">
+                                    <Label>
+                                        {{ t('settings.workflowCaptureLabel') }}
+                                        <span class="value-hint">{{ t('settings.workflowCaptureHint') }}</span>
+                                    </Label>
+                                    <Switch :model-value="!!step.capture" @update:model-value="(v: boolean) => setStepCapture(step, v)" />
+                                </div>
+                                <template v-if="step.capture">
+                                    <div class="wf-step-advanced-row">
+                                        <Label>{{ t('settings.workflowCaptureVar') }}</Label>
+                                        <Input v-model="step.capture.var" class="wf-advanced-input" placeholder="version" />
+                                    </div>
+                                    <div class="wf-step-advanced-row">
+                                        <Label>
+                                            {{ t('settings.workflowCapturePattern') }}
+                                            <span class="value-hint">{{ t('settings.workflowCapturePatternHint') }}</span>
+                                        </Label>
+                                        <Input v-model="step.capture.pattern" class="wf-advanced-input" placeholder="version (\S+)" />
+                                    </div>
+                                </template>
+                            </div>
                         </div>
                         <div class="wf-step-add">
                             <Select
@@ -352,9 +520,19 @@ function confirmDeleteWorkflow (workflow: Workflow): void {
                         <p v-if="draftParams.length" class="hint wf-params-hint">
                             {{ t('settings.quickCommandParams', { names: draftParams.join(', ') }) }}
                         </p>
+                        <p v-for="error in draftValidationErrors" :key="error" class="hint wf-validation-error">
+                            {{ error }}
+                        </p>
+                    </div>
+                    <div class="settings-card-row">
+                        <Label>
+                            {{ t('settings.workflowStopOnError') }}
+                            <span class="value-hint">{{ t('settings.workflowStopOnErrorHint') }}</span>
+                        </Label>
+                        <Switch v-model="wfDraft.stopOnError" />
                     </div>
                     <div class="settings-card-row actions">
-                        <Button size="sm" :disabled="!isWfDraftDirty" @click="workflowEditor.save()">
+                        <Button size="sm" :disabled="!isWfDraftDirty" @click="saveWorkflowDraft">
                             {{ t('settings.profileSave') }}
                         </Button>
                         <Button
@@ -391,11 +569,45 @@ function confirmDeleteWorkflow (workflow: Workflow): void {
 
 .wf-step {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    gap: 4px;
     padding: 5px 8px;
     border: 1px solid var(--color-border);
     border-radius: 6px;
+}
+
+.wf-step-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.wf-step-button.active {
+    color: var(--color-primary);
+}
+
+.wf-step-advanced {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 4px 4px 26px;
+    border-top: 1px dashed var(--color-border);
+}
+
+.wf-step-advanced-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.wf-step-advanced-row > :first-child {
+    flex-shrink: 0;
+    width: 200px;
+}
+
+.wf-advanced-select,
+.wf-advanced-input {
+    width: 240px;
 }
 
 .wf-step-index {
@@ -484,5 +696,10 @@ function confirmDeleteWorkflow (workflow: Workflow): void {
 
 .wf-params-hint {
     margin: -4px 0 8px;
+}
+
+.wf-validation-error {
+    margin: 0 0 4px;
+    color: var(--color-destructive);
 }
 </style>
