@@ -115,6 +115,25 @@ pub fn fs_read_text_file (path: String) -> Result<Option<String>, String> {
     fs_read_text_file_inner(path).map_err(|e| e.to_string())
 }
 
+/// 写入文本文件（工作流 YAML 导出用；create/truncate，父目录须存在）
+///
+/// # Arguments
+///
+/// * `path` - 目标文件绝对路径（保存对话框选定）
+/// * `contents` - UTF-8 文本内容
+///
+/// # Returns
+///
+/// Result<(), String>（IO 失败返回错误信息）
+///
+/// # Examples
+///
+/// `invoke('fs_write_text_file', { path: '/tmp/wf.yml', contents: '...' })`
+#[tauri::command]
+pub fn fs_write_text_file (path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents).map_err(|e| format!("failed to write {path}: {e}"))
+}
+
 /// 目录浏览（SFTP 本地栏）：含大小/修改时间；错误显式返回（UI 呈现 banner）
 ///
 /// # Arguments

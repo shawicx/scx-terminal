@@ -5,7 +5,7 @@ import { useConfigStore, type QuickCommand, type TerminalProfile, type Workflow 
 import { terminalTabApi } from './terminalTabsApi'
 import { openQuickCommandPalette } from './quickCommandPalette'
 import { openWorkflowPalette } from './workflowPalette'
-import { runWorkflow } from './workflowRunner'
+import { runWorkflowV2 as runWorkflow } from './workflowRunService'
 import { openTabSwitcher } from './tabSwitcher'
 import { hotkeys } from './hotkeysSingleton'
 import { defaultDarkColorScheme, defaultLightColorScheme } from '@/lib/colorSchemes'

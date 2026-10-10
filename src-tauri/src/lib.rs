@@ -97,6 +97,7 @@ pub fn run() {
             forward::forward_list_all,
             fsutil::fs_list_dir,
             fsutil::fs_read_text_file,
+            fsutil::fs_write_text_file,
             fsutil::fs_browse_dir,
             fsutil::fs_home_dir,
             background::background_image_set,

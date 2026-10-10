@@ -10,6 +10,8 @@ import { nanoid } from 'nanoid'
 import type { QuickCommand, StepCapture, StepWait, Workflow, WorkflowStep } from '@/stores/config'
 import { useTabsStore } from '@/stores/tabs'
 import { terminalTabApi, type PaneCapture } from '@/services/terminalTabsApi'
+import { sendAppNotification } from '@/services/notifications'
+import i18n from '@/i18n'
 import {
     buildWorkflowCommand, extractCapture, matchExpect,
     resolveStepValues, stepCommandTemplate, stripAnsi,
@@ -132,6 +134,32 @@ function renderStep (
     }
     const rendered = renderQuickCommand(template, resolveStepValues(step, captured, runParams))
     return rendered.trim() === '' ? null : rendered
+}
+
+/**
+ * @description 运行失败/中止时发送系统通知（completed/cancelled 面板内可见，不打扰）
+ * @param run 运行记录（status/note 已置终态）
+ * @returns void
+ *
+ * @example notifyRunFailure(run)
+ *
+ */
+function notifyRunFailure (run: WorkflowRun): void {
+    const { t } = i18n.global
+    if (run.status === 'failed') {
+        const step = run.note.split(':')[1] ?? ''
+        void sendAppNotification(
+            t('palette.workflowNotifyFailedTitle'),
+            t('palette.workflowNotifyFailedBody', { name: run.workflowName, step }),
+        )
+        return
+    }
+    if (run.status === 'aborted') {
+        void sendAppNotification(
+            t('palette.workflowNotifyAbortedTitle'),
+            t('palette.workflowNotifyAbortedBody', { name: run.workflowName }),
+        )
+    }
 }
 
 /**
@@ -319,6 +347,7 @@ export async function runWorkflowV2 (
             if (!pane.isAlive()) {
                 run.status = 'aborted'
                 run.note = 'pane-lost'
+                notifyRunFailure(run)
                 return run
             }
             run.currentStepIndex = index
@@ -343,6 +372,7 @@ export async function runWorkflowV2 (
                     if (step.wait.onTimeout === 'abort' && workflow.stopOnError) {
                         run.status = 'failed'
                         run.note = `expect-timeout:${index + 1}`
+                        notifyRunFailure(run)
                         return run
                     }
                     // onTimeout=continue 或 stopOnError=false：跳过该步继续

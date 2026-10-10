@@ -51,3 +51,20 @@ export async function sendBellNotification (tabId: string, title: string, body?:
     lastSentAt.set(tabId, now)
     sendNotification({ title, body })
 }
+
+/**
+ * @description 发送应用级系统通知（非标签语义：工作流运行失败/中止等场景；不走
+ *              响铃开关与标签节流，权限不可用时静默跳过）
+ * @param title 通知标题
+ * @param body 通知正文（由调用方本地化）
+ * @returns Promise<void>
+ *
+ * @example await sendAppNotification('工作流失败', '「部署」步骤 2 等待超时')
+ *
+ */
+export async function sendAppNotification (title: string, body: string): Promise<void> {
+    if (!(await ensureNotificationPermission())) {
+        return
+    }
+    sendNotification({ title, body })
+}

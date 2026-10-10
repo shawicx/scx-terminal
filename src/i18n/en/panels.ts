@@ -164,6 +164,10 @@ export const panels = {
         workflowRunElapsed: 'Elapsed',
         workflowRunEscHint: 'Esc to go back (run continues) · Cancel stops remaining steps',
         workflowRunCancel: 'Cancel run',
+        workflowNotifyFailedTitle: 'Workflow failed',
+        workflowNotifyFailedBody: '"{name}" timed out waiting for output at step {step}',
+        workflowNotifyAbortedTitle: 'Workflow aborted',
+        workflowNotifyAbortedBody: 'The target pane of "{name}" was closed',
     },
 
     tabSwitcher: {

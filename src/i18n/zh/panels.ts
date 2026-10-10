@@ -164,6 +164,10 @@ export const panels = {
         workflowRunElapsed: '耗时',
         workflowRunEscHint: 'Esc 返回（运行继续）· 取消将停止剩余步骤',
         workflowRunCancel: '取消运行',
+        workflowNotifyFailedTitle: '工作流运行失败',
+        workflowNotifyFailedBody: '「{name}」步骤 {step} 等待输出超时',
+        workflowNotifyAbortedTitle: '工作流已中止',
+        workflowNotifyAbortedBody: '「{name}」的目标窗格已关闭',
     },
 
     tabSwitcher: {

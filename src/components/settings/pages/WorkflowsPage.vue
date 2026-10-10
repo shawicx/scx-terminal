@@ -1,13 +1,14 @@
 <!--
   @description 设置·工作流页：工作流主从管理（扁平列表 + 名称/描述/执行模式/步骤
               编辑器）。步骤可引用快捷命令或内联 raw 命令；二期步骤支持等待策略
-              （固定延时/等待输出）与输出捕获（变量注入后续步骤）；编辑器走草稿模式
-              （改动经「保存」按钮提交，保存前经 validateWorkflowV2 校验）。
+              （固定延时/等待输出）与输出捕获（变量注入后续步骤）；三期支持 YAML
+              导入导出（导出解引用快捷命令为内联命令，导入一律新 id）；编辑器走
+              草稿模式（改动经「保存」按钮提交，保存前经 validateWorkflowV2 校验）。
 -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Download, Plus, Trash2, Upload } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import Label from '@/components/ui/Label.vue'
@@ -19,8 +20,10 @@ import {
     buildWorkflow, buildWorkflowStep, collectWorkflowParams, previewWorkflow,
     stepCommandTemplate, validateWorkflowV2,
 } from '@/lib/workflows'
+import { buildImportedWorkflow, WorkflowYamlError, type YamlWorkflow } from '@/lib/workflowYaml'
 import { confirmAction } from '@/components/settings/useConfirmAction'
 import { useDraftEditor } from '@/components/settings/useDraftEditor'
+import { exportAllWorkflowsToFile, exportWorkflowToFile, importWorkflowsFromFile } from '@/services/workflowYamlIo'
 
 const { t } = useI18n()
 const config = useConfigStore()
@@ -345,6 +348,104 @@ function confirmDeleteWorkflow (workflow: Workflow): void {
     const name = workflow.name || previewWorkflow(workflow, store.quickCommands)
     confirmAction(t('settings.deleteConfirmBody', { name }), () => deleteWorkflow(workflow.id))
 }
+
+// ---- YAML 导入导出（三期） ----
+
+/** 页面内 notice：成功/警告（绿）/错误（红）；空串 = 无 */
+const ioNotice = ref('')
+const ioError = ref('')
+
+function resetIoMessages (): void {
+    ioNotice.value = ''
+    ioError.value = ''
+}
+
+/**
+ * @description 导出当前选中（已保存）的工作流为 YAML：保存对话框 → 写文件；
+ *              悬空引用步骤被丢弃时附警告
+ * @returns Promise<void>
+ *
+ * @example void exportSelectedWorkflow()
+ *
+ */
+async function exportSelectedWorkflow (): Promise<void> {
+    const workflow = selectedWorkflow.value
+    if (!workflow) {
+        return
+    }
+    resetIoMessages()
+    try {
+        const result = await exportWorkflowToFile(workflow, store.quickCommands)
+        if (!result) {
+            return
+        }
+        ioNotice.value = result.droppedSteps > 0
+            ? t('settings.workflowExportDropped', { count: result.droppedSteps })
+            : t('settings.workflowExportDone')
+    } catch (error) {
+        ioError.value = t('settings.workflowExportFailed', { message: String(error) })
+    }
+}
+
+/**
+ * @description 导出全部工作流为多文档 YAML（无工作流时 no-op）
+ * @returns Promise<void>
+ *
+ * @example void exportAllWorkflows()
+ *
+ */
+async function exportAllWorkflows (): Promise<void> {
+    if (!store.workflows.length) {
+        return
+    }
+    resetIoMessages()
+    try {
+        const result = await exportAllWorkflowsToFile(store.workflows, store.quickCommands)
+        if (!result) {
+            return
+        }
+        ioNotice.value = result.droppedSteps > 0
+            ? t('settings.workflowExportDropped', { count: result.droppedSteps })
+            : t('settings.workflowExportDone')
+    } catch (error) {
+        ioError.value = t('settings.workflowExportFailed', { message: String(error) })
+    }
+}
+
+/**
+ * @description 从 YAML 文件导入工作流：打开对话框 → 解析 → 预览确认（名称与步骤数）
+ *              → 构建（一律新 id，步骤全内联）入 store 并选中第一条
+ * @returns Promise<void>
+ *
+ * @example void importWorkflows()
+ *
+ */
+async function importWorkflows (): Promise<void> {
+    resetIoMessages()
+    let parsed: YamlWorkflow[]
+    try {
+        const result = await importWorkflowsFromFile()
+        if (!result) {
+            return
+        }
+        parsed = result.workflows
+    } catch (error) {
+        ioError.value = error instanceof WorkflowYamlError
+            ? t(`settings.workflowImport${error.code}`)
+            : t('settings.workflowImportFailed', { message: String(error) })
+        return
+    }
+    const summary = parsed
+        .map(item => `${item.name}（${item.steps.length}）`)
+        .join('、')
+    confirmAction(t('settings.workflowImportConfirmBody', { count: parsed.length, names: summary }), () => {
+        for (const item of parsed) {
+            store.workflows.push(buildImportedWorkflow(item))
+        }
+        selectedWorkflowId.value = store.workflows[store.workflows.length - parsed.length]?.id ?? null
+        ioNotice.value = t('settings.workflowImportDone', { count: parsed.length })
+    })
+}
 </script>
 
 <template>
@@ -357,7 +458,21 @@ function confirmDeleteWorkflow (workflow: Workflow): void {
                     <Plus :size="14" />
                     <span>{{ t('settings.workflowNew') }}</span>
                 </button>
+                <button class="profile-new-button" @click="void importWorkflows()">
+                    <Upload :size="14" />
+                    <span>{{ t('settings.workflowImport') }}</span>
+                </button>
+                <button
+                    class="profile-new-button"
+                    :disabled="!store.workflows.length"
+                    @click="void exportAllWorkflows()"
+                >
+                    <Download :size="14" />
+                    <span>{{ t('settings.workflowExportAll') }}</span>
+                </button>
             </div>
+            <p v-if="ioNotice" class="hint wf-io-notice">{{ ioNotice }}</p>
+            <p v-if="ioError" class="hint wf-validation-error">{{ ioError }}</p>
             <button
                 v-for="workflow in store.workflows"
                 :key="workflow.id"
@@ -547,6 +662,15 @@ function confirmDeleteWorkflow (workflow: Workflow): void {
                             <Trash2 :size="14" />
                             {{ t('settings.workflowDelete') }}
                         </Button>
+                        <Button
+                            v-if="!isNewWfDraft"
+                            variant="outline"
+                            size="sm"
+                            @click="void exportSelectedWorkflow()"
+                        >
+                            <Download :size="14" />
+                            {{ t('settings.workflowExport') }}
+                        </Button>
                     </div>
                 </div>
             </div>
@@ -701,5 +825,10 @@ function confirmDeleteWorkflow (workflow: Workflow): void {
 .wf-validation-error {
     margin: 0 0 4px;
     color: var(--color-destructive);
+}
+
+.wf-io-notice {
+    margin: 0 0 4px;
+    color: var(--color-primary);
 }
 </style>
