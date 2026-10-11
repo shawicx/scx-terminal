@@ -16,7 +16,80 @@ use crate::secrets::SecretsState;
 
 use super::auth::authenticate;
 use super::session::{ScxHandler, SshSession};
-use super::{SshConnectOptions, SshManager};
+use super::{SshConnectOptions, SshHop, SshManager};
+
+/// 跳板连接参数 → 完整连接选项（authenticate 按此读取密钥链/密码；中间跳不开 PTY）
+///
+/// # Arguments
+///
+/// * `hop` - 单个跳板连接参数
+///
+/// # Returns
+///
+/// SshConnectOptions（headless 语义；jump_hops 置空——链已由前端展开为扁平列表）
+///
+/// # Examples
+///
+/// `let options = hop_connect_options(&hop);`
+fn hop_connect_options(hop: &SshHop) -> SshConnectOptions {
+    SshConnectOptions {
+        id: hop.id.clone(),
+        profile_id: hop.profile_id.clone(),
+        host: hop.host.clone(),
+        port: hop.port,
+        user: hop.user.clone(),
+        auth: hop.auth.clone(),
+        key_id: hop.key_id.clone(),
+        cols: 0,
+        rows: 0,
+        headless: Some(true),
+        jump_hops: None,
+    }
+}
+
+/// 经传输层（直连 TCP 或上一跳 direct-tcpip 隧道流）建立一跳 SSH 连接
+///
+/// # Arguments
+///
+/// * `config` - 客户端配置（keepalive 等）
+/// * `app` - AppHandle（事件发射）
+/// * `forward_registry` - -R 入站路由表（注入 Handler）
+/// * `id` - 本跳连接 id（指纹/kbd 事件按它路由）
+/// * `host` / `port` - 本跳目标地址
+/// * `hostkey_reply` - 前端指纹确认应答通道
+/// * `via` - 上一跳隧道流；None = 直连 TCP
+///
+/// # Returns
+///
+/// 已建立（未认证）连接句柄；连接失败返回错误文本
+///
+/// # Examples
+///
+/// `let handle = connect_hop(config, &app, &registry, &id, "bastion", 22, reply_rx, None).await?;`
+async fn connect_hop(
+    config: Arc<client::Config>,
+    app: &AppHandle,
+    forward_registry: &std::sync::Arc<crate::forward::ForwardRegistry>,
+    id: &str,
+    host: &str,
+    port: u16,
+    hostkey_reply: oneshot::Receiver<bool>,
+    via: Option<russh::ChannelStream<client::Msg>>,
+) -> Result<client::Handle<ScxHandler>, String> {
+    let handler = ScxHandler {
+        app: app.clone(),
+        id: id.to_string(),
+        host: host.to_string(),
+        port,
+        hostkey_reply: Some(hostkey_reply),
+        forward_registry: forward_registry.clone(),
+    };
+    let connected = match via {
+        Some(stream) => client::connect_stream(config, stream, handler).await,
+        None => client::connect(config, (host, port), handler).await,
+    };
+    connected.map_err(|e| format!("could not connect to {host}:{port}: {e}"))
+}
 
 /// 建立 SSH shell 会话：连接 → 指纹确认 → 认证 → PTY + shell → 启动输出泵。
 /// 输出经 Tauri Channel 二进制流回传（复用 pty 的背压队列），前端按 `ssh_ack_data` 确认。
@@ -58,21 +131,89 @@ pub async fn ssh_connect(
         nodelay: true,
         ..Default::default()
     });
-    let handler = ScxHandler {
-        app: app.clone(),
-        id: id.clone(),
-        host: options.host.clone(),
-        port: options.port,
-        hostkey_reply: Some(reply_rx),
-        forward_registry: forward_manager.registry(),
-    };
-    let address = (options.host.as_str(), options.port);
     let kbd_waiters = manager.kbd_waiters.clone();
+    let forward_registry = forward_manager.registry();
+    let hops = options.jump_hops.clone().unwrap_or_default();
+
+    // 跳板句柄外置持有：async 块借用累积，失败时外层仍可级联回收
+    let mut jump_handles: Vec<client::Handle<ScxHandler>> = Vec::new();
 
     let connected = async {
-        let mut handle = client::connect(config, address, handler)
+        // 逐跳建连：首跳直连 TCP，后续经上一跳 direct-tcpip 隧道流 connect_stream；
+        // 中间跳认证即可（不开 PTY），错误文本带跳序号与地址便于定位
+        for (index, hop) in hops.iter().enumerate() {
+            let hop_no = index + 1;
+            let via = match jump_handles.last() {
+                Some(handle) => Some(
+                    handle
+                        .channel_open_direct_tcpip(
+                            hop.host.clone(),
+                            u32::from(hop.port),
+                            "127.0.0.1".to_string(),
+                            0,
+                        )
+                        .await
+                        .map_err(|e| {
+                            format!("jump {hop_no} ({}:{}): tunnel open failed: {e}", hop.host, hop.port)
+                        })?
+                        .into_stream(),
+                ),
+                None => None,
+            };
+            let (reply_tx, reply_rx) = oneshot::channel();
+            manager
+                .hostkey_waiters
+                .lock()
+                .unwrap()
+                .insert(hop.id.clone(), reply_tx);
+            let mut handle = connect_hop(
+                config.clone(),
+                &app,
+                &forward_registry,
+                &hop.id,
+                &hop.host,
+                hop.port,
+                reply_rx,
+                via,
+            )
             .await
-            .map_err(|e| format!("could not connect to {}:{}: {e}", options.host, options.port))?;
+            .map_err(|e| format!("jump {hop_no} ({}:{}): {e}", hop.host, hop.port))?;
+            let hop_options = hop_connect_options(hop);
+            let authed = authenticate(&mut handle, &secrets, &hop_options, &app, &kbd_waiters).await;
+            manager.hostkey_waiters.lock().unwrap().remove(&hop.id);
+            manager.kbd_waiters.lock().unwrap().remove(&hop.id);
+            authed.map_err(|e| format!("jump {hop_no} ({}:{}): {e}", hop.host, hop.port))?;
+            jump_handles.push(handle);
+        }
+
+        // 目标主机：有跳板时经最后一跳隧道，否则直连（与原有路径一致）
+        let via = match jump_handles.last() {
+            Some(handle) => Some(
+                handle
+                    .channel_open_direct_tcpip(
+                        options.host.clone(),
+                        u32::from(options.port),
+                        "127.0.0.1".to_string(),
+                        0,
+                    )
+                    .await
+                    .map_err(|e| format!("tunnel to {}:{} failed: {e}", options.host, options.port))?
+                    .into_stream(),
+            ),
+            None => None,
+        };
+        let mut handle = connect_hop(
+            config.clone(),
+            &app,
+            &forward_registry,
+            &id,
+            options.host.as_str(),
+            options.port,
+            reply_rx,
+            via,
+        )
+        .await
+        .map_err(|e| format!("could not connect to {}:{}: {e}", options.host, options.port))?;
         authenticate(&mut handle, &secrets, &options, &app, &kbd_waiters).await?;
 
         // headless：认证即完成（无 PTY/shell/数据通道），连接句柄交断连 watcher 看护
@@ -99,7 +240,18 @@ pub async fn ssh_connect(
     manager.hostkey_waiters.lock().unwrap().remove(&id);
     manager.kbd_waiters.lock().unwrap().remove(&id);
 
-    let (connection, channel) = connected?;
+    let (connection, channel) = match connected {
+        Ok((connection, channel)) => (connection, channel),
+        Err(error) => {
+            // 链上任一环失败：级联断开已建立的跳板连接后同步返回错误
+            for handle in &jump_handles {
+                let _ = handle
+                    .disconnect(russh::Disconnect::ByApplication, "Session closed", "English")
+                    .await;
+            }
+            return Err(error);
+        }
+    };
     let queue = Arc::new(PtyDataQueue::new(data_channel));
     let (mut read_half, write_half) = match channel {
         Some(channel) => {
@@ -113,6 +265,7 @@ pub async fn ssh_connect(
         id: id.clone(),
         write: tokio::sync::Mutex::new(write_half),
         connection: tokio::sync::Mutex::new(Some(connection)),
+        jumps: tokio::sync::Mutex::new(jump_handles),
         exited: Arc::new(AtomicBool::new(false)),
         queue: queue.clone(),
     });
@@ -143,6 +296,7 @@ pub async fn ssh_connect(
             watcher_session.exited.store(true, Ordering::Release);
             let _ = app.emit(&format!("ssh:{id_for_event}:exit"), serde_json::Value::Null);
             sessions.lock().unwrap().remove(&id_for_event);
+            watcher_session.disconnect_jumps().await;
             app.state::<ForwardManager>()
                 .stop_all_for_ssh(&app, &id_for_event);
         });
@@ -173,9 +327,11 @@ pub async fn ssh_connect(
             session.exited.store(true, Ordering::Release);
             let _ = app.emit(&format!("ssh:{id_for_event}:exit"), serde_json::Value::Null);
             sessions.lock().unwrap().remove(&id_for_event);
-            // 会话断开：级联停止该连接全部转发（-R 路由注销、监听/数据泵 abort、端口释放）
+            // 会话断开：级联停止该连接全部转发（-R 路由注销、监听/数据泵 abort、端口释放），
+            // 并级联断开跳板链（主连接已 EOF，跳板需显式断开）
             app.state::<ForwardManager>()
                 .stop_all_for_ssh(&app, &id_for_event);
+            session.disconnect_jumps().await;
         });
     }
 

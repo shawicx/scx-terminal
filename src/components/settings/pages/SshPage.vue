@@ -19,6 +19,7 @@ import GroupAccordion from '@/components/settings/GroupAccordion.vue'
 import { useConfigStore, reorderGroups, type SshProfile, type MoshProfile, type RemoteProfile } from '@/stores/config'
 import { useMonitorStore } from '@/stores/monitor'
 import { builtinColorSchemes } from '@/lib/colorSchemes'
+import { canUseAsJump } from '@/lib/jumpChain'
 import { groupQuickCommandSections } from '@/lib/quickCommands'
 import { listSshKeys, setProfilePassword, removeProfilePassword, hasProfilePassword, type SshKeyMeta } from '@/services/secrets'
 import { confirmAction } from '@/components/settings/useConfirmAction'
@@ -196,6 +197,43 @@ const keyIdModel = computed({
             profile.keyId = value || null
         }
     },
+})
+
+// ---- 跳板机下拉（ProxyJump：选另一 SSH 档案作为隧道中继；排除自身与成环项） ----
+
+/** 跳板候选档案视图（store 侧档案按 id 索引，供环检测） */
+const sshProfilesById = computed(() => new Map(
+    store.profiles
+        .filter((p): p is SshProfile => p.type === 'ssh')
+        .map(p => [p.id, p] as const)
+))
+
+/** 跳板机表单模型：空串 = 直连（清掉 jumpProfileId 键） */
+const jumpProfileModel = computed({
+    get: () => (sshDraft.value?.type === 'ssh' ? sshDraft.value.jumpProfileId : undefined) ?? '',
+    set: (value: string) => {
+        const profile = sshDraft.value
+        if (!profile || profile.type !== 'ssh') {
+            return
+        }
+        if (value) {
+            profile.jumpProfileId = value
+        } else {
+            delete profile.jumpProfileId
+        }
+    },
+})
+
+/** 跳板候选：其他 SSH 档案中可安全引用的（选中后不成环的） */
+const jumpProfileOptions = computed(() => {
+    const draft = sshDraft.value
+    if (!draft || draft.type !== 'ssh') {
+        return []
+    }
+    return store.profiles
+        .filter((p): p is SshProfile =>
+            p.type === 'ssh' && canUseAsJump(draft, p, sshProfilesById.value))
+        .map(p => ({ value: p.id, label: `${p.name} (${p.user}@${p.host})` }))
 })
 
 const sshKeyOptions = computed(() => [
@@ -405,6 +443,12 @@ function deleteSshProfile (id: string): void {
         return
     }
     store.profiles.splice(index, 1)
+    // 级联清掉其他 SSH 档案对本档案的跳板引用（否则连接时链解析报引用缺失）
+    for (const profile of store.profiles) {
+        if (profile.type === 'ssh' && profile.jumpProfileId === id) {
+            delete profile.jumpProfileId
+        }
+    }
     // 同步清掉监控 store 的样本/错误缓冲：profileId 不复用，残留条目只会白占内存
     monitorStore.clear(id)
     if (selectedSshProfileId.value === id) {
@@ -522,6 +566,10 @@ function confirmDeleteProfile (profile: RemoteProfile): void {
                         <div v-if="sshDraft.auth === 'publicKey' || sshDraft.auth === 'auto'" class="settings-card-row">
                             <Label>{{ t('settings.keychain') }} <span class="value-hint">{{ t('settings.keychainHint') }}</span></Label>
                             <Select v-model="keyIdModel" :options="sshKeyOptions" class="w-60" />
+                        </div>
+                        <div class="settings-card-row">
+                            <Label>{{ t('settings.jumpHost') }} <span class="value-hint">{{ t('settings.jumpHostHint') }}</span></Label>
+                            <Select v-model="jumpProfileModel" :options="[{ value: '', label: t('settings.jumpNone') }, ...jumpProfileOptions]" class="w-60" />
                         </div>
                         <div v-if="sshDraft.auth === 'password' || sshDraft.auth === 'auto'" class="settings-card-row">
                             <Label>{{ t('settings.sshPassword') }}</Label>

@@ -22,6 +22,30 @@ export interface SSHConnectOptions {
     rows: number
     /** 无终端会话的后台连接（SFTP 标签/独立隧道）：跳过 PTY/shell，cols/rows/dataChannel 被忽略 */
     headless?: boolean
+    /** 跳板机链（连接顺序，最外层在前；空 = 直连）。id 由代理按会话 id 生成
+     * （`{id}:jump{i}`），指纹/kbd 挑战事件按该 id 发射并路由到与主 id 相同的 handlers */
+    jumpHops?: JumpHop[]
+}
+
+/** 单个跳板参数（不含 id；SshProxy.start 内按会话 id 生成 `{id}:jump{i}`） */
+export interface JumpHop {
+    profileId: string
+    host: string
+    port: number
+    user: string
+    auth: string
+    keyId: string | null
+}
+
+/** 单个跳板参数的 IPC 形状（含连接 id，Rust SshHop 对应） */
+export interface JumpHopWire {
+    id: string
+    profileId: string
+    host: string
+    port: number
+    user: string
+    auth: string
+    keyId: string | null
 }
 
 /** 主机指纹确认请求（事件 `ssh:{id}:hostkey` 载荷） */
@@ -79,17 +103,29 @@ export class SshProxy {
         }
 
         this.id = options.id
+        // 跳板 id 在此生成（依赖会话 id），随 invoke 下发并在下方按 id 监听事件
+        const jumpHops: JumpHopWire[] | undefined = options.jumpHops?.map((hop, index) => ({
+            id: `${this.id}:jump${index}`,
+            ...hop
+        }))
         // 事件监听必须先于 invoke 注册：hostkey 事件在连接握手期间发出，
-        // 而 ssh_connect 要等指纹确认才返回（否则事件丢失 → 死锁）
-        for (const event of ['exit', 'close', 'hostkey', 'kbdchallenge']) {
-            this.unlisteners.push(await listen(`ssh:${this.id}:${event}`, e => {
-                for (const handler of this.handlers[event] ?? []) {
-                    handler(e.payload)
+        // 而 ssh_connect 要等指纹确认才返回（否则事件丢失 → 死锁）。
+        // 跳板链的每跳 id 同样监听并路由到与主 id 相同的 handlers（复用确认/挑战弹窗）
+        const eventIds = [this.id, ...(jumpHops?.map(hop => hop.id) ?? [])]
+        for (const eventId of eventIds) {
+            for (const event of ['exit', 'close', 'hostkey', 'kbdchallenge']) {
+                if (eventId !== this.id && (event === 'exit' || event === 'close')) {
+                    continue
                 }
-            }))
+                this.unlisteners.push(await listen(`ssh:${eventId}:${event}`, e => {
+                    for (const handler of this.handlers[event] ?? []) {
+                        handler(e.payload)
+                    }
+                }))
+            }
         }
 
-        await invoke<string>('ssh_connect', { options, dataChannel: channel })
+        await invoke<string>('ssh_connect', { options: { ...options, jumpHops }, dataChannel: channel })
     }
 
     /**

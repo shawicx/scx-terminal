@@ -26,7 +26,8 @@ import { importShellHistoryForProfile } from '@/services/history'
 import { useTabsStore } from '@/stores/tabs'
 import { useConfigStore } from '@/stores/config'
 import { useThemeStore } from '@/stores/theme'
-import type { TerminalProfile } from '@/stores/config'
+import type { SshProfile, TerminalProfile } from '@/stores/config'
+import { jumpChainErrorText, resolveJumpChain } from '@/lib/jumpChain'
 import { useSshChallenges } from './useSshChallenges'
 import { useTerminalSearch } from './useTerminalSearch'
 import { usePaneSuggestions } from './usePaneSuggestions'
@@ -309,6 +310,14 @@ async function start (): Promise<void> {
                 height: null,
             })
         } else if (props.profile.type === 'ssh') {
+            // 跳板链解析（环/引用缺失等错误以失败文本打进终端后放弃连接）
+            const profilesById = new Map(
+                configStore.store.profiles
+                    .filter((p): p is SshProfile => p.type === 'ssh')
+                    .map(p => [p.id, p])
+            )
+            const jump = resolveJumpChain(props.profile, profilesById)
+            const jumpChainError = 'error' in jump ? jumpChainErrorText(jump.error, profilesById) : undefined
             await session.start({
                 host: props.profile.host,
                 port: props.profile.port,
@@ -316,6 +325,8 @@ async function start (): Promise<void> {
                 auth: props.profile.auth,
                 profileId: props.profile.id,
                 keyId: props.profile.keyId,
+                jumpHops: 'hops' in jump ? jump.hops : undefined,
+                jumpChainError,
                 width: null,
                 height: null,
             })

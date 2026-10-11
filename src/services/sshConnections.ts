@@ -11,6 +11,8 @@ import { useConfigStore } from '@/stores/config'
 import { SshProxy, type HostKeyChallenge, type KbdChallenge, type KbdAnswer } from '@/services/ssh'
 import { setProfilePassword } from '@/services/secrets'
 import { SshConnectionRegistry } from '@/lib/sshConnectionRegistry'
+import { jumpChainErrorText, resolveJumpChain } from '@/lib/jumpChain'
+import type { SshProfile } from '@/stores/config'
 
 export type ProfileConnectionStatus = 'idle' | 'connecting' | 'connected' | 'failed'
 
@@ -53,6 +55,21 @@ async function connectHeadless (profileId: string): Promise<string> {
     }
     connectionStates[profileId] = 'connecting'
     connectionErrors[profileId] = ''
+    // 跳板链解析（环/引用缺失等）：以档案级失败呈现，不进入连接
+    const profilesById = new Map(
+        config.store.profiles
+            .filter((p): p is SshProfile => p.type === 'ssh')
+            .map(p => [p.id, p] as const)
+    )
+    const jump = resolveJumpChain(profile, profilesById)
+    if ('error' in jump) {
+        const message = `jump chain error: ${jumpChainErrorText(jump.error, profilesById)}`
+        connectionStates[profileId] = 'failed'
+        connectionErrors[profileId] = message
+        registryVersion.value += 1
+        throw new Error(message)
+    }
+    const jumpHops = jump.hops
     // kbd-interactive / 密码挑战：挂全局弹窗等应答；「记住」仅对单一密码型挑战生效，
     // 以最后一轮为准，连接成功后回存（见 start 成功分支）
     // 注：初值用 as 显式联合类型——闭包内赋值不参与 CFA，否则此处被收窄为 null
@@ -95,6 +112,7 @@ async function connectHeadless (profileId: string): Promise<string> {
             user: profile.user,
             auth: profile.auth,
             keyId: profile.keyId,
+            jumpHops,
             cols: 0,
             rows: 0,
             headless: true,

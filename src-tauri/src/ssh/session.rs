@@ -89,6 +89,9 @@ pub struct SshSession {
     pub(super) write: tokio::sync::Mutex<Option<russh::ChannelWriteHalf<client::Msg>>>,
     /// 连接句柄：open_sftp_channel 复用它开第二 channel（SFTP 文件面板）
     pub(super) connection: tokio::sync::Mutex<Option<client::Handle<ScxHandler>>>,
+    /// 跳板机连接句柄（ProxyJump 链，按跳序；直连为空）。生命周期从属于本会话：
+    /// 断开/退出时级联断开；目标连接死亡时跳板 channel EOF 也会触发本会话 exit
+    pub(super) jumps: tokio::sync::Mutex<Vec<client::Handle<ScxHandler>>>,
     pub(super) exited: Arc<AtomicBool>,
     pub(super) queue: Arc<PtyDataQueue>,
 }
@@ -249,7 +252,7 @@ impl SshSession {
             .map_err(|e| format!("cancel tcpip-forward failed: {e}"))
     }
 
-    /// 主动断开：关 channel → 断连接 → 停队列（泵任务随后收到 EOF 并发出 exit 事件）
+    /// 主动断开：关 channel → 断连接 → 级联断开跳板链 → 停队列（泵任务随后收到 EOF 并发出 exit 事件）
     pub(super) async fn disconnect(&self) {
         if let Some(write) = self.write.lock().await.take() {
             let _ = write.close().await;
@@ -259,6 +262,17 @@ impl SshSession {
                 .disconnect(Disconnect::ByApplication, "Session closed", "English")
                 .await;
         }
+        self.disconnect_jumps().await;
         self.queue.close();
+    }
+
+    /// 级联断开全部跳板连接（会话退出/清理路径调用；句柄保留在 Vec 中，重复调用无副作用）
+    pub(super) async fn disconnect_jumps(&self) {
+        let jumps = self.jumps.lock().await;
+        for handle in jumps.iter() {
+            let _ = handle
+                .disconnect(Disconnect::ByApplication, "Session closed", "English")
+                .await;
+        }
     }
 }

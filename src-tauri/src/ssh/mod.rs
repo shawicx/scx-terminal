@@ -39,6 +39,26 @@ pub struct SshConnectOptions {
     /// 无终端会话的后台连接（SFTP 标签 / 独立隧道用）：跳过 PTY/shell/输出泵，
     /// 由断连 watcher 轮询连接状态做清理；cols/rows 与 data_channel 被忽略
     pub headless: Option<bool>,
+    /// 跳板机链（按连接顺序，最外层跳板在前；缺省/空 = 直连）。
+    /// 每跳 id 由前端生成为 `{最终会话id}:jump{i}`，指纹/kbd 挑战事件按该 id 发射
+    pub jump_hops: Option<Vec<SshHop>>,
+}
+
+/// 单个跳板机连接参数（形状对齐 SshConnectOptions 核心字段；中间跳不开 PTY）
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshHop {
+    /// 跳板连接 id（`{最终id}:jump{i}`；指纹确认与 kbd 挑战按它路由）
+    pub id: String,
+    /// 跳板档案 id（Rust 据此从加密库解密已存密码）
+    pub profile_id: String,
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    /// auto | agent | publicKey | password
+    pub auth: String,
+    /// 密钥链条目 id；null = 不用密钥链
+    pub key_id: Option<String>,
 }
 
 #[derive(Default)]
@@ -73,5 +93,42 @@ impl SshManager {
         &self,
     ) -> Arc<Mutex<HashMap<String, Arc<SshSession>>>> {
         self.sessions.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// connect_options_parse_jump_hops：camelCase 跳板链字段解析（id/profileId/keyId 形状）
+    #[test]
+    fn connect_options_parse_jump_hops() {
+        let raw = r#"{
+            "id": "ssh-1", "profileId": "p1", "host": "target", "port": 22,
+            "user": "root", "auth": "auto", "keyId": null, "cols": 80, "rows": 24,
+            "jumpHops": [{ "id": "ssh-1:jump0", "profileId": "pj", "host": "bastion",
+                           "port": 2222, "user": "ops", "auth": "agent", "keyId": "k1" }]
+        }"#;
+        let options: SshConnectOptions = serde_json::from_str(raw).unwrap();
+        let hops = options.jump_hops.expect("jump hops parsed");
+        assert_eq!(hops.len(), 1);
+        assert_eq!(hops[0].id, "ssh-1:jump0");
+        assert_eq!(hops[0].profile_id, "pj");
+        assert_eq!(hops[0].host, "bastion");
+        assert_eq!(hops[0].port, 2222);
+        assert_eq!(hops[0].user, "ops");
+        assert_eq!(hops[0].auth, "agent");
+        assert_eq!(hops[0].key_id.as_deref(), Some("k1"));
+    }
+
+    /// connect_options_jump_hops_optional：旧前端负载不携带 jumpHops 时解析为直连
+    #[test]
+    fn connect_options_jump_hops_optional() {
+        let raw = r#"{
+            "id": "ssh-1", "profileId": "p1", "host": "target", "port": 22,
+            "user": "root", "auth": "auto", "keyId": null, "cols": 80, "rows": 24
+        }"#;
+        let options: SshConnectOptions = serde_json::from_str(raw).unwrap();
+        assert!(options.jump_hops.is_none());
     }
 }

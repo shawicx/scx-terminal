@@ -6,7 +6,7 @@
  *              kbd-interactive 凭据挑战应答与记住密码回存。
  */
 import { BaseSession, type BaseSessionOptions } from './baseSession'
-import { SshProxy, type HostKeyChallenge, type KbdAnswer, type KbdChallenge } from '@/services/ssh'
+import { SshProxy, type HostKeyChallenge, type JumpHop, type KbdAnswer, type KbdChallenge } from '@/services/ssh'
 import { setProfilePassword } from '@/services/secrets'
 import { encodeUTF8 } from '@/lib/utils/bytes'
 import { nanoid } from 'nanoid'
@@ -20,6 +20,10 @@ export interface SshSessionOptions {
     profileId: string
     /** 密钥链条目 id（Rust 据此解密私钥）；null = 不用密钥链 */
     keyId: string | null
+    /** 跳板机链（连接顺序；缺省 = 直连）。由调用方经 resolveJumpChain 解析填入 */
+    jumpHops?: JumpHop[]
+    /** 跳板链解析失败文案（环/引用缺失等；有值时以失败文本打进终端后放弃连接） */
+    jumpChainError?: string
     width: number | null
     height: number | null
 }
@@ -40,6 +44,12 @@ export class SshSession extends BaseSession {
     }
 
     async start (options: SshSessionOptions): Promise<void> {
+        // 跳板链解析失败（环/引用缺失等）：与连接失败同模式打进终端缓冲后放弃
+        if (options.jumpChainError) {
+            this.emitOutput(encodeUTF8(`\r\nSSH jump chain error:\r\n${options.jumpChainError}\r\n`))
+            return
+        }
+
         // fit 尺寸可能在连接前就通过 resize() 到达（resize$ 是 ReplaySubject），连接时使用
         const initialSize = this.pendingResize
         this.pendingResize = null
@@ -81,6 +91,7 @@ export class SshSession extends BaseSession {
                 user: options.user,
                 auth: options.auth,
                 keyId: options.keyId,
+                jumpHops: options.jumpHops,
                 cols: initialSize?.columns ?? options.width ?? 80,
                 rows: initialSize?.rows ?? options.height ?? 24,
             })

@@ -46,6 +46,9 @@ export interface SshProfile {
     groupId?: string
     /** 端口转发规则（对标 Tabby：连接后可自动启动；运行态临时转发不落此字段） */
     forwardings?: PortForwarding[]
+    /** 跳板机档案 id（ProxyJump：经该档案建立到本目标的隧道；缺省 = 直连）。
+     *  跳板链由引用递归形成，连接前在前端做环检测与展开 */
+    jumpProfileId?: string
 }
 
 /** Mosh 远程档案：认证由 mosh 内部 ssh 完成（agent / ~/.ssh / PTY 密码提示），无应用侧凭据字段 */
