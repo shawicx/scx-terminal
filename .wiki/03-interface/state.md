@@ -12,97 +12,77 @@
 - src/stores/transfers.ts
 </details>
 
-本页基于状态管理扫描数据，说明项目的状态管理选型、store 清单及其按业务域的组织方式。全部结论以 `file:line` 锚定，未提供的维度明确标注为「待确认」。
+本项目前端状态管理为 **Pinia（6 个 store）+ 组件内 composable（1 个）** 的组合：全局共享状态集中在 `src/stores/` 目录下的 Pinia store，局部交互状态则由设置组件内的 composable 承担。管理面最广的是 `config`（src/stores/config/store.ts:23），其余 store 分别对应转发、监控、标签页、主题与传输等较窄的场景。
 
-## 一、选型概览
+> 下表条目严格来自状态管理扫描结果，未增删改；未在数据中出现的 store 一律不作补充。
 
-扫描到 7 个状态单元，类型分布为：**Pinia 6 个**、**composable 1 个**（`src/components/settings/useConfirmAction.ts:45`）。即全局共享状态统一由 Pinia 承担，局部交互逻辑以 composable 形式存在，未出现 Vuex / Redux / Zustand 等其他方案（数据中无对应条目）。
+## store 清单
 
-| 类型 | 数量 | 条目 |
-| --- | --- | --- |
-| pinia | 6 | config、forwarding、monitor、tabs、theme、transfers |
-| composable | 1 | useConfirmState |
-
-## 二、store 清单
-
-> 条目与扫描数据一一对应，未作增删改。
-
-| 名称 | 类型 | state 字段数 | 消费文件数 | 源文件:行号 |
+| 名称 | 类型 | state 字段数（近似） | 消费文件数（词法统计） | 源文件:行号 |
 | --- | --- | --- | --- | --- |
-| useConfirmState | composable | 0 | 2 | `src/components/settings/useConfirmAction.ts:45` |
-| config | pinia | 0 | 57 | `src/stores/config/store.ts:23` |
-| forwarding | pinia | 6 | 11 | `src/stores/forwarding.ts:16` |
-| monitor | pinia | 11 | 17 | `src/stores/monitor.ts:16` |
-| tabs | pinia | 15 | 24 | `src/stores/tabs.ts:34` |
-| theme | pinia | 0 | 11 | `src/stores/theme.ts:14` |
-| transfers | pinia | 8 | 7 | `src/stores/transfers.ts:17` |
+| `useConfirmState` | composable | 0 | 1 | src/components/settings/useConfirmAction.ts:47 |
+| `config` | pinia | 1 | 35 | src/stores/config/store.ts:23 |
+| `forwarding` | pinia | 3 | 3 | src/stores/forwarding.ts:16 |
+| `monitor` | pinia | 4 | 5 | src/stores/monitor.ts:16 |
+| `tabs` | pinia | 4 | 17 | src/stores/tabs.ts:34 |
+| `theme` | pinia | 2 | 2 | src/stores/theme.ts:14 |
+| `transfers` | pinia | 5 | 4 | src/stores/transfers.ts:17 |
 
-**统计口径**：
+**口径声明**
 
-- `state 字段数`为近似计数，取扫描器识别结果。值为 0 的条目（`useConfirmState`、`config`、`theme`）表示**扫描未识别出 state 字段**，不等同于该单元无状态（见「待确认」）。
-- `消费文件数`为**词法统计**的引用该单元的文件数量，不代表运行时调用次数或调用频次。
+- **state 字段数**：为近似计数，只反映 store 顶层状态字段的数量级，不代表字段的嵌套深度或运行时数据量。
+- **消费文件数**：为词法统计结果，即源码文本中出现该 store 标识符的文件数，不等同于运行时实际调用点数量。
+- **类型**：`pinia` 表示独立定义的 Pinia store；`composable` 表示随组件模块定义、供组件内部使用的组合式函数，不注册为全局 store。
 
-## 三、按业务域的组织
+## 按业务域分组
 
-### 3.1 配置与外观域
+以下分组依据 **store 命名** 推断得出（推断处：命名特征，无源码调用或注释证据佐证），仅用于组织阅读，不代表代码中存在显式的域划分。
 
-| store | 锚点 | state 字段数 | 消费文件数 |
-| --- | --- | --- | --- |
-| config | `src/stores/config/store.ts:23` | 0 | 57 |
-| theme | `src/stores/theme.ts:14` | 0 | 11 |
+### 应用配置与外观
 
-`config` 是全部条目中消费文件数最高的单元（57，`src/stores/config/store.ts:23`），且是唯一位于带子目录路径 `src/stores/config/` 下的 Pinia store。`theme` 与其同属外观/配置相关命名，消费文件数 11（`src/stores/theme.ts:14`）。两者 state 字段计数均为 0。
-
-> **推断 1**：按命名特征可将 store 划分为「配置与外观」「网络运行」「界面状态」三类，并据此解读职责。推断依据仅为条目 `name` 与文件路径的命名特征，数据中未提供任何字段名、getter 或 action 列表。该分类为阅读便利而设，非数据给定。
-
-> **推断 2**：`config` 作为唯一带子目录的 store 且消费面最广，可能承担跨模块的全局配置中枢角色。推断依据为路径结构 `src/stores/config/store.ts:23` 与消费文件数 57，无源码调用点佐证。
-
-### 3.2 网络运行域
-
-| store | 锚点 | state 字段数 | 消费文件数 |
-| --- | --- | --- | --- |
-| forwarding | `src/stores/forwarding.ts:16` | 6 | 11 |
-| monitor | `src/stores/monitor.ts:16` | 11 | 17 |
-| transfers | `src/stores/transfers.ts:17` | 8 | 7 |
-
-三者均位于 `src/stores/` 根目录下的单文件形式。其中 `monitor` 的状态规模在该组最大（11 个 state 字段，`src/stores/monitor.ts:16`），消费文件数也为该组最高（17，`src/stores/monitor.ts:16`）；`transfers` 状态字段 8 个（`src/stores/transfers.ts:17`），但消费文件数在该组最低（7，`src/stores/transfers.ts:17`），呈「状态较重、消费面较窄」的形态。
-
-### 3.3 界面状态域
-
-| store | 锚点 | state 字段数 | 消费文件数 |
-| --- | --- | --- | --- |
-| tabs | `src/stores/tabs.ts:34` | 15 | 24 |
-
-`tabs` 是全部条目中 state 字段数最多者（15，`src/stores/tabs.ts:34`），消费文件数 24（`src/stores/tabs.ts:34`），仅次于 `config`。其定义行号（34）明显大于其他 Pinia store（14–23），说明该文件在 store 定义之前还有较长的前置内容。
-
-### 3.4 局部 composable
-
-| 单元 | 锚点 | 类型 | state 字段数 | 消费文件数 |
-| --- | --- | --- | --- | --- |
-| useConfirmState | `src/components/settings/useConfirmAction.ts:45` | composable | 0 | 2 |
-
-`useConfirmState` 是唯一非 Pinia 单元，位于组件目录 `src/components/settings/` 而非 `src/stores/`，消费文件数 2（`src/components/settings/useConfirmAction.ts:45`），是扫描结果中作用范围最小的单元。
-
-## 四、规模对照
-
-| 维度 | 最高 | 最低 |
+| store | 关键事实 | 锚点 |
 | --- | --- | --- |
-| state 字段数 | tabs（15，`src/stores/tabs.ts:34`） | useConfirmState / config / theme（0） |
-| 消费文件数 | config（57，`src/stores/config/store.ts:23`） | useConfirmState（2，`src/components/settings/useConfirmAction.ts:45`） |
+| `config` | 唯一 state 字段数最少的全局 store（1 个），但消费文件数达 35，是全项目覆盖面最广的状态单元 | src/stores/config/store.ts:23 |
+| `theme` | 2 个 state 字段，2 个消费文件，聚焦单一外观维度 | src/stores/theme.ts:14 |
 
-可观察到 state 字段数与消费文件数并不同向：`config` 状态计数为 0 而消费文件数达 57（`src/stores/config/store.ts:23`），`transfers` 状态计数 8 而消费文件数仅 7（`src/stores/transfers.ts:17`）。
+`config` 的消费广度（35 个文件）与 `theme` 的消费收敛（2 个文件）形成对比：前者属于被广泛读取的基础状态，后者属于窄口径的展示层状态。
 
-## 五、待确认
+### 网络转发与传输
 
-1. **`config` 的实际暴露接口未知**：`src/stores/config/store.ts:23` 的 state 字段计数为 0，但其消费文件数达 57，缺 state/getter/action 清单数据，无法判断其被消费的具体内容。
-2. **跨 store 调用关系缺失**：数据未提供任何调用边，无法给出「调用方 → 被调用方 → `file:line`」的依赖表，也无法确认 store 之间是否存在相互引用。
-3. **持久化与外部同步策略无数据**：全部条目均无持久化（localStorage / sessionStorage 等）信息，`theme`（`src/stores/theme.ts:14`）一类通常需持久化的单元亦无佐证。
-4. **设计动机无证据源**：本次扫描的 `intent`（待确认） 数组为空，无法引用注释、提交信息或文档小节说明各 store 的拆分动机，故本页动机相关表述（推断 1、推断 2）已显式标注为推断。
-5. **composable 的消费文件未列出**：`useConfirmState`（`src/components/settings/useConfirmAction.ts:45`）仅给出消费文件数为 2，未提供具体消费文件路径，无法界定其适用范围。
+| store | 关键事实 | 锚点 |
+| --- | --- | --- |
+| `forwarding` | 3 个 state 字段，3 个消费文件 | src/stores/forwarding.ts:16 |
+| `transfers` | 5 个 state 字段（清单中字段数最多），4 个消费文件 | src/stores/transfers.ts:17 |
+
+两者字段数与消费面都较小且接近，属于围绕单一业务链路展开的状态。
+
+### 运行监控与界面交互
+
+| store | 关键事实 | 锚点 |
+| --- | --- | --- |
+| `monitor` | 4 个 state 字段，5 个消费文件 | src/stores/monitor.ts:16 |
+| `tabs` | 4 个 state 字段，消费文件数 17，仅次于 `config` | src/stores/tabs.ts:34 |
+| `useConfirmState` | 唯一非 Pinia 条目；state 字段数计为 0，消费文件数 1，随设置组件模块存在 | src/components/settings/useConfirmAction.ts:47 |
+
+`tabs` 的高消费数（17）说明界面标签状态被多个视图共享；`useConfirmState` 则相反，仅服务于其所在模块（src/components/settings/useConfirmAction.ts:47），是典型的组件局部状态封装。
+
+## 集中度观察
+
+- 消费文件数排名：`config`（35）> `tabs`（17）> `monitor`（5）> `transfers`（4）> `forwarding`（3）> `theme`（2）> `useConfirmState`（1）。
+- 单文件式独立 store 占多数（`forwarding`、`monitor`、`tabs`、`theme`、`transfers` 均为 `src/stores/` 下的单文件），仅 `config` 采用目录形态（src/stores/config/store.ts:23）。
+
+## 待确认
+
+1. **state 字段构成**：数据只提供各 store 的字段数量，未提供字段名与类型，因此无法说明任一 store 具体持有哪些状态。需补充 `defineStore` 的 state 定义体。
+2. **store 间依赖关系**：无调用边或导入关系数据，无法判断 store 是否互相引用（例如 `theme` 是否被 `config` 内部读写）。需补充 store 之间的导入/调用证据。
+3. **持久化机制**：数据未涉及 Pinia 插件、`localStorage`（待确认） 或后端同步，无法说明状态是否跨会话保留。需补充 store 定义外的初始化与订阅代码。
+4. **设计动机**：本次扫描未返回意图证据（注释、提交信息、文档小节），因此各 store 的拆分理由与演进过程无据可依，不作叙述。
 ## Related
 
 - 同目录：[api.md](api.md) · [components.md](components.md) · [routing.md](routing.md)
-- 共享 2 个源文件、共享 1 个符号：[decisions.md](../04-design/decisions.md)
-- 共享 1 个源文件、共享 1 个符号：[modules.md](../02-architecture/modules.md)
-- 共享 2 个符号：[onboarding.md](../05-guides/onboarding.md)
+- 共享 2 个源文件、共享 1 个符号：[glossary.md](../07-reference/glossary.md)
+- 共享 1 个源文件、共享 1 个符号：[overview.md](../01-overview/overview.md)
+- 共享 2 个符号：[tech-stack.md](../01-overview/tech-stack.md)
 - 总入口：[README](../README.md)
+
+<!-- wiki:source: llm -->

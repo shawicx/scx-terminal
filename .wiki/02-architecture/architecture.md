@@ -1,468 +1,386 @@
 <details>
 <summary>Relevant source files</summary>
 
-- src-tauri/src/forward/mod.rs
-- src-tauri/src/fsutil.rs
-- src-tauri/src/history.rs
-- src-tauri/src/secrets/mod.rs
-- src-tauri/src/sftp.rs
-- src-tauri/src/transfers/mod.rs
-- src/components/settings/groupDragSort.ts
-- src/components/settings/useGroupNameDialog.ts
-- src/components/sftp/usePaneNavigation.ts
-- src/components/titlebar/tabGroupLayout.ts
-- src/components/titlebar/tabStripLayout.ts
-- src/components/titlebar/tabSwitcherModel.ts
+- src-tauri/src/background.rs
+- src-tauri/src/config/groups.rs
+- src-tauri/src/config/legacy.rs
+- src-tauri/src/config/load.rs
+- src-tauri/src/config/mod.rs
+- src-tauri/src/config/model.rs
+- src-tauri/src/config/profiles.rs
+- src/i18n/en.ts
 - src/i18n/en/panels.ts
 - src/i18n/en/settings.ts
 - src/i18n/index.ts
+- src/i18n/zh-CN.ts
+- src/i18n/zh/panels.ts
+- src/i18n/zh/settings.ts
+- src/lib/backgroundImage.ts
 </details>
 
 ## 整体架构设计思路与架构图
 
-### 分层结构与判定依据
+从顶层目录看，项目由 6 个模块组成：`src`（60 个文件）、`lib`（51 个）、`services`（29 个）、`components`（75 个）、`stores`（10 个）、`i18n`（7 个）。按依赖形态，数据把其中 5 个模块划入三层：`src` 与 `stores` 归为**入口层**（判定依据是它们只存在对外调用、没有入向依赖）；`lib` 与 `services` 归为**核心层**（被依赖规模分别达 57 处 / 40 处，对外依赖 22 处 / 38 处）；`components` 归为**内部层**（被依赖 5 处，对外依赖 11 处）。`i18n` 未被纳入分层，数据中也没有它的任何依赖边。
 
-数据把 6 个模块中的 5 个显式归入三层：**entry**（`src`、`stores`）、**core**（`lib`、`services`）、**internal**（`components`）；`i18n` 未出现在 `layers` 表中，未分层。分层的判定依据是扇入/扇出特征，而非目录约定（`layers` 表）。
+| 模块 | 所属层 | 分层依据 | 文件数 |
+| --- | --- | --- | --- |
+| `src` | 入口层 | 含入口点，仅有对外调用 | 60 |
+| `stores` | 入口层 | 仅有对外调用 | 10 |
+| `lib` | 核心层 | 被依赖 57 处、对外依赖 22 处 | 51 |
+| `services` | 核心层 | 被依赖 40 处、对外依赖 38 处 | 29 |
+| `components` | 内部层 | 被依赖 5 处、对外依赖 11 处 | 75 |
+| `i18n` | 未纳入分层 | 数据未给出分层，亦无依赖边 | 7 |
 
-| 模块 | 层 | 文件数（modules） | layers 给出的判定理由 |
-|---|---|---|---|
-| `src` | entry | 57 | has entry points, only outbound calls |
-| `stores` | entry | 10 | only outbound calls |
-| `lib` | core | 47 | high fan-in (42 in, 18 out) |
-| `services` | core | 25 | high fan-in (34 in, 22 out) |
-| `components` | internal | 72 | fan-in=3, fan-out=10 |
-| `i18n` | —（无记录） | 7 | layers 表中无此模块 |
+层间协作并非逐层下钻，而是「入口层按需直达下层」。`src` 同时连到核心层的两个模块（`src → lib`、`src → services`），`stores` 则同时连到核心层与内部层（`stores → lib`、`stores → services`、`stores → components`），跨越了两层。核心层内部也不是单向的：`services` 与 `lib` 互为调用（`services → lib`、`lib → services`），核心层与内部层同样互指（`services → components`、`components → services`）。因此整体骨架是分层的，但局部存在双向耦合对，实际形态更接近「分层 + 共享核心 + 组件库」的混合风格，而非严格单向分层。
 
-从模块级调用边（`relations`，type 均为 `calls`）统计，实际扇入/扇出如下：
-
-| 模块 | 出边数 | 入边数 | 出边指向 |
-|---|---|---|---|
-| `src` | 3 | 0 | services、lib、components |
-| `stores` | 2 | 0 | lib、services |
-| `components` | 2 | 2 | lib、services（入边来自 src、services） |
-| `lib` | 1 | 4 | services（入边来自 src、stores、components、services） |
-| `services` | 2 | 4 | lib、components（入边来自 src、stores、components、lib） |
-| `i18n` | 0 | 0 | 无 |
-
-需要区分两套口径：上表是模块级边计数，而 `layers` 中标注的 `lib`（42 in / 18 out）、`services`（34 in / 22 out）、`components`（fan-in=3 / fan-out=10）是符号/文件聚合后的计数，两者数值不同但排序一致——`lib` 与 `services` 是扇入最高的两个模块，这构成它们被划为 core 的直接依据。
-
-### 各层职责与层间协作
-
-**entry 层是单向消费者。**`src`（57 文件）被标注为 "has entry points"，且模块级没有任何入边，出边同时指向 `src → services`、`src → lib`、`src → components`（`relations`），说明它承担进程/应用的装配与启动职责，向三个下层模块同时取用能力。`stores`（10 文件）同样只有出边，指向 `stores → lib` 与 `stores → services`，扮演状态持有与数据请求入口的角色；由于它在 `layers` 中被归入 entry 而非 core，其定位更接近"入口状态的来源"而不是被复用的公共设施。entry 层成员之间没有任何互调边。
-
-**core 层是复用的汇聚点，但不是无环底座。**`lib`（47 文件）与 `services`（25 文件）拥有最高扇入（`layers`：42 in / 34 in），是全部其他模块的共同依赖目标。然而数据中存在一对双向边：`lib → services` 与 `services → lib`（`relations`）。这意味着二者不是"底层库 + 上层服务"的经典上下关系，而是一对互相协作的核心模块——`lib` 既被 `services` 依赖，其自身也需要调用 `services` 的能力。`services` 在此之外还向 `components` 发起调用，是唯一同时跨到 internal 层的核心模块。
-
-**internal 层规模最大、方向最杂。**`components` 有 72 个文件，是文件数最多的模块（`modules`），`layers` 记录其 fan-out=10、fan-in=3，属于"高扇出、低扇入"形态。它被 `src` 与 `services` 调用，同时反向调用 `lib` 与 `services`，因此 `services ↔ components` 构成第二组双向边。`components` 承担了从核心层向外展开的大部分实现细节，其规模与扇出也印证了它作为内部实现层的定位。
-
-**整体架构风格：以 core 为中心的辐射状依赖 + 局部双向耦合。**依赖总体呈 entry → core → internal 的流向，`src`、`stores` 两个入口只出不进，`lib`/`services` 聚合了绝大多数入边，符合"入口薄、核心厚"的组织方式。但 `lib ↔ services` 与 `services ↔ components` 两组双向边表明这不是严格的无环分层架构，而是允许同一协作对内部互相调用的模块化架构；任何试图按"层间单向"来推导变更影响面的结论都会在这两组边上失效。
-
-### 模块依赖关系图
+| 调用方 | 被调用方 | 证据 | 是否跨层 |
+| --- | --- | --- | --- |
+| `src` | `services` | `src → services` | 入口层 → 核心层 |
+| `src` | `lib` | `src → lib` | 入口层 → 核心层 |
+| `stores` | `lib` | `stores → lib` | 入口层 → 核心层 |
+| `stores` | `services` | `stores → services` | 入口层 → 核心层 |
+| `stores` | `components` | `stores → components` | 入口层 → 内部层（跨两层） |
+| `services` | `lib` | `services → lib` | 核心层内部 |
+| `lib` | `services` | `lib → services` | 核心层内部（反向） |
+| `services` | `components` | `services → components` | 核心层 → 内部层 |
+| `components` | `services` | `components → services` | 内部层 → 核心层（反向） |
+| `components` | `lib` | `components → lib` | 内部层 → 核心层 |
 
 ```mermaid
 graph TD
-    src["src (entry)"]
-    stores["stores (entry)"]
-    lib["lib (core)"]
-    services["services (core)"]
-    components["components (internal)"]
-    i18n["i18n (未分层)"]
+  subgraph 入口层
+    src
+    stores
+  end
+  subgraph 核心层
+    lib
+    services
+  end
+  subgraph 内部层
+    components
+  end
+  subgraph 未纳入分层
+    i18n
+  end
 
-    src --> services
-    src --> lib
-    src --> components
-    stores --> services
-    stores --> lib
-    services --> lib
-    services --> components
-    components --> lib
-    components --> services
-    lib --> services
+  src --> services
+  src --> lib
+  stores --> lib
+  stores --> services
+  stores --> components
+  services --> lib
+  lib --> services
+  services --> components
+  components --> services
+  components --> lib
 ```
 
-> 说明：`i18n` 在 `relations` 中无任何入边或出边，图中以孤立节点呈现；`lib ↔ services` 与 `services ↔ components` 为双向边，图中以两条反向箭头表示。边方向即依赖方向（`relations.source` → `relations.target`）。
+代码的实际聚簇与模块划分并不一一对应。数据给出 12 个高内聚代码群，标签为 `src-tauri` 的 6 个群规模分别为 112、72、55、49、42、33 个成员，例如包含 `execute`、`lock_conn`、`mark_initialized`（内聚度 0.856），以及 `ssh_connect`、`forward_start`、`session`、`snapshot`、`stop`（内聚度 0.822）——后者从符号命名看涉及连接与转发类能力，但本节不展开其内部实现。标签为 `src` 的群组内聚度更高，如 `load` / `flush` / `migrateLocalGroups`（内聚度 1.0）、`onSilence` / `evaluate` / `acceptSelected`（0.977）、`constructor` / `encodeUTF8` / `refreshMirror`（0.965），集中体现了状态管理与交互逻辑的聚合方式。这意味着项目的模块目录只提供粗粒度边界，真正的职责切分体现在这些符号簇上。
 
-完整的模块级调用边清单（锚点格式为 `relations#调用方→被调用方`）：
+**待确认**：模块清单中不存在 `src-tauri`，但聚簇标签中出现了 6 个 `src-tauri` 群组，其与现有模块的归属关系缺少证据。**待确认**：`i18n` 既未被分层，也没有任何依赖边，它如何被其他模块接入（或是否完全独立）缺少证据。
 
-| 调用方 | 被调用方 | 类型 | 锚点 |
+**推断**：`src-tauri` 群组下的代表符号多为 `execute`、`lock_conn`、`load_internal`、`ssh_connect`、`forward_start` 一类下划线命名，与 `src` 群组中的 `onSilence`、`computeSuggestions`、`refreshMirror` 等驼峰命名分属两套风格，推断这两类代码来自不同的语言或运行时边界；依据仅为聚簇标签与符号命名特征，数据中无编译产物、构建配置或目录路径佐证。
+
+## 核心模块详解
+
+本节逐一说明本批次六个核心模块的职责、语言构成、设计意图与依赖关系。所有事实性描述均附源码锚点；模块级符号明细（符号签名与逐个用途）因数据缺失统一列入「待确认」。
+
+---
+
+### 1. src 模块（src-tauri/src）
+
+`src` 是 Tauri 应用的后端实现层，共 60 个文件，其中 Rust 55 个、TypeScript 3 个、其他 2 个。Rust 代码承载核心系统能力：SFTP 传输调度、敏感数据加密存储、SSH 端口转发、文件系统工具命令、命令历史持久化。该模块依赖 `services` 与 `lib` 两个前端模块，数据中未记录有模块依赖它。
+
+**语言构成与职责域**
+
+- **Rust（55 文件）**：后端命令实现与系统能力。由文件头自述可确认的职责域包括传输任务中心、密钥加密存储、端口转发、文件系统工具、SFTP 面板后端、命令历史持久化（见表 1-1）。
+- **TypeScript（3 文件）**：具体职责数据未给出来源证据，见「待确认」。
+- **其他（2 文件）**：同上，数据无标注。
+
+**表 1-1 设计意图（文件头自述）**
+
+| 源码文件 | 文件头自述要点 | 锚点 |
+|---|---|---|
+| transfers/mod.rs | SFTP 传输任务中心：上传/下载统一注册进 TransferManager，任务快照经 app 级事件 `sftp-transfers-changed` 全量广播（进度按 ≥1MB 步进节流），支持取消（AtomicBool 标志注入传输循环）、暂停/继续/重试与目录递归传输；同一 SSH 连接内任务按 FIFO 排队、限并发执行（信号量）；断点续传以 `.scxpart` 部分文件实现 | src-tauri/src/transfers/mod.rs:1 |
+| secrets/mod.rs | 敏感数据加密存储：SQLite（secrets.db）+ AES-256-GCM 字段级加密，主密钥随机生成存 macOS 钥匙串（keyring，service `scx-terminal`/user `master-key`），密文格式 = 12 字节随机 nonce 前置 + 密文（含 GCM tag） | src-tauri/src/secrets/mod.rs:1 |
+| forward/mod.rs | SSH 端口转发后端：本地转发（-L，本地 TcpListener → direct-tcpip channel）、远程转发（-R，tcpip_forward 请求 server 监听 → 入站 channel 回连本地目标）、动态转发（-D，fast-socks5 no-auth CONNECT → direct-tcpip channel） | src-tauri/src/forward/mod.rs:1 |
+| fsutil.rs | 文件系统工具命令：路径补全的列目录与 shell history 文件读取，以及 SFTP 本地栏目录浏览；补全命令做 `~` → $HOME 展开，列目录错误静默降级返回空数组，浏览命令错误显式返回 Err | src-tauri/src/fsutil.rs:1 |
+| sftp.rs | SFTP 文件面板后端：在同一 russh 连接上开第二 channel 跑 `sftp` subsystem（russh-sftp 3.0）；上传/下载经 transfers 模块的 TransferManager 执行 | src-tauri/src/sftp.rs:1 |
+| history.rs | 命令历史持久化：SQLite（history.db，独立于 config.db——历史是高频写数据不属于配置语义）；沿用 config.rs 的「Mutex 单连接 + WAL + PRAGMA user_version 迁移」模式；同 source 同命令去重存储，导入经 meta 表 `imported:{source}` 标记幂等 | src-tauri/src/history.rs:1 |
+
+**设计意图说明**：这几份文件头自述显示一致的架构取向——把「长生命周期资源」（SSH 连接、SQLite 连接、主密钥）集中托管，把跨切面行为（进度广播、加密、错误降级策略）收敛到单一模块内。例如 transfers 模块将取消、暂停/重试、递归统计、断点续传统一在任务中心内编排（src-tauri/src/transfers/mod.rs:1）；sftp.rs 明确「上传/下载经 transfers 模块的 TransferManager 执行」，说明文件面板与传输调度是分层而非并列关系（src-tauri/src/sftp.rs:1）；history.rs 明确将历史库与配置库分离，理由是「历史是高频写数据不属于配置语义」（src-tauri/src/history.rs:1）。
+
+**依赖关系**
+
+| 方向 | 模块 |
+|---|---|
+| 依赖 | services、lib |
+| 被依赖 | 无记录 |
+
+---
+
+### 2. lib 模块（src/lib）
+
+`lib` 是前端的纯逻辑层，共 51 个文件，其中 TypeScript 50 个、其他 1 个。它被 `services`、`stores`、`components`、`src` 四个模块依赖，自身仅依赖 `services`，是整个前端被引用面最广、复用度最高的模块。多份文件头自述明确其设计准则为「纯逻辑 + IO 全注入 / UI 无关」，以便单测。
+
+**语言构成与职责域**
+
+- **TypeScript（50 文件）**：无 UI 依赖的业务纯逻辑——输入行建模与补全建议、监控编排、起始页视图构建、终端配色、端口转发规则模型等（见表 2-1）。
+- **其他（1 文件）**：数据未标注，见「待确认」。
+
+**表 2-1 设计意图（文件头自述）**
+
+| 源码文件 | 文件头自述要点 | 锚点 |
+|---|---|---|
+| suggestions/promptTracker.ts | 输入行模型：从 xterm buffer 现读现算当前逻辑行（soft-wrap 链拼接）、提示符剥离、续行合并、词定位；PromptTracker 在此之上做提示符长度自适应学习与回车命令采集；对 shell 端编辑（Tab 补全/↑ 调历史/Ctrl+R）免疫——永不维护影子副本 | src/lib/suggestions/promptTracker.ts:1 |
+| suggestions/controller.ts | 建议控制器：聚合 PromptTracker（输入行模型 + 提示符学习 + 命令采集）、建议引擎与菜单 UI 状态；菜单键盘语义（↑↓/Tab/Enter/→/Esc）、接受写入（公共前缀保留 + 退格差异）、Esc 抑制自动弹出、历史记录写入 | src/lib/suggestions/controller.ts:1 |
+| monitorOrchestrator.ts | SSH 监控编排器（纯逻辑，IO 全注入）：管理档案级的卡片/详情两级采样绑定，经注册表消费计数管理连接生命周期；fatal 后按退避序列重连（release → acquire → start），成功即重置退避 | src/lib/monitorOrchestrator.ts:1 |
+| startPage.ts | 连接中心（起始页）纯逻辑：SSH 档案分组视图构建、本地终端分组过滤、全局搜索过滤、最近连接排序与相对时间分桶；UI 无关，便于单测 | src/lib/startPage.ts:1 |
+| colorSchemes.ts | 内置终端配色方案库：严格复刻 Tabby 候选主题列表——Tabby Default / Tabby Default Light 两套核心默认配色（移植自 tabby-terminal colorSchemes.ts，保留选区增强值）+ Tabby 官方社区配色全集（communityColorSchemes.ts，189 套）；并提供按用户偏好解析配色的工具函数 | src/lib/colorSchemes.ts:1 |
+| portForwarding.ts | 端口转发纯逻辑层：转发类型与数据模型（档案持久化规则 + 运行态）、规则归一化校验（sanitize，config 加载时清洗）、展示文案、autoStart 规则筛选与规则 → 启动参数映射；IPC 封装见 services/forward.ts | src/lib/portForwarding.ts:1 |
+
+**设计意图说明**：`lib` 的多份自述反复强调同一模式——**把可测性放在首位**：`startPage.ts` 直言「UI 无关，便于单测」（src/lib/startPage.ts:1）；`monitorOrchestrator.ts` 标注「纯逻辑，IO 全注入」（src/lib/monitorOrchestrator.ts:1）；`portForwarding.ts` 把规则模型与 IPC 封装拆开，明确「IPC 封装见 services/forward.ts」（src/lib/portForwarding.ts:1）。`promptTracker.ts` 的「永不维护影子副本」是一条防止状态不一致的关键约束（src/lib/suggestions/promptTracker.ts:1）。`colorSchemes.ts` 的意图则是兼容性移植而非重新设计（src/lib/colorSchemes.ts:1）。
+
+**依赖关系**
+
+| 方向 | 模块 |
+|---|---|
+| 依赖 | services |
+| 被依赖 | services、stores、components、src |
+
+---
+
+### 3. services 模块（src/services）
+
+`services` 是前端与后端之间的接线层，共 29 个文件，全部为 TypeScript。它依赖 `lib` 与 `components`，同时被 `lib`、`src`、`stores`、`components` 依赖，处于前端依赖图的中枢位置。该模块的职责是把 `lib` 层的纯逻辑接到真实 IO（Tauri IPC、事件通道、系统通知）上。
+
+**语言构成与职责域**
+
+- **TypeScript（29 文件）**：Tauri IPC 封装、Rust SSH 会话句柄、连接注册表、系统通知、自动更新、背景图应用等（见表 3-1）。
+
+**表 3-1 设计意图（文件头自述）**
+
+| 源码文件 | 文件头自述要点 | 锚点 |
+|---|---|---|
+| tabSession.ts | 标签恢复快照：形状守卫（库内 JSON 是系统边界，须校验）+ 启动加载 + 变更防抖同步；快照 schema v1：`{ version: 1, entries: [{ groupId, tabs: [{ profileId?, manualTitle?, color? }] }] }` | src/services/tabSession.ts:1 |
+| ssh.ts | Rust SSH 会话（russh）的前端句柄：连接选项、二进制输出通道（带 ack 背压与订阅前缓冲）、exit/close/hostkey 事件监听与指纹确认应答；结构对照 services/pty.ts 的 TauriPTYProxy（Tauri IPC 数据面约定一致）；支持 kbd-interactive 凭据挑战事件与应答 | src/services/ssh.ts:1 |
+| notifications.ts | 后台标签响铃的系统通知服务：读外观分片开关、按标签节流（BEL 常连续触发）、权限拒绝时静默降级为仅标签未读标记 | src/services/notifications.ts:1 |
+| sshConnections.ts | SSH 连接注册表服务：SshConnectionRegistry 的 IO 接线——headless 建连走 SshProxy（hostkey 确认经全局 pendingHostKey 供 App 层对话框呈现）、断连走 ssh_kill；维护档案级连接状态的 reactive 镜像；registryVersion 在任何连接集合变化时自增，供组件 watch | src/services/sshConnections.ts:1 |
+| updater.ts | 自动更新服务（仅手动检查）：check 的三条路径透传给调用方，安装流程聚合下载进度并在成功后重启应用（失败不重启） | src/services/updater.ts:1 |
+| backgroundImage.ts | 终端背景图片应用服务：从 Rust 读回图片 bytes 转 blob URL 写入全局 CSS 变量（--term-bg-*），TerminalPane 背景层消费；模块级持有 objectURL，替换时 revoke；无图/读失败降级为 none | src/services/backgroundImage.ts:1 |
+
+**设计意图说明**：`services` 层的自述共同点是**显式处理失败与降级**：`notifications.ts` 在权限被拒时「静默降级为仅标签未读标记」（src/services/notifications.ts:1）；`backgroundImage.ts` 在「无图/读失败降级为 none」（src/services/backgroundImage.ts:1）；`updater.ts` 明确「成功后重启应用（失败不重启）」（src/services/updater.ts:1）。另一条主线是**统一数据面约定**：`ssh.ts` 明确「结构对照 services/pty.ts 的 TauriPTYProxy（Tauri IPC 数据面约定一致）」，说明 HTTP/IPC 通道的背压与缓冲策略被刻意保持一致（src/services/ssh.ts:1）；`tabSession.ts` 则强调「库内 JSON 是系统边界，须校验」（src/services/tabSession.ts:1）。
+
+**依赖关系**
+
+| 方向 | 模块 |
+|---|---|
+| 依赖 | lib、components |
+| 被依赖 | lib、src、stores、components |
+
+---
+
+### 4. components 模块（src/components）
+
+`components` 是 UI 组件层，共 75 个文件，其中 TypeScript 68 个、其他 7 个，是本批次文件数最多的模块。它依赖 `lib` 与 `services`，被 `services` 与 `stores` 依赖。文件头自述显示出一种共同做法：把标签条、分组拖拽、标签切换器等交互中**可计算的规则抽出为纯函数/纯 model**，组件本体只做渲染。
+
+**语言构成与职责域**
+
+- **TypeScript（68 文件）**：Vue 组件与配套的纯计算工具（见表 4-1）。
+- **其他（7 文件）**：数据未标注，见「待确认」。
+
+**表 4-1 设计意图（文件头自述）**
+
+| 源码文件 | 文件头自述要点 | 锚点 |
+|---|---|---|
+| settings/groupDragSort.ts | 分组指针拖拽的纯计算工具：从指针命中的元素反查分组头，供 Tauri 场景替代会被原生文件拖放拦截的 HTML5 Drag & Drop | src/components/settings/groupDragSort.ts:1 |
+| titlebar/tabGroupLayout.ts | 标签分组展示序与拖拽换算的纯函数集：展示序 = 全部分组（定义序，含空组 chip）在前 + 未分组标签（数组序）在后；数组相对顺序只影响「同组内」与「未分组区」的先后 | src/components/titlebar/tabGroupLayout.ts:1 |
+| settings/useDraftEditor.ts | 设置域共享的「草稿编辑器」：档案/SSH/快捷命令等编辑表单不再实时写入 config store，而是编辑条目的草稿副本，经「保存」按钮统一提交；存在未保存修改时切换条目/新建经确认弹窗放行（复用共享 confirmAction） | src/components/settings/useDraftEditor.ts:1 |
+| settings/useConfirmAction.ts | 设置域共享的确认弹窗状态（模块级单例）：各设置页调用 confirmAction()，SettingsView 外壳统一渲染 Dialog，跨页共用一份；默认承接删除确认场景；title/confirmLabel 可选参数允许复用到「放弃未保存修改」等非删除场景 | src/components/settings/useConfirmAction.ts:1 |
+| titlebar/tabSwitcherModel.ts | 标签页切换器的纯计算模型：统一处理 MRU 排序、分组过滤、模糊搜索与左侧分组过滤栏数据，避免组件内散落交互规则 | src/components/titlebar/tabSwitcherModel.ts:1 |
+| titlebar/tabStripLayout.ts | 标签栏溢出布局的纯计算工具：把滚轮输入转换成横向滚动量，并计算能让活动标签完整可见的最小滚动位置 | src/components/titlebar/tabStripLayout.ts:1 |
+
+**设计意图说明**：该模块的自述集中在两条设计意图。其一是**把交互规则从组件中抽出**：`tabSwitcherModel.ts` 明确目标是「避免组件内散落交互规则」（src/components/titlebar/tabSwitcherModel.ts:1），`tabGroupLayout.ts`、`tabStripLayout.ts`、`groupDragSort.ts` 同属这一模式（src/components/titlebar/tabGroupLayout.ts:1、src/components/titlebar/tabStripLayout.ts:1、src/components/settings/groupDragSort.ts:1）。其二是**设置域表单的提交语义改造**：`useDraftEditor.ts` 说明「不再实时写入 config store，而是编辑条目的草稿副本，经『保存』按钮统一提交」（src/components/settings/useDraftEditor.ts:1），`useConfirmAction.ts` 作为配套的单例确认弹窗，被设计为可复用到「放弃未保存修改」等非删除场景（src/components/settings/useConfirmAction.ts:1）。`groupDragSort.ts` 另记录了一条平台约束动因：Tauri 场景下 HTML5 Drag & Drop 会被原生文件拖放拦截，故改用指针计算（src/components/settings/groupDragSort.ts:1）。
+
+**依赖关系**
+
+| 方向 | 模块 |
+|---|---|
+| 依赖 | lib、services |
+| 被依赖 | services、stores |
+
+---
+
+### 5. stores 模块（src/stores）
+
+`stores` 是前端状态管理层，共 10 个文件，全部为 TypeScript。它依赖 `lib`、`services`、`components` 三个模块，数据中未记录有模块依赖它。该模块承担三类状态的持有：监控采样、应用配置（含落库）、端口转发运行态。其中配置子模块被拆成 defaults / store / flush / index 四块，形成「默认值与纯函数 → store 本体 → 差异 flush → 统一再导出」的分层。
+
+**语言构成与职责域**
+
+- **TypeScript（10 文件）**：全局 store 与配置持久化引擎（见表 5-1）。
+
+**表 5-1 设计意图（文件头自述）**
+
+| 源码文件 | 文件头自述要点 | 锚点 |
+|---|---|---|
+| monitor.ts | 全局监控 store：订阅 Rust monitor-* 事件维护每档案最新样本与 150 点环形缓冲；errors 用哨兵值（'unsupported' / 'reconnecting'）与原始错误文本，UI 侧按哨兵映射文案 | src/stores/monitor.ts:1 |
+| config/defaults.ts | 配置默认值与纯函数助手：默认配置/热键、系统 shell 生成本地分组与档案、存量迁移、分组分段视图、最近记录 upsert 与 deepMerge | src/stores/config/defaults.ts:1 |
+| config/store.ts | 配置 store 本体：响应式全量配置 + 深度 watch 防抖 flush 落库（调用方保持直接改 store 的用法）；加载时合并库内快照/legacy yaml、清理无效引用、按需生成默认档案与迁移本地分组 | src/stores/config/store.ts:1 |
+| config/flush.ts | 差异 flush 引擎：把本地 store mutation 翻译成 Rust 侧实体级 CRUD 命令；基线 = 各实体键排序的稳定序列化快照；flush 只重试「当前状态与基线」的剩余差异，单条失败即中断且基线不动（部分成功可安全续传） | src/stores/config/flush.ts:1 |
+| forwarding.ts | 端口转发运行态聚合 store：`forward_list_all` 全量拉取 + 按连接订阅 `forward:{sshId}:changed` 事件（连接集合来自 sshConnections 注册表，registryVersion 变化时同步增删订阅）；隧道管理器标签页与 TitleBar 隧道指示器的数据源 | src/stores/forwarding.ts:1 |
+| config/index.ts | 配置 store 桶模块：对外保持 `@/stores/config` 的完整公开面不变（类型 / 默认值与纯函数 / flush 引擎 / store 本体统一再导出） | src/stores/config/index.ts:1 |
+
+**设计意图说明**：`stores` 的自述体现出两条明确原则。第一是**状态与落库解耦且可续传**：`config/store.ts` 保留「调用方保持直接改 store 的用法」，由深度 watch 防抖 flush 承担落库（src/stores/config/store.ts:1）；`config/flush.ts` 进一步说明 flush 是差异式的，且「单条失败即中断且基线不动（部分成功可安全续传）」，这是把网络/IPC 部分失败纳入设计的前提假设（src/stores/config/flush.ts:1）。第二是**订阅集合跟随连接集合动态增删**：`forwarding.ts` 依据 sshConnections 注册表的 registryVersion 变化同步增删事件订阅（src/stores/forwarding.ts:1）。此外 `monitor.ts` 用哨兵值区分「不支持」与「重连中」两类非正常态，把文案映射交给 UI（src/stores/monitor.ts:1）。
+
+**依赖关系**
+
+| 方向 | 模块 |
+|---|---|
+| 依赖 | lib、services、components |
+| 被依赖 | 无记录 |
+
+---
+
+### 6. i18n 模块（src/i18n）
+
+`i18n` 是国际化词条与装配模块，共 7 个文件，全部为 TypeScript。数据中未记录它依赖任何模块，也未被任何模块依赖。结构上按「语言 × 领域」二维切分：语言为 en / zh-CN，领域为 settings（设置域）与 panels（面板域），由 `index.ts` 装配、由 `zh-CN.ts` 做浅合并。
+
+**语言构成与职责域**
+
+- **TypeScript（7 文件）**：vue-i18n 装配、双语词条包与语言包合并（见表 6-1）。
+
+**表 6-1 设计意图（文件头自述）**
+
+| 源码文件 | 文件头自述要点 | 锚点 |
+|---|---|---|
+| index.ts | vue-i18n 装配入口：语言包在 zh-CN.ts / en.ts（Messages 类型以 zh-CN 为基准） | src/i18n/index.ts:1 |
+| en/settings.ts | English 设置域词条（settings 子树整体） | src/i18n/en/settings.ts:1 |
+| zh/settings.ts | 简体中文设置域词条（settings 子树整体） | src/i18n/zh/settings.ts:1 |
+| zh/panels.ts | 简体中文面板域词条（sftp/传输/转发/SSH/命令/面板/搜索/终端/标签/起始页/监控） | src/i18n/zh/panels.ts:1 |
+| en/panels.ts | English 面板域词条（sftp/传输/转发/SSH/命令/面板/搜索/终端/标签/起始页/监控） | src/i18n/en/panels.ts:1 |
+| zh-CN.ts | 简体中文语言包装配：设置域（settings）+ 面板域（panels）浅合并；键结构是 en 与类型 Messages 的基准 | src/i18n/zh-CN.ts:1 |
+
+**设计意图说明**：`index.ts` 声明「Messages 类型以 zh-CN 为基准」（src/i18n/index.ts:1），`zh-CN.ts` 声明「键结构是 en 与类型 Messages 的基准」（src/i18n/zh-CN.ts:1），两处一致地确立了**中文为词条键结构的事实源**，英文包需对齐该结构。`zh-CN.ts` 采用「设置域 + 面板域浅合并」的组装方式（src/i18n/zh-CN.ts:1），对应 `zh/settings.ts`、`zh/panels.ts` 的领域切分（src/i18n/zh/settings.ts:1、src/i18n/zh/panels.ts:1）；panels 域覆盖 sftp/传输/转发/SSH/命令/面板/搜索/终端/标签/起始页/监控共十一个子域（src/i18n/zh/panels.ts:1）。
+
+**依赖关系**
+
+| 方向 | 模块 |
+|---|---|
+| 依赖 | 无记录 |
+| 被依赖 | 无记录 |
+
+---
+
+### 模块依赖一览
+
+下表汇总本批次六个模块的依赖与被依赖关系（依据各模块的依赖清单字段）。由于所有模块的扇入、扇出计数在数据中均为 0，位置重要性的量化排序无法给出，故仅以依赖边呈现结构。
+
+| 模块 | 文件数 | 依赖 | 被依赖 |
 |---|---|---|---|
-| `src` | `services` | calls | relations#src→services |
-| `src` | `lib` | calls | relations#src→lib |
-| `src` | `components` | calls | relations#src→components |
-| `stores` | `lib` | calls | relations#stores→lib |
-| `stores` | `services` | calls | relations#stores→services |
-| `services` | `lib` | calls | relations#services→lib |
-| `services` | `components` | calls | relations#services→components |
-| `components` | `lib` | calls | relations#components→lib |
-| `components` | `services` | calls | relations#components→services |
-| `lib` | `services` | calls | relations#lib→services |
+| src | 60 | services、lib | 无记录 |
+| lib | 51 | services | services、stores、components、src |
+| services | 29 | lib、components | lib、src、stores、components |
+| components | 75 | lib、services | services、stores |
+| stores | 10 | lib、services、components | 无记录 |
+| i18n | 7 | 无记录 | 无记录 |
 
-### 聚类视角（与模块划分不完全对齐）
-
-`clusters` 给出了 12 个高内聚分组，只带两种标签：`src-tauri`（8 组）与 `src`（4 组）。
-
-| 聚类标签 | 成员数 | 内聚度 | topNodes（前 3） |
-|---|---|---|---|
-| `src-tauri` | 105 | 0.850 | execute, lock_conn, load_internal |
-| `src-tauri` | 65 | 0.686 | new, push_then_pull_round_trip_via_fake_s3, replace_all |
-| `src-tauri` | 45 | 0.764 | push, new, run_task |
-| `src-tauri` | 43 | 0.682 | new, s3_get, s3_list, fs_browse_dir_inner |
-| `src-tauri` | 36 | 0.855 | format_auth_failure, try_password_like, authenticate |
-| `src-tauri` | 35 | 0.750 | session, pty_spawn, monitor_start |
-| `src-tauri` | 34 | 0.788 | forward_start, ssh_connect, snapshot |
-| `src-tauri` | 29 | 0.833 | open, run, append_raw |
-| `src` | 42 | 0.979 | constructor, refreshMirror, encodeUTF8 |
-| `src` | 36 | 0.977 | onSilence, evaluate, acceptSelected |
-| `src` | 35 | 1.000 | load, flush, migrateLocalGroups |
-| `src` | 30 | 0.943 | activate, pathSuggestions, displaySequence |
-
-**推断**：`src-tauri` 标签组的 topNodes 为 `lock_conn`、`pty_spawn`、`ssh_connect`、`forward_start`、`s3_get` 等下划线命名及 `*_round_trip_via_fake_s3` 形式的用例名，`src` 标签组为 `refreshMirror`、`handleKeydown`、`pathSuggestions` 等驼峰命名，据此推断前者对应后端（Rust/Tauri 侧）代码簇、后者对应前端代码簇；推断依据仅为命名风格与聚类标签本身，数据未给出平台/语言元信息。此外 `src` 组的 `members=35, cohesion=1.000` 表明存在一组完全内聚的 `load/flush/migrateLocalGroups` 持久化相关逻辑。
-
-**待确认**：
-1. 聚类标签 `src-tauri` / `src` 与 `modules` 中的 `src`/`lib`/`services`/`components`/`stores`/`i18n` 无法对应，无法确定模块的物理目录位置，因此本节的锚点只能落到模块名与字段级（如 `modules#lib`、`relations#src→services`），缺少 `file:line` 级锚点。
-2. `i18n` 既无 `layers` 记录也无 `relations` 边，其在分层中的归属与依赖方向无法判定。
-3. `relations` 只提供 `calls` 一种类型，是否存在事件、配置或数据层面的依赖无法从数据判断。
-
-## 核心模块详解（第1批）
-
-本节覆盖本批全部 6 个模块：`src`、`lib`、`services`、`components`、`stores`、`i18n`。需要先说明本批数据的一个共同特征：**所有模块的 `symbolCount`（待确认） 均为 0、`topSymbols`（待确认） 均为空**，因此下文不提供符号级签名与逐符号用途，事实来源限定为两类——模块级元数据（文件数、语言分布、依赖关系）与文件头自述（intent，kind=`file-header`，带 `file:line` 锚点）。
+依赖边中值得注意的三点：`lib` 的被依赖面最广（被四个模块引用），说明纯逻辑层是前端的复用底座；`services` 与 `components` 之间存在**双向依赖**（services 依赖 components，components 依赖 services）；`i18n` 在本批次数据中没有入边也没有出边，其词条如何被消费未在依赖数据中体现。
 
 ---
-
-### 1. src（模块 qualified_name: `src`）
-
-**一句话职责**：应用主源码树，以 Rust 为主体的后端实现层，文件头自述覆盖传输、密钥加密、端口转发、SFTP、文件系统命令、命令历史六条后端子系统。
-
-#### 模块元数据
-
-| 项 | 值 |
-|---|---|
-| 文件数 | 57 |
-| 语言分布 | Rust 52 / TypeScript 3 / other 2 |
-| symbolCount / topSymbols | 0 / 空 |
-| dependsOn | `services`、`lib`、`components` |
-| usedBy | 空 |
-| fanIn / fanOut | 0 / 0 |
-
-#### 语言职责域
-
-- **Rust（52 个文件）**：后端主体。本模块全部 6 条 intent 自述锚点均落在 `src-tauri/src/` 下，可确证 Rust 侧承载了后端子系统实现。
-- **TypeScript（3 个文件）**：数据仅给出文件数量，未给出任何路径与文件头自述 → 职责域**信息不足**。
-- **other（2 个文件）**：同样无路径与自述证据 → 职责域**信息不足**。
-
-#### 由文件头自述给出的后端子系统
-
-| 子系统 | 文件头自述要点（原文摘录） | 锚点（证据） |
-|---|---|---|
-| SFTP 传输任务中心 | 「上传/下载统一注册进 TransferManager，任务快照经 app 级事件 `sftp-transfers-changed` 全量广播（进度按 ≥1MB 步进节流），支持取消（AtomicBool 标志注入传输循环）与目录递归传输（先 walk 统计总量、单任务聚合进度）；终态任务保留最近 MAX_HISTORY 条历史供传输中心回看。模块拆分：plan（传输计划构建：远/本地递归 walk…」 | `src-tauri/src/transfers/mod.rs:1` |
-| 敏感数据加密存储 | 「SQLite（secrets.db）+ AES-256-GCM 字段级加密。主密钥随机生成存 macOS 钥匙串（keyring，service `scx-terminal`/user `master-key`），密文格式 = 12 字节随机 nonce 前置 + 密文（含 GCM tag）。存储范围：SSH 密钥链（私钥/口令加密，元数据明文）、SSH 档案密码（按 profileId）、云端同步配置的…」 | `src-tauri/src/secrets/mod.rs:1` |
-| SSH 端口转发后端 | 「本地转发（-L，本地 TcpListener → direct-tcpip channel）、远程转发（-R，tcpip_forward 请求 server 监听 → 入站 channel 回连本地目标）、动态转发（-D，fast-socks5 no-auth CONNECT → direct-tcpip channel）。生命周期与 SFTP 一致：转发绑定 ssh_id，SSH 会话断开后由 exit…」 | `src-tauri/src/forward/mod.rs:1` |
-| SFTP 文件面板后端 | 「在同一 russh 连接上开第二 channel 跑 `sftp` subsystem（russh-sftp 3.0），提供目录浏览/文件管理命令；上传/下载经 transfers 模块的 TransferManager 执行（事件广播进度、支持取消与目录递归）。生命周期：SSH 会话断开后所有 SFTP 命令自然报错，前端据此关面板。」 | `src-tauri/src/sftp.rs:1` |
-| 文件系统工具命令 | 「路径补全的列目录与 shell history 文件读取，以及 SFTP 本地栏的目录浏览（含大小/修改时间、隐藏文件开关、错误显式传播）。补全命令做 `~` → $HOME 展开（前端不知道 HOME，统一传 ~ 相对路径）；列目录错误（权限/不存在）返回空数组静默降级，读取文件不存在返回 None，浏览命令错误显式返回 Err（UI 呈现 banner）。」 | `src-tauri/src/fsutil.rs:1` |
-| 命令历史持久化 | 「SQLite（history.db，独立于 config.db——历史是高频写数据不属于配置语义）。沿用 config.rs 的「Mutex 单连接 + WAL + PRAGMA user_version 迁移」模式。同 source 同命令去重存储（更新 run_at/hit_count）；导入经 meta 表 `imported:{source}` 标记幂等，清空时顺带清除标记以便重新导入。」 | `src-tauri/src/history.rs:1` |
-
-#### 职责与设计意图
-
-从上述自述可以直接读出四条被显式声明的设计决策，均非推断：其一，**传输进度采用「全量广播 + 节流」而非增量 diff**——任务快照经 app 级事件 `sftp-transfers-changed` 广播，进度按 ≥1MB 步进节流（`src-tauri/src/transfers/mod.rs:1`）；其二，**取消语义用 `AtomicBool` 标志注入传输循环**，而非终止线程（同上锚点）；其三，**端口转发与 SFTP 共用「绑定 ssh_id、随 SSH 会话断开而失效」的生命周期约定**——forward 自述「生命周期与 SFTP 一致：转发绑定 ssh_id，SSH 会话断开后由 exit…」（`src-tauri/src/forward/mod.rs:1`），sftp 自述「SSH 会话断开后所有 SFTP 命令自然报错，前端据此关面板」（`src-tauri/src/sftp.rs:1`）；其四，**错误处理策略按命令语义分级**——`fsutil.rs` 中补全列目录错误静默降级为空数组、读取文件不存在返回 `None`，而 SFTP 本地栏浏览命令错误显式返回 `Err` 供 UI 呈现 banner（`src-tauri/src/fsutil.rs:1`）。
-
-持久化层面另有两处被显式记录的取舍：**密钥材料不出本机**——主密钥随机生成后存 macOS 钥匙串（keyring，service `scx-terminal` / user `master-key`），密文格式为 12 字节随机 nonce 前置 + 含 GCM tag 的密文（`src-tauri/src/secrets/mod.rs:1`）；**历史库与配置库物理分离**——`history.db` 独立于 `config.db`，自述给出的理由是「历史是高频写数据不属于配置语义」，并沿用 config.rs 的「Mutex 单连接 + WAL + PRAGMA user_version 迁移」模式，同 source 同命令去重存储、导入经 meta 表 `imported:{source}` 标记幂等（`src-tauri/src/history.rs:1`）。
-
-模块级依赖上，`src` 声明依赖 `services`、`lib`、`components`，且 `usedBy` 为空；而其全部文件头证据均指向 `src-tauri/src/` 下的 Rust 后端实现。该跨层依赖的具体形式在数据中无锚点可证（见文末「待确认」）。
-
----
-
-### 2. lib（模块 qualified_name: `lib`）
-
-**一句话职责**：前端纯逻辑层——把可单测的业务规则（输入行模型、监控编排、建议聚合、配色解析、起始页视图、转发规则）从 IO 与 UI 中剥离。
-
-
-| 项 | 值 |
-|---|---|
-| 文件数 | 47 |
-| 语言分布 | TypeScript 46 / other 1 |
-| symbolCount / topSymbols | 0 / 空 |
-| dependsOn | `services` |
-| usedBy | `services`、`stores`、`components`、`src` |
-| fanIn / fanOut | 0 / 0 |
-
-
-- **TypeScript（46 个文件）**：纯逻辑主体，下述 6 条自述锚点文件均为 TS。
-- **other（1 个文件）**：无路径与自述证据 → 职责域**信息不足**。
-
-#### 由文件头自述给出的逻辑单元
-
-| 文件 | 文件头自述要点（原文摘录） | 锚点（证据） |
-|---|---|---|
-| `src/lib/suggestions/promptTracker.ts` | 「输入行模型：从 xterm buffer 现读现算当前逻辑行（soft-wrap 链拼接）、提示符剥离、续行合并、词定位；PromptTracker 在此之上做提示符长度自适应学习与回车命令采集。对 shell 端编辑（Tab 补全/↑ 调历史/Ctrl+R）免疫——永不维护影子副本。」 | `src/lib/suggestions/promptTracker.ts:1` |
-| `src/lib/monitorOrchestrator.ts` | 「SSH 监控编排器（纯逻辑，IO 全注入）：管理档案级的卡片/详情两级采样绑定，经注册表消费计数管理连接生命周期；fatal 后按退避序列重连（release → acquire → start），成功即重置退避。」 | `src/lib/monitorOrchestrator.ts:1` |
-| `src/lib/suggestions/controller.ts` | 「建议控制器：聚合 PromptTracker（输入行模型 + 提示符学习 + 命令采集）、建议引擎与菜单 UI 状态。菜单键盘语义（↑↓/Tab/Enter/→/Esc）、接受写入（公共前缀保留 + 退格差异）、Esc 抑制自动弹出、历史记录写入。」 | `src/lib/suggestions/controller.ts:1` |
-| `src/lib/colorSchemes.ts` | 「内置终端配色方案库：严格复刻 Tabby 候选主题列表——Tabby Default / Tabby Default Light 两套核心默认配色（移植自 tabby-terminal colorSchemes.ts，保留选区增强值）+ Tabby 官方社区配色全集（communityColorSchemes.ts，189 套）。并提供按用户偏好解析配色的工具函数，自定义配色经可选参数参与解析。」 | `src/lib/colorSchemes.ts:1` |
-| `src/lib/startPage.ts` | 「连接中心（起始页）纯逻辑：SSH 档案分组视图构建、本地终端分组过滤、全局搜索过滤、最近连接排序与相对时间分桶。UI 无关，便于单测。」 | `src/lib/startPage.ts:1` |
-| `src/lib/portForwarding.ts` | 「端口转发纯逻辑层：转发类型与数据模型（档案持久化规则 + 运行态）、规则归一化校验（sanitize，config 加载时清洗）、展示文案、autoStart 规则筛选与规则 → 启动参数映射。IPC 封装见 services/forward.ts。」 | `src/lib/portForwarding.ts:1` |
-
-
-`lib` 的设计意图在自述中被反复明示为**「纯逻辑、IO 全注入、UI 无关、便于单测」**：`monitorOrchestrator.ts` 自述「纯逻辑，IO 全注入」（`src/lib/monitorOrchestrator.ts:1`），`startPage.ts` 自述「UI 无关，便于单测」（`src/lib/startPage.ts:1`）。这同时解释了它为何 `dependsOn: services`——`portForwarding.ts` 明确交代分层边界：「IPC 封装见 services/forward.ts」，即纯规则留在 lib、IPC 落到 services（`src/lib/portForwarding.ts:1`）。
-
-另有两处由自述记录的**抗干扰设计**：`promptTracker.ts` 声称「对 shell 端编辑（Tab 补全/↑ 调历史/Ctrl+R）免疫——永不维护影子副本」，选择从 xterm buffer 现读现算而非缓存一份输入行状态（`src/lib/suggestions/promptTracker.ts:1`）；`monitorOrchestrator.ts` 的重连采用显式退避序列「release → acquire → start」，成功后重置退避（`src/lib/monitorOrchestrator.ts:1`）。`colorSchemes.ts` 则以「严格复刻 Tabby 候选主题列表」并逐项注明移植来源（`tabby-terminal colorSchemes.ts`、`communityColorSchemes.ts` 189 套）的方式记录了兼容性目标（`src/lib/colorSchemes.ts:1`）。
-
----
-
-### 3. services（模块 qualified_name: `services`）
-
-**一句话职责**：前端 IO/IPC 接线层——把 Rust 命令、Tauri 事件与前端数据结构对接，并向 store/组件暴露 reactive 镜像。
-
-
-| 项 | 值 |
-|---|---|
-| 文件数 | 25 |
-| 语言分布 | TypeScript 25（单语言） |
-| symbolCount / topSymbols | 0 / 空 |
-| dependsOn | `lib`、`components` |
-| usedBy | `lib`、`src`、`stores`、`components` |
-| fanIn / fanOut | 0 / 0 |
-
-#### 由文件头自述给出的服务单元
-
-| 文件 | 文件头自述要点（原文摘录） | 锚点（证据） |
-|---|---|---|
-
-| 文件 | 文件头自述要点（原文摘录） | 锚点（证据） |
-|---|---|---|
-| `src/services/tabSession.ts` | 「标签恢复快照：形状守卫（库内 JSON 是系统边界，须校验）+ 启动加载 + 变更防抖同步（Task 6）。快照 schema v1：`{ version: 1, entries: [{ groupId, tabs: [{ profileId?, manualTitle?, color? }] }] }`」 | `src/services/tabSession.ts:1` |
-| `src/services/ssh.ts` | 「Rust SSH 会话（russh）的前端句柄：连接选项、二进制输出通道（带 ack 背压与订阅前缓冲）、exit/close/hostkey 事件监听与指纹确认应答。结构对照 services/pty.ts 的 TauriPTYProxy（Tauri IPC 数据面约定一致）。支持 kbd-interactive 凭据挑战事件与应答。」 | `src/services/ssh.ts:1` |
-| `src/services/sshConnections.ts` | 「SSH 连接注册表服务：SshConnectionRegistry 的 IO 接线——headless 建连走 SshProxy（hostkey 确认经全局 pendingHostKey 供 App 层对话框呈现）、断连走 ssh_kill；并维护档案级连接状态的 reactive 镜像（供 SFTP 标签/隧道管理器展示「复用终端连接 / 后台连接」徽标与断线重连）。registryVersion 在任何连接集合变化时自增，供组件 watch」 | `src/services/sshConnections.ts:1` |
-| `src/services/updater.ts` | 「自动更新服务（仅手动检查）：check 的三条路径透传给调用方，安装流程聚合下载进度并在成功后重启应用（失败不重启）。」 | `src/services/updater.ts:1` |
-| `src/services/backgroundImage.ts` | 「终端背景图片应用服务：从 Rust 读回图片 bytes 转 blob URL 写入全局 CSS 变量（--term-bg-*），TerminalPane 背景层消费；填充方式纯变量写入。模块级持有 objectURL，替换时 revoke；无图/读失败降级为 none。」 | `src/services/backgroundImage.ts:1` |
-| `src/services/notifications.ts` | 「后台标签响铃的系统通知服务：读外观分片开关、按标签节流（BEL 常连续触发）、权限拒绝时静默降级为仅标签未读标记。」 | `src/services/notifications.ts:1` |
-
-
-`services` 的定位由 `lib` 侧自述反向确证：`lib/portForwarding.ts` 明确「IPC 封装见 services/forward.ts」（`src/lib/portForwarding.ts:1`），即纯规则与 IPC 分层而置。它自身承担两类职责：**命令/事件接线**（`sshConnections.ts` 描述 headless 建连走 SshProxy、断连走 `ssh_kill`，hostkey 确认经全局 `pendingHostKey` 交给 App 层对话框呈现，`src/services/sshConnections.ts:1`；`ssh.ts` 描述连接选项、二进制输出通道、exit/close/hostkey 事件与指纹确认应答，`src/services/ssh.ts:1`）与**给上层的 reactive 投影**（`sshConnections.ts` 维护档案级连接状态镜像，并声明「registryVersion 在任何连接集合变化时自增，供组件 watch」，`src/services/sshConnections.ts:1`）。
-
-若干降级与边界策略在自述中被显式承诺：`updater.ts` 为「仅手动检查」，安装成功后重启、失败不重启（`src/services/updater.ts:1`）；`backgroundImage.ts` 模块级持有 objectURL、替换时 revoke，无图或读失败降级为 `none`，仅供 TerminalPane 背景层消费（`src/services/backgroundImage.ts:1`）；`notifications.ts` 按标签节流（理由是「BEL 常连续触发」），权限拒绝时静默降级为仅标签未读标记（`src/services/notifications.ts:1`）；`tabSession.ts` 把库内 JSON 视为系统边界，故设形状守卫校验，并给出快照 schema v1（`src/services/tabSession.ts:1`）。此外 `ssh.ts` 自述其结构「对照 services/pty.ts 的 TauriPTYProxy」，即主动保持与既有 PTY 代理一致的数据面约定（`src/services/ssh.ts:1`）。
-
-依赖上 `services` 声明 `dependsOn: lib, components`，同时 `usedBy` 列出 `lib`、`src`、`stores`、`components`——与 `lib` 互为依赖项；该环状依赖的具体接触点在数据中无锚点可证（见文末「待确认」）。
-
----
-
-### 4. components（模块 qualified_name: `components`）
-
-**一句话职责**：UI 组件与视图层，其中相当一部分文件是把交互规则抽成可单测纯函数的辅助模块。
-
-
-| 项 | 值 |
-|---|---|
-| 文件数 | 72（本批文件数最多的模块） |
-| 语言分布 | TypeScript 65 / other 7 |
-| symbolCount / topSymbols | 0 / 空 |
-| dependsOn | `lib`、`services` |
-| usedBy | `services`、`src` |
-| fanIn / fanOut | 0 / 0 |
-
-
-- **TypeScript（65 个文件）**：自述锚点全部落在 `.ts` 路径上，覆盖标签分组布局、拖拽换算、导航状态机等。
-- **other（7 个文件）**：无路径与自述证据；但 `usePaneNavigation.ts` 自述提及「原 SftpBrowserPane.vue 的导航段」被抽出（`src/components/sftp/usePaneNavigation.ts:1`），说明本模块存在 `.vue` 单文件组件这一形态。除此之外的 other 文件职责 → 职责域**信息不足**。
-
-
-| 文件 | 文件头自述要点（原文摘录） | 锚点（证据） |
-|---|---|---|
-| `src/components/titlebar/tabGroupLayout.ts` | 「标签分组展示序与拖拽换算的纯函数集：展示序 = 全部分组（定义序，含空组 chip）在前 + 未分组标签（数组序）在后；数组相对顺序只影响「同组内」与「未分组区」的先后。」 | `src/components/titlebar/tabGroupLayout.ts:1` |
-| `src/components/settings/groupDragSort.ts` | 「分组指针拖拽的纯计算工具：从指针命中的元素反查分组头，供 Tauri 场景替代会被原生文件拖放拦截的 HTML5 Drag & Drop。」 | `src/components/settings/groupDragSort.ts:1` |
-| `src/components/sftp/usePaneNavigation.ts` | 「SFTP 面板导航状态机：路径/前进后退历史/加载（序号防串）/面包屑分段（原 SftpBrowserPane.vue 的导航段；成功加载后回调清理选择态）。」 | `src/components/sftp/usePaneNavigation.ts:1` |
-| `src/components/titlebar/tabSwitcherModel.ts` | 「标签页切换器的纯计算模型：统一处理 MRU 排序、分组过滤、模糊搜索与左侧分组过滤栏数据，避免组件内散落交互规则。」 | `src/components/titlebar/tabSwitcherModel.ts:1` |
-| `src/components/titlebar/tabStripLayout.ts` | 「标签栏溢出布局的纯计算工具：把滚轮输入转换成横向滚动量，并计算能让活动标签完整可见的最小滚动位置。」 | `src/components/titlebar/tabStripLayout.ts:1` |
-| `src/components/settings/useGroupNameDialog.ts` | 「设置域共享的分组名称弹窗（模块级单例）：SSH 分组 / 快捷命令分组 / 本地档案分组共用（均仅名称字段，确认才落库）。各页调用 open* 触发，SettingsView 外壳统一渲染 Dialog 与提交逻辑。」 | `src/components/settings/useGroupNameDialog.ts:1` |
-
-
-本批给出的 `components` 自述锚点呈现出统一取向：**把可判定的交互规则从组件中抽出为纯函数/纯模型**。`tabSwitcherModel.ts` 直接写明动机——「避免组件内散落交互规则」（`src/components/titlebar/tabSwitcherModel.ts:1`）；`tabGroupLayout.ts` 把展示序规则完全形式化（「全部分组（定义序，含空组 chip）在前 + 未分组标签（数组序）在后」，`src/components/titlebar/tabGroupLayout.ts:1`）；`tabStripLayout.ts` 把滚轮转横向滚动量与最小可见滚动位置定义为可计算量（`src/components/titlebar/tabStripLayout.ts:1`）。
-
-两处设计决策带有明确的环境约束证据，**非推断**：`groupDragSort.ts` 自述用指针命中反查分组头的方式「替代会被原生文件拖放拦截的 HTML5 Drag & Drop」，即为绕开 Tauri/原生文件拖放的拦截而放弃 HTML5 DnD（`src/components/settings/groupDragSort.ts:1`）；`usePaneNavigation.ts` 的加载序号用于「防串」（防止过期响应覆盖新状态），并在成功加载后回调清理选择态，其来源是「原 SftpBrowserPane.vue 的导航段」抽出（`src/components/sftp/usePaneNavigation.ts:1`）。
-
-组件复用策略上也有一条显式记录：分组名称弹窗做成「模块级单例」，由 SSH 分组 / 快捷命令分组 / 本地档案分组三处共用，各页调用 `open*` 触发、由 SettingsView 外壳统一渲染与提交，「仅名称字段，确认才落库」（`src/components/settings/useGroupNameDialog.ts:1`）。
-
-`components` 的依赖方向为 `dependsOn: lib, services`，并被 `services`、`src` 反向引用——与 `services` 构成双向依赖（见文末「待确认」）。
-
----
-
-### 5. stores（模块 qualified_name: `stores`）
-
-**一句话职责**：全局状态层——响应式配置本体、差异落库引擎，以及监控、端口转发、传输中心三类运行态聚合 store。
-
-
-| 项 | 值 |
-|---|---|
-| 文件数 | 10 |
-| 语言分布 | TypeScript 10（单语言） |
-| symbolCount / topSymbols | 0 / 空 |
-| dependsOn | `lib`、`services` |
-| usedBy | 空 |
-| fanIn / fanOut | 0 / 0 |
-
-#### 由文件头自述给出的状态单元
-
-| 文件 | 文件头自述要点（原文摘录） | 锚点（证据） |
-|---|---|---|
-| `src/stores/monitor.ts` | 「全局监控 store：订阅 Rust monitor-* 事件维护每档案最新样本与 150 点环形缓冲；errors 用哨兵值（'unsupported' / 'reconnecting'）与原始错误文本，UI 侧按哨兵映射文案。」 | `src/stores/monitor.ts:1` |
-| `src/stores/config/defaults.ts` | 「配置默认值与纯函数助手：默认配置/热键、系统 shell 生成本地分组与档案、存量迁移、分组分段视图、最近记录 upsert 与 deepMerge。」 | `src/stores/config/defaults.ts:1` |
-| `src/stores/config/store.ts` | 「配置 store 本体：响应式全量配置 + 深度 watch 防抖 flush 落库（调用方保持直接改 store 的用法）；加载时合并库内快照/legacy yaml、清理无效引用、按需生成默认档案与迁移本地分组。」 | `src/stores/config/store.ts:1` |
-| `src/stores/forwarding.ts` | 「端口转发运行态聚合 store：`forward_list_all` 全量拉取 + 按连接订阅 `forward:{sshId}:changed` 事件（连接集合来自 sshConnections 注册表，registryVersion 变化时同步增删订阅）。隧道管理器标签页与 TitleBar 隧道指示器的数据源。注意：registryVersion 的 watch 在模块作用域同步创建（WKWebView 下 await 之后创建的 watc…」 | `src/stores/forwarding.ts:1` |
-| `src/stores/config/flush.ts` | 「差异 flush 引擎：把本地 store mutation 翻译成 Rust 侧实体级 CRUD 命令。基线 = 各实体键排序的稳定序列化快照；flush 只重试「当前状态与基线」的剩余差异，单条失败即中断且基线不动（部分成功可安全续传）。」 | `src/stores/config/flush.ts:1` |
-| `src/stores/transfers.ts` | 「全局传输中心 store：订阅 Rust `sftp-transfers-changed` 事件维护任务快照，前端计算平滑速度（字节增量/时间差 EMA）；version 在每次快照变化时自增，供 SFTP 标签等消费方 watch 后刷新目录。」 | `src/stores/transfers.ts:1` |
-
-
-`stores` 内部明显分为两组。**配置组**（`config/defaults.ts`、`config/store.ts`、`config/flush.ts`）走的是「响应式全量配置 + 深度 watch 防抖 flush 落库」路线，且自述强调「调用方保持直接改 store 的用法」（`src/stores/config/store.ts:1`）——即对外契约是直接改 store，落库由后台防抖完成。其容错与韧性设计有明确文字依据：`flush.ts` 的基线定义为「各实体键排序的稳定序列化快照」，flush 只重试「当前状态与基线」的剩余差异，且**单条失败即中断、基线不动**，理由是「部分成功可安全续传」（`src/stores/config/flush.ts:1`）；`store.ts` 在加载时合并库内快照与 legacy yaml、清理无效引用、按需生成默认档案并迁移本地分组（`src/stores/config/store.ts:1`）；`defaults.ts` 提供默认配置/热键、系统 shell 生成本地分组与档案、存量迁移、分组分段视图、最近记录 upsert 与 deepMerge 等纯函数助手（`src/stores/config/defaults.ts:1`）。
-
-**运行态组**（`monitor.ts`、`forwarding.ts`、`transfers.ts`）统一采用「订阅 Rust 事件维护快照」的模式，并各自附带消费侧的刷新信号：`monitor.ts` 订阅 Rust `monitor-*` 事件，为每档案维护最新样本与 150 点环形缓冲，errors 用哨兵值 `'unsupported'` / `'reconnecting'` 加原始错误文本、由 UI 按哨兵映射文案（`src/stores/monitor.ts:1`）；`transfers.ts` 订阅 `sftp-transfers-changed` 维护任务快照并在前端以「字节增量/时间差 EMA」计算平滑速度，`version` 每次快照变化自增供 SFTP 标签 watch 后刷新目录（`src/stores/transfers.ts:1`）；`forwarding.ts` 以 `forward_list_all` 全量拉取加按连接订阅 `forward:{sshId}:changed`，订阅集合来自 sshConnections 注册表并在 `registryVersion` 变化时同步增删订阅，作为隧道管理器标签页与 TitleBar 隧道指示器的数据源（`src/stores/forwarding.ts:1`）。
-
-`forwarding.ts` 的文件头还留下一条**平台相关的时序约束**：「registryVersion 的 watch 在模块作用域同步创建（WKWebView 下 await 之后创建的 watc…」——自述在此被截断，完整约束文本在数据中不可得（见文末「待确认」）。可确证的只是：watch 在模块作用域**同步**创建，且理由与 WKWebView 下 `await` 之后创建 watch 的行为有关（`src/stores/forwarding.ts:1`）。
-
-`stores` 的 `dependsOn` 为 `lib`、`services`，`usedBy` 为空。
-
----
-
-### 6. i18n（模块 qualified_name: `i18n`）
-
-**一句话职责**：vue-i18n 装配与中英双语词条包，按「设置域 / 面板域」分文件。
-
-
-| 项 | 值 |
-|---|---|
-| 文件数 | 7 |
-| 语言分布 | TypeScript 7（单语言） |
-| symbolCount / topSymbols | 0 / 空 |
-| dependsOn | 空 |
-| usedBy | 空 |
-| fanIn / fanOut | 0 / 0 |
-
-#### 由文件头自述给出的词条单元
-
-| 文件 | 文件头自述要点（原文摘录） | 锚点（证据） |
-|---|---|---|
-| `src/i18n/index.ts` | 「vue-i18n 装配入口：语言包在 zh-CN.ts / en.ts（Messages 类型以 zh-CN 为基准）。」 | `src/i18n/index.ts:1` |
-| `src/i18n/zh/panels.ts` | 「简体中文面板域词条（sftp/传输/转发/SSH/命令/面板/搜索/终端/标签/起始页/监控）。」 | `src/i18n/zh/panels.ts:1` |
-| `src/i18n/en/panels.ts` | 「English面板域词条（sftp/传输/转发/SSH/命令/面板/搜索/终端/标签/起始页/监控）。」 | `src/i18n/en/panels.ts:1` |
-| `src/i18n/en/settings.ts` | 「English设置域词条（settings 子树整体）。」 | `src/i18n/en/settings.ts:1` |
-| `src/i18n/zh/settings.ts` | 「简体中文设置域词条（settings 子树整体）。」 | `src/i18n/zh/settings.ts:1` |
-| `src/i18n/zh-CN.ts` | 「简体中文语言包装配：设置域（settings）+ 面板域（panels）浅合并；键结构是 en 与类型 Messages 的基准。」 | `src/i18n/zh-CN.ts:1` |
-
-
-该模块的组织规则有明确自述依据：`index.ts` 是 vue-i18n 装配入口，语言包分别位于 `zh-CN.ts` / `en.ts`，且「Messages 类型以 zh-CN 为基准」（`src/i18n/index.ts:1`）；`zh-CN.ts` 进一步把简体中文包定义为「设置域（settings）+ 面板域（panels）浅合并」，并声明「键结构是 en 与类型 Messages 的基准」（`src/i18n/zh-CN.ts:1`）。两条自述互相印证了同一取向：**以 zh-CN 的键结构作为类型与 en 包的基准**，而非中英各自独立演进。
-
-词条按域分文件：面板域覆盖 sftp / 传输 / 转发 / SSH / 命令 / 面板 / 搜索 / 终端 / 标签 / 起始页 / 监控（中英各一份，`src/i18n/zh/panels.ts:1`、`src/i18n/en/panels.ts:1`），设置域覆盖 settings 子树整体（中英各一份，`src/i18n/zh/settings.ts:1`、`src/i18n/en/settings.ts:1`）。
-
-`i18n` 的 `dependsOn` 与 `usedBy` 均为空（fanIn / fanOut 均为 0）。
-
----
-
-### 本批模块骨架对照
-
-| 模块 | 文件数 | 语言构成 | dependsOn | usedBy | 自述锚点数 |
-|---|---|---|---|---|---|
-| `src` | 57 | rust 52 / ts 3 / other 2 | services, lib, components | — | 6 |
-| `lib` | 47 | ts 46 / other 1 | services | services, stores, components, src | 6 |
-| `services` | 25 | ts 25 | lib, components | lib, src, stores, components | 6 |
-| `components` | 72 | ts 65 / other 7 | lib, services | services, src | 6 |
-| `stores` | 10 | ts 10 | lib, services | — | 6 |
-| `i18n` | 7 | ts 7 | — | — | 6 |
-
-依赖环（据 `dependsOn` / `usedBy` 字段直接读出，无额外推断）：`lib` ⇄ `services`；`services` ⇄ `components`。
 
 ### 待确认
 
-1. **`src` 模块内 TypeScript（3 个文件）与 other（2 个文件）的职责域**：数据未给出这些文件的路径与文件头自述，无法确定其内容与归属层。
-2. **`src` 对 `services` / `lib` / `components` 的依赖形式**：`src` 的三个依赖目标均为前端目录（依据本批其余模块的语言构成为 TS），而 `src` 自述证据全部落在 `src-tauri/src/` 下；跨层接触点缺锚点。
-3. **`lib` 与 `services`、`services` 与 `components` 两处依赖环的具体接触点**：仅能从 `dependsOn` / `usedBy` 字段确认互指，缺调用边或 import 证据定位到具体文件。
-4. **`src/stores/forwarding.ts` 关于 WKWebView 的时序约束原文**：`src/stores/forwarding.ts:1` 自述在「WKWebView 下 await 之后创建的 watc…」处被截断，完整约束与影响范围不可得。
-5. **`components` 的 other（7 个文件）清单**：除 `usePaneNavigation.ts:1` 提及的 `SftpBrowserPane.vue` 可确证 `.vue` 形态存在外，其余组件文件无锚点。
+1. **模内符号明细缺失**：六个模块的符号数均为 0，`topSymbols`（待确认） 全为空数组（仅提供模块与文件级锚点）。因此无法逐一说明各模块的顶层符号、函数签名与 docstring 内容，本节的设计意图仅能基于文件头自述展开。
+2. **src 模块的 TypeScript 与「其他」文件未标注职责**：src 含 TypeScript 3 个、其他 2 个文件（src-tauri/src 下），数据未给出这些文件的路径与用途，其职责域无法分语言说明。
+3. **lib 与 components 的「其他」类文件未标注**：lib 含其他 1 个、components 含其他 7 个文件，缺少路径与语言标注，无法说明其职责。
+4. **i18n 的消费方缺失**：i18n 无入边也无出边，词条在组件/store 中的实际引用点未在依赖数据中出现。
+5. **services 与 components 的双向依赖成因**：数据只给出依赖方向，未给出具体的循环引用入口（哪个文件→哪个文件），无法判断是类型依赖还是运行时依赖。
 
 ## 模块依赖分析与横切关注点
 
-> 说明：本页依赖数据为**模块级聚合**（模块名来自 `modules[].name`、边来自 `boundaries[].from/to`），数据中未提供文件级 `file:line`，因此锚点以模块限定名表示（如 `services`、`lib`）。
-
 ### 模块依赖全景
+
+下图仅包含数据中存在的模块与依赖边，无依赖关系的模块（如 `i18n`）独立列出。
 
 ```mermaid
 graph TD
-  src -->|7| services
-  src -->|6| lib
-  src -->|1| components
-  services -->|20| lib
-  services -->|2| components
-  lib -->|18| services
-  stores -->|9| lib
-  stores -->|6| services
-  components -->|7| lib
-  components -->|3| services
+  src --> services
+  src --> lib
+  stores --> lib
+  stores --> services
+  stores --> components
+  services --> lib
+  lib --> services
+  services --> components
+  components --> lib
+  components --> services
   i18n
 ```
 
-图中边与权重全部取自 `boundaries`；`i18n` 在依赖数据中为孤立节点（无入边、无出边）。
+### 模块依赖边清单
 
-### 依赖边明细（调用次数）
+| 调用方 | 被调用方 | 调用次数 | 关系类型 | 证据（依赖边） |
+| --- | --- | --- | --- | --- |
+| services | lib | 34 | 调用 | `services→lib` |
+| lib | services | 22 | 调用 | `lib→services` |
+| stores | lib | 9 | 调用 | `stores→lib` |
+| src | services | 8 | 调用 | `src→services` |
+| components | lib | 7 | 调用 | `components→lib` |
+| src | lib | 7 | 调用 | `src→lib` |
+| stores | services | 6 | 调用 | `stores→services` |
+| services | components | 4 | 调用 | `services→components` |
+| components | services | 4 | 调用 | `components→services` |
+| stores | components | 1 | 调用 | `stores→components` |
 
-| 调用方 → 被调用方 | 调用次数 | 占全部调用边比例 | 锚点 |
-|---|---|---|---|
-| services → lib | 20 | 25.3% | boundaries(services→lib) |
-| lib → services | 18 | 22.8% | boundaries(lib→services) |
-| stores → lib | 9 | 11.4% | boundaries(stores→lib) |
-| components → lib | 7 | 8.9% | boundaries(components→lib) |
-| src → services | 7 | 8.9% | boundaries(src→services) |
-| stores → services | 6 | 7.6% | boundaries(stores→services) |
-| src → lib | 6 | 7.6% | boundaries(src→lib) |
-| components → services | 3 | 3.8% | boundaries(components→services) |
-| services → components | 2 | 2.5% | boundaries(services→components) |
-| src → components | 1 | 1.3% | boundaries(src→components) |
+合计 10 条依赖边、102 次跨模块调用。
 
-合计 10 条调用边、79 次调用（`boundaries` 求和）。
+### 模块出入度汇总
 
-### 模块出/入度对照
+| 模块 | 依赖的模块 | 出向调用次数 | 被哪些模块使用 | 入向调用次数 |
+| --- | --- | --- | --- | --- |
+| lib | services | 22 | services、stores、components、src | 57 |
+| services | lib、components | 38 | lib、src、stores、components | 40 |
+| stores | lib、services、components | 16 | 无 | 0 |
+| src | services、lib | 15 | 无 | 0 |
+| components | lib、services | 11 | services、stores | 9 |
+| i18n | 无 | 0 | 无 | 0 |
 
-| 模块 | dependsOn（出边） | usedBy（入边来源） |
-|---|---|---|
-| src | services, lib, components | （无） |
-| lib | services | services, stores, components, src |
-| services | lib, components | lib, src, stores, components |
-| components | lib, services | services, src |
-| stores | lib, services | （无） |
-| i18n | （无） | （无） |
-
-（`modules[].dependsOn` / `modules[].usedBy`）
+（出入向调用次数由上表依赖边汇总得出。）
 
 ### 关键依赖路径分析
 
-1. **`lib` 是全图聚合中心。** 4 个模块向其发起调用，入边次数合计 20+9+7+6 = 42 次，占全部调用次数的 53.2%。`lib` 自身仅依赖 `services`（1 条出边）。
-2. **`services` 是第二层聚合点。** 入边次数 18+7+6+3 = 34 次（43.0%）；出边指向 `lib`(20) 与 `components`(2)。
-3. **最强的耦合是一对双向调用环：`services` ↔ `lib`。** 两个方向合计 38 次（48.1%），是所有边中权重最高的一对，构成显式循环依赖。
-4. **次强环：`services` ↔ `components`。** `services → components` 2 次、`components → services` 3 次，规模小但方向成环。
-5. **`stores` 只有出边、没有入边。** 它向 `lib`(9)、`services`(6) 发起调用，但不在任何模块的 `usedBy` 列表中；`src` 的 `dependsOn` 也不含 `stores`。
-6. **`src` 是叶子型调用方。** 其 `usedBy` 为空，仅向下调用 `services`/`lib`/`components`（合计 14 次），且不调用 `stores`。
-7. **依赖环汇总**：`services ↔ lib`、`services ↔ components` 两处为双向边；`lib` 与 `services` 处于同一强连通结构中，二者无法单向分层。
+- **`lib` 是被依赖最集中的模块**：被 `services`、`stores`、`components`、`src` 四个模块使用，入向调用合计 57 次，其中 `services→lib` 单边 34 次为全图最高。这说明 `lib` 处于依赖结构的底层，被上层广泛复用。
+- **`services` 是调用发起最多的模块**：出向调用合计 38 次（`→lib` 34 次、`→components` 4 次），同时又被 `lib`、`src`、`stores`、`components` 四个模块调用（入向 40 次），是连接上下层的中枢。
+- **存在两处双向依赖（循环依赖）**：
+  - `services ↔ lib`：34 次 + 22 次，是全图调用量最大的一对模块；
+  - `services ↔ components`：各 4 次。
+  这两条路径意味着 `services` 与 `lib`、`components` 之间无法形成单向分层，改动任一侧都可能反向影响。
+- **两条上层调用链**：
+  - `src → services → lib`（`src→services` 8 次、`services→lib` 34 次）；
+  - `src → lib`（7 次，直连）。
+  `src` 不依赖 `stores` 与 `components`，其对外依赖全部落在 `services` 与 `lib` 上。
+- **`stores` 的依赖面最宽**：同时依赖 `lib`（9 次）、`services`（6 次）、`components`（1 次）三个模块，但没有被任何模块使用，处于调用链末端。
+- **`i18n` 在依赖数据中完全孤立**：既无出向依赖也无入向依赖。其注册/装载方式需要源码证据才能说明。
 
 ### 横切关注点
 
-在提供的依赖与模块数据中，**未出现任何错误处理、日志、配置管理相关的模块节点、依赖边或调用证据**。为避免无依据推断，以下仅列出数据能确认的事实与缺口：
+数据中未包含错误处理、日志、配置管理相关的模块、调用边或配置项证据，无法基于现有数据描述这些机制的实现位置与作用范围，下列三项均标注为「待确认」。
 
-| 横切关注点 | 数据中的证据 | 结论 |
-|---|---|---|
-| 错误处理 | 无边界边、无模块节点与错误处理相关 | 信息不足，待确认 |
-| 日志 | 无边界边、无模块节点与日志相关 | 信息不足，待确认 |
-| 配置管理 | 无边界边、无模块节点与配置相关 | 信息不足，待确认 |
-| 国际化 | 存在模块 `i18n`（`modules[].name`），其 `dependsOn` 与 `usedBy` 均为空，`boundaries` 中无任何入边/出边 | 仅能确认该模块在依赖图中孤立；其被谁消费、由谁加载，待确认 |
+| 横切机制 | 依据数据可确认的内容 | 待确认 |
+| --- | --- | --- |
+| 错误处理 | 无可确认证据 | 待确认：缺少错误/异常相关模块、类型或调用边，无法定位统一的错误处理入口与传播策略 |
+| 日志 | 无可确认证据 | 待确认：缺少日志工具模块及其调用方，无法说明日志落点与级别管理方式 |
+| 配置管理 | 无可确认证据 | 待确认：模块清单中无配置类模块，依赖边中亦无配置读取调用，无法说明配置来源与加载时机 |
+| 国际化（i18n） | 存在 `i18n` 模块，但在依赖边中无任何出入向调用 | 待确认：`i18n` 如何被业务模块装载与使用，缺少调用边或引用证据 |
 
-**推断（依据：模块命名 `i18n` 为国际化（internationalization）的通用缩写惯例）**：`i18n` 可能承担文本/多语言资源的横切职责。推断依据仅为命名特征，数据中无调用边、无引用点、无依赖关系可佐证，实际用途待确认。
-
-### 待确认清单
-
-| 编号 | 缺口 | 缺少的证据 |
-|---|---|---|
-| 1 | 错误处理机制在哪一层实现 | 无错误处理相关模块节点或调用边 |
-| 2 | 日志采集位置与实现 | 无日志相关模块节点或调用边 |
-| 3 | 配置来源与加载时机 | 无配置相关模块节点或调用边 |
-| 4 | `i18n` 的消费方与加载方式 | `usedBy`/`boundaries` 中无任何入边 |
-| 5 | `stores` 的调用方 | `usedBy` 为空，且不在 `src` 的 `dependsOn` 中 |
+此外，`services ↔ lib`、`services ↔ components` 的双向依赖会放大任何横切机制（如错误处理、日志）改动的影响面：这些机制若落在 `lib` 或 `services` 任一侧，都会经由上述双向边传导到对方。
 ## Related
 
 - 同目录：[modules.md](modules.md)
 - 互补职责：[modules.md](../02-architecture/modules.md)
-- 共享 3 个源文件、共享 15 个符号：[api.md](../03-interface/api.md)
-- 共享 1 个源文件、共享 16 个符号：[overview.md](../01-overview/overview.md)
-- 共享 2 个源文件、共享 9 个符号：[troubleshooting.md](../05-guides/troubleshooting.md)
+- 共享 6 个源文件、共享 6 个符号：[api.md](../03-interface/api.md)
+- 共享 3 个源文件、共享 6 个符号：[overview.md](../01-overview/overview.md)
+- 共享 6 个源文件、共享 2 个符号：[onboarding.md](../05-guides/onboarding.md)
 - 总入口：[README](../README.md)
+
+<!-- wiki:source: llm -->

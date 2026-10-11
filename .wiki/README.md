@@ -7,9 +7,11 @@
 - README.md
 </details>
 
+> 本 Wiki 基于 commit `9c37721`（2026-10-11）生成；代码演进后请重新构建以保证内容与实现一致。
+
 | 项 | 值 |
 | --- | --- |
-| 版本 | 0.2.1 |
+| 版本 | 0.2.2 |
 | 许可证 | - |
 | 运行时 | ESM |
 
@@ -42,7 +44,6 @@
 | [03-interface/api.md](03-interface/api.md) | structure | 导出函数与 CLI 命令（带 file:line） |
 | [03-interface/components.md](03-interface/components.md) | surface | 前端组件清单与被引用度 |
 | [03-interface/state.md](03-interface/state.md) | surface | 状态管理：store 清单与消费关系 |
-| [03-interface/routing.md](03-interface/routing.md) | surface | 前端路由表（path → 组件） |
 
 ## 04-design/
 
@@ -78,6 +79,7 @@
 | 文档 | 层级 | 回答的问题 |
 | --- | --- | --- |
 | [08-topics/frontends-middleware-services.md](08-topics/frontends-middleware-services.md) | structure | 仓库专属主题（图谱聚类推导） |
+| [08-topics/ci-keypress-cmd-t-double-open.md](08-topics/ci-keypress-cmd-t-double-open.md) | structure | 仓库专属主题（图谱聚类推导） |
 
 ## 相关文档（仓库）
 
@@ -87,3 +89,4 @@ Wiki 之外的既有文档，链接为仓库相对路径
 | --- | --- |
 | [README.md](../README.md) | scx-terminal |
 | [AGENTS.md](../AGENTS.md) | AI Code Agent |
+<!-- wiki:source: fallback -->
