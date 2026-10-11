@@ -280,7 +280,23 @@ function setRenameInput (el: unknown): void {
 }
 
 /**
- * @description 进入标签行内重命名模式，预填当前显示标题
+ * @description 重命名期间的焦点守护：reka-ui 菜单卸载后会在 setTimeout(0) 中把焦点
+ *              还原到触发元素（晚于 nextTick 聚焦输入框），导致键入字符进不了输入框；
+ *              重命名期间任何 focusin 到非输入框元素时强制收回焦点
+ * @param event focusin 事件
+ * @returns void
+ *
+ */
+function guardRenameFocus (event: FocusEvent): void {
+    if (!renamingId.value || event.target === renameInputEl.value) {
+        return
+    }
+    renameInputEl.value?.focus()
+}
+
+/**
+ * @description 进入标签行内重命名模式，预填当前显示标题；rAF 聚焦晚于 reka-ui 菜单
+ *              卸载时的 setTimeout(0) 焦点还原，避免初始聚焦被抢占
  * @param tab 目标标签
  * @returns void
  *
@@ -288,7 +304,10 @@ function setRenameInput (el: unknown): void {
 function startRename (tab: Tab): void {
     renamingId.value = tab.id
     renameValue.value = displayTitle(tab)
-    void nextTick(() => renameInputEl.value?.focus())
+    document.addEventListener('focusin', guardRenameFocus, true)
+    void nextTick(() => {
+        requestAnimationFrame(() => renameInputEl.value?.focus())
+    })
 }
 
 /**
@@ -301,6 +320,7 @@ function commitRename (): void {
         store.renameTab(renamingId.value, renameValue.value)
     }
     renamingId.value = null
+    document.removeEventListener('focusin', guardRenameFocus, true)
 }
 
 /**
@@ -310,6 +330,7 @@ function commitRename (): void {
  */
 function cancelRename (): void {
     renamingId.value = null
+    document.removeEventListener('focusin', guardRenameFocus, true)
 }
 
 /**
