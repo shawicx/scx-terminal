@@ -147,6 +147,7 @@ export const settings = {
         quickCommandReferencedBody: '"{name}" is referenced by the following workflows — remove the step there first: {workflows}',
         workflows: 'Workflows',
         workflowNew: 'New workflow',
+        workflowEdit: 'Edit workflow',
         workflowUntitled: 'Untitled workflow',
         workflowEmptyHint: 'No workflows yet — create one here',
         workflowName: 'Name',

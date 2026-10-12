@@ -147,6 +147,7 @@ export const settings = {
         quickCommandReferencedBody: '「{name}」被以下工作流引用，请先在工作流中移除该步骤：{workflows}',
         workflows: '工作流',
         workflowNew: '新建工作流',
+        workflowEdit: '编辑工作流',
         workflowUntitled: '未命名工作流',
         workflowEmptyHint: '还没有工作流，可在此创建',
         workflowName: '名称',

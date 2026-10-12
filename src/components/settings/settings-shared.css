@@ -140,12 +140,15 @@
 
 .profile-new-group {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     margin-bottom: 6px;
 }
 
+/* 弹性换行 + 禁止文字折行：按钮多时不挤压成竖排文字（如工作流页 5 个操作） */
 .profile-new-group .profile-new-button {
-    flex: 1 1 0;
+    flex: 1 1 auto;
+    white-space: nowrap;
     margin-bottom: 0;
 }
 

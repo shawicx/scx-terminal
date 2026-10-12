@@ -4900,7 +4900,7 @@ dependencies = [
 
 [[package]]
 name = "scx-terminal"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "aes-gcm",
  "argon2 0.5.3",
