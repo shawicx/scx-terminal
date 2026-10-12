@@ -1,6 +1,20 @@
 # scx-terminal
 
-一个基于 **Tauri V2 + Rust + Vue 3 + shadcn-vue** 的跨平台终端应用。
+<div align="center">
+
+[![Stars](https://img.shields.io/github/stars/shawicx/scx-terminal?style=flat&logo=github&color=yellow)](https://github.com/shawicx/scx-terminal/stargazers)
+[![Release](https://img.shields.io/github/v/release/shawicx/scx-terminal?logo=github&color=blue)](https://github.com/shawicx/scx-terminal/releases)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey?logo=apple)](https://github.com/shawicx/scx-terminal/releases)
+[![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](https://v2.tauri.app)
+[![Vue 3](https://img.shields.io/badge/Vue-3.x-4FC08D?logo=vuedotjs&logoColor=white)](https://vuejs.org)
+[![Rust](https://img.shields.io/badge/Rust-stable-DEA584?logo=rust&logoColor=white)](https://www.rust-lang.org)
+
+**简体中文** | [English](./README.en.md)
+
+</div>
+
+一个基于 **Tauri V2 + Rust + Vue 3 + shadcn-vue（基于 reka-ui）** 的跨平台终端应用。
 
 由开源项目 [Tabby](https://github.com/Eugeny/tabby)（MIT License）改造而来，重写了整体架构：
 
@@ -43,7 +57,7 @@
 
 ```bash
 bun install
-bun run tauri dev
+bun run app:dev
 ```
 
 常用脚本：
@@ -51,8 +65,8 @@ bun run tauri dev
 | 命令 | 说明 |
 | --- | --- |
 | `bun run dev` | 仅启动前端 Vite 开发服务器 |
-| `bun run tauri dev` | 启动完整桌面应用（开发模式） |
-| `bun run tauri build` | 构建发布版安装包 |
+| `bun run app:dev` | 启动完整桌面应用（开发模式） |
+| `bun run app:build` | 构建发布版安装包 |
 | `bun run lint` | oxlint 检查 |
 | `bun run test` | vitest 单元测试 |
 
@@ -61,13 +75,12 @@ bun run tauri dev
 ```
 src/          Vue 前端（components / stores / services / lib / i18n）
 src-tauri/    Rust 后端（pty 背压队列 / config 持久化 / shells 探测）
-docs/         设计文档（Tabby → Tauri 移植记录）
 ```
 
 ## 构建产物
 
-`bun run tauri build` 产出 `src-tauri/target/release/bundle/macos/scx-terminal.app`
-（约 5MB）。DMG 由 tauri 的美化脚本（create-dmg，依赖 Finder/AppleScript 权限）
+`bun run app:build` 产出 `src-tauri/target/release/bundle/macos/scx-terminal.app`
+（约 10MB）。DMG 由 tauri 的美化脚本（create-dmg，依赖 Finder/AppleScript 权限）
 生成；在无 GUI 权限的环境可用 hdiutil 兜底：
 
 ```bash
@@ -78,9 +91,9 @@ hdiutil create -volname scx-terminal \
 
 ## 调试
 
-- `SCX_DEVTOOLS=1 bun run tauri dev` 自动打开 WebView Inspector
+- `SCX_DEVTOOLS=1 bun run app:dev` 自动打开 WebView Inspector
 - 前端错误会转发到 Rust 控制台（`[scx:js]` 前缀）
 
 ## 许可
 
-本项目衍生自 Tabby（Copyright (c) 2018 Eugene Pankov），沿用 MIT License，见 [LICENSE](./LICENSE)。
+本项目衍生自 Tabby（Copyright (c) 2017 Tabby Developers），沿用 MIT License，见 [LICENSE](./LICENSE)。
