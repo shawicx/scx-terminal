@@ -5,7 +5,7 @@
  *              由 App.vue 渲染在内容区下方、此处不渲染标签。
  */
 import { computed } from 'vue'
-import { ArrowRightLeft, ArrowUpDown, Settings } from 'lucide-vue-next'
+import { ArrowRightLeft, ArrowUpDown, Server, Settings } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { platform } from '@/lib/platform'
 import { useTabsStore } from '@/stores/tabs'
@@ -72,6 +72,11 @@ const tabsInline = computed(() => config.store.appearance.tabBarPosition !== 'bo
             <span v-else-if="forwardingStore.failedStates.length > 0" class="indicator-dot"></span>
         </button>
 
+        <!-- 连接中心常驻入口（单例标签，同 openForwardingTab 先例）：关闭后可随时重开 -->
+        <button class="new-tab-button start-button" :title="t('commands.openStart')" @click="store.openStartTab()">
+            <Server :size="18" />
+        </button>
+
         <button class="new-tab-button settings-button" :title="t('commands.openSettings')" @click="store.openSettingsTab()">
             <Settings :size="18" />
         </button>
@@ -124,6 +129,12 @@ const tabsInline = computed(() => config.store.appearance.tabBarPosition !== 'bo
 .settings-button {
     align-self: center;
     margin-right: 8px;
+}
+
+/* 连接中心按钮：紧贴设置按钮左侧，外观同款 */
+.start-button {
+    align-self: center;
+    margin-right: 4px;
 }
 
 /* 标题栏指示器（传输/隧道）：无任务时仍可见但弱化，有任务徽标/红点时高亮 */
