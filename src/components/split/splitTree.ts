@@ -120,6 +120,13 @@ export function splitLeaf (root: SplitNode, leafId: string, direction: 'right' |
     }
 
     const target = ref.parent.children[ref.index]!
+    // 同方向分屏：新叶直接插入为兄弟节点，避免把目标叶包进新分支导致其组件
+    // 在 vdom 中换位被 Vue 卸载重建（会丢失源窗格会话）
+    if (ref.parent.orientation === orientation) {
+        ref.parent.children.splice(ref.index + 1, 0, newLeaf)
+        ref.parent.ratios.splice(ref.index + 1, 0, Math.max(1, ref.parent.ratios[ref.index] ?? 1))
+        return { tree, newLeafId: newLeaf.id }
+    }
     const branch = makeBranch(orientation, [target, newLeaf])
     ref.parent.children[ref.index] = branch
     ref.parent.ratios[ref.index] = Math.max(1, ref.parent.ratios[ref.index]!)

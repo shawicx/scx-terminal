@@ -283,6 +283,11 @@ async function start (): Promise<void> {
             emit('bell')
         })
         session.destroyed$.subscribe(() => {
+            // 组件卸载触发的销毁（分屏换位重建等）不得回报 closed：
+            // 否则 closePane 会把刚分好的树剪掉（新窗格闪现后消失的级联）
+            if (disposed) {
+                return
+            }
             // 注销注册表中的窗格连接（SFTP 标签等消费者据此感知并转后台连接）
             if (registeredSshId) {
                 unregisterPaneSession(props.profile.id, registeredSshId)

@@ -47,6 +47,32 @@ describe('split tree', () => {
         expect(bBranch && bBranch.type === 'branch' ? bBranch.orientation : null).toBe('v')
     })
 
+    it('inserts the new leaf as a sibling when the parent orientation matches', () => {
+        const a = makeLeaf()
+        const b = makeLeaf()
+        const root = makeBranch('h', [a, b])
+        const { tree, newLeafId } = splitLeaf(root, a.id, 'right')!
+        // 同向分屏：不新建分支，a 保持原位（组件不被卸载重建）
+        expect(tree.type).toBe('branch')
+        if (tree.type !== 'branch') {
+            return
+        }
+        expect(tree.children.map(c => c.id)).toEqual([a.id, newLeafId, b.id])
+        expect(listLeaves(tree).map(l => l.id)).toEqual([a.id, newLeafId, b.id])
+        // 新叶与源叶等份额
+        expect(tree.ratios[0]).toBe(tree.ratios[1])
+    })
+
+    it('same-orientation split of a root-only leaf still wraps the tree', () => {
+        const root = makeLeaf()
+        const { tree, newLeafId } = splitLeaf(root, root.id, 'right')!
+        expect(tree.type).toBe('branch')
+        if (tree.type !== 'branch') {
+            return
+        }
+        expect(tree.children.map(c => c.id)).toEqual([root.id, newLeafId])
+    })
+
     it('removing a leaf prunes single-child branches', () => {
         const a = makeLeaf()
         const b = makeLeaf()
