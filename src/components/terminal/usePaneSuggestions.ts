@@ -14,6 +14,7 @@ import type { ConfigStore } from '@/stores/config/types'
 import { listLocalDir, SshPathLister } from '@/services/pathCompletion'
 import { openQuickCommandPalette } from '@/services/quickCommandPalette'
 import { openWorkflowPalette } from '@/services/workflowPalette'
+import { visibleWorkflows } from '@/lib/builtinWorkflows'
 
 /** usePaneSuggestions 的依赖集（全部现读访问器，配置/会话变更即时生效） */
 export interface PaneSuggestionsDeps {
@@ -115,7 +116,7 @@ export function usePaneSuggestions (deps: PaneSuggestionsDeps) {
                 command: qc.command,
                 groupName: deps.config().quickCommandGroups.find(group => group.id === qc.groupId)?.name ?? null,
             })),
-            workflows: () => deps.config().workflows
+            workflows: () => visibleWorkflows(deps.config())
                 .filter(workflow => workflow.steps.length > 0 && workflow.name)
                 .map(workflow => ({ id: workflow.id, name: workflow.name })),
             sendInput: text => deps.session()?.feedFromTerminal(encodeUTF8(text)),

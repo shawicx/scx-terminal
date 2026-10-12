@@ -237,12 +237,22 @@ export interface MonitorConfig {
 /** hotkey id -> list of sequences, each sequence a list of keystrokes */
 export type HotkeysConfig = Record<string, string[][]>
 
+/** 内置工作流控制状态：隐藏（删除）清单 + 用户导入的内置扩展包（随 config 持久化） */
+export interface WorkflowCtlConfig {
+    /** 被用户隐藏的内置工作流 id（重置 = 清空） */
+    removed: string[]
+    /** 用户导入的内置扩展包工作流（scope: builtin，upsert by id；重置不清除） */
+    packs: Workflow[]
+}
+
 export interface ConfigStore {
     terminal: TerminalConfig
     appearance: AppearanceConfig
     advanced: AdvancedConfig
     recents: RecentsConfig
     monitor: MonitorConfig
+    /** 内置工作流控制状态 */
+    workflowCtl: WorkflowCtlConfig
     hotkeys: HotkeysConfig
     profiles: TerminalProfile[]
     /** 本地档案分组（本地档案以 groupId 引用） */
@@ -265,6 +275,7 @@ export interface ConfigSnapshot {
     advanced?: Partial<AdvancedConfig>
     recents?: RecentsConfig
     monitor?: Partial<MonitorConfig>
+    workflowCtl?: Partial<WorkflowCtlConfig>
     hotkeys?: HotkeysConfig
     profiles?: TerminalProfile[]
     localGroups?: LocalGroup[]

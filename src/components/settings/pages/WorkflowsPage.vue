@@ -7,8 +7,9 @@
 -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { nanoid } from 'nanoid'
 import { useI18n } from 'vue-i18n'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Download, Plus, Trash2, Upload } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, Download, EyeOff, Plus, RotateCcw, Trash2, Upload } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import Label from '@/components/ui/Label.vue'
@@ -20,18 +21,31 @@ import {
     buildWorkflow, buildWorkflowStep, collectWorkflowParams, previewWorkflow,
     stepCommandTemplate, validateWorkflowV2,
 } from '@/lib/workflows'
-import { buildImportedWorkflow, WorkflowYamlError, type YamlWorkflow } from '@/lib/workflowYaml'
+import {
+    BUILTIN_WORKFLOW_ID_PREFIX, builtinCatalog, builtinSlugFromName, hideBuiltinWorkflow,
+    isBuiltinId, resetBuiltinWorkflows, visibleBuiltinWorkflows, visibleWorkflows,
+} from '@/lib/builtinWorkflows'
+import { buildImportedWorkflow, WorkflowYamlError } from '@/lib/workflowYaml'
 import { confirmAction } from '@/components/settings/useConfirmAction'
 import { useDraftEditor } from '@/components/settings/useDraftEditor'
-import { exportAllWorkflowsToFile, exportWorkflowToFile, importWorkflowsFromFile } from '@/services/workflowYamlIo'
+import { exportAllWorkflowsToFile, exportBuiltinsToFile, exportWorkflowToFile, importWorkflowsFromFile, type ImportedWorkflowDoc } from '@/services/workflowYamlIo'
 
 const { t } = useI18n()
 const config = useConfigStore()
 const store = config.store
 
+/** 可见工作流全集（可见内置在前 + 用户工作流在后）：列表/选中统一数据源 */
+const allWorkflows = computed(() => visibleWorkflows(store))
+
+/** 可见内置目录（隐藏清单已过滤） */
+const visibleBuiltins = computed(() => visibleBuiltinWorkflows(store))
+
+/** 被隐藏的内置数量（> 0 时展示重置入口） */
+const hiddenBuiltinCount = computed(() => builtinCatalog(store).length - visibleBuiltins.value.length)
+
 const selectedWorkflowId = ref<string | null>(null)
 const selectedWorkflow = computed(() =>
-    store.workflows.find(workflow => workflow.id === selectedWorkflowId.value)
+    allWorkflows.value.find(workflow => workflow.id === selectedWorkflowId.value)
     ?? store.workflows[0]
     ?? null)
 
@@ -54,14 +68,15 @@ const workflowEditor = useDraftEditor<Workflow>({
 const { draft: wfDraft, isNew: isNewWfDraft, dirty: isWfDraftDirty } = workflowEditor
 
 /**
- * @description 把编辑器同步到当前选中项（选中变化/删除后的兜底收敛均走这里）
+ * @description 把编辑器同步到当前选中项：内置项只读（编辑走派生副本），编辑器清空；
+ *              选中变化/删除后的兜底收敛均走这里
  * @returns void
  *
  * @example syncEditorToSelection()
  *
  */
 function syncEditorToSelection (): void {
-    if (selectedWorkflow.value) {
+    if (selectedWorkflow.value && !isBuiltinId(selectedWorkflow.value.id)) {
         workflowEditor.edit(selectedWorkflow.value)
     } else {
         workflowEditor.clear()
@@ -71,14 +86,19 @@ function syncEditorToSelection (): void {
 watch(selectedWorkflow, syncEditorToSelection, { immediate: true })
 
 /**
- * @description 选中左侧列表工作流（有未保存修改时经确认弹窗放行）
- * @param workflow 目标工作流
+ * @description 选中左侧列表工作流：内置项直接选中（只读详情）；用户项有未保存修改时
+ *              经确认弹窗放行
+ * @param workflow 目标工作流（内置或用户）
  * @returns void
  *
  * @example selectWorkflow(workflow)
  *
  */
 function selectWorkflow (workflow: Workflow): void {
+    if (isBuiltinId(workflow.id)) {
+        selectedWorkflowId.value = workflow.id
+        return
+    }
     workflowEditor.guard(t('settings.unsavedChangesBody'), () => {
         if (workflow.id !== selectedWorkflowId.value) {
             selectedWorkflowId.value = workflow.id
@@ -349,6 +369,60 @@ function confirmDeleteWorkflow (workflow: Workflow): void {
     confirmAction(t('settings.deleteConfirmBody', { name }), () => deleteWorkflow(workflow.id))
 }
 
+// ---- 内置工作流控制（只读 + 派生编辑 + 隐藏/重置） ----
+
+/** 当前选中的是否为内置项（详情区按此渲染只读卡片） */
+const isBuiltinSelected = computed(() => isBuiltinId(selectedWorkflow.value?.id ?? ''))
+
+/**
+ * @description 派生内置工作流为可编辑用户副本：复制入用户列表、原内置项进入隐藏
+ *              态（避免两条同名），并选中副本进入编辑
+ * @param workflow 目标内置工作流
+ * @returns void
+ *
+ * @example deriveBuiltinWorkflow(builtin)
+ *
+ */
+function deriveBuiltinWorkflow (workflow: Workflow): void {
+    const copy: Workflow = {
+        ...structuredClone(workflow),
+        id: `wf-${nanoid(8)}`,
+    }
+    copy.steps = copy.steps.map(step => ({ ...step, id: `step-${nanoid(6)}` }))
+    store.workflows.push(copy)
+    hideBuiltinWorkflow(store, workflow.id)
+    selectedWorkflowId.value = copy.id
+    syncEditorToSelection()
+}
+
+/**
+ * @description 隐藏（内置「删除」）内置工作流：记入隐藏清单，可随时重置恢复
+ * @param workflow 目标内置工作流
+ * @returns void
+ *
+ */
+function confirmHideBuiltin (workflow: Workflow): void {
+    confirmAction(t('settings.workflowBuiltinHideBody', { name: workflow.name }), () => {
+        hideBuiltinWorkflow(store, workflow.id)
+        if (selectedWorkflowId.value === workflow.id) {
+            selectedWorkflowId.value = store.workflows[0]?.id ?? null
+        }
+        syncEditorToSelection()
+    })
+}
+
+/**
+ * @description 重置内置目录：清空隐藏清单，全部内置恢复展示（扩展包保留）
+ * @returns void
+ *
+ */
+function confirmResetBuiltins (): void {
+    confirmAction(t('settings.workflowBuiltinResetBody', { count: hiddenBuiltinCount.value }), () => {
+        resetBuiltinWorkflows(store)
+        syncEditorToSelection()
+    })
+}
+
 // ---- YAML 导入导出（三期） ----
 
 /** 页面内 notice：成功/警告（绿）/错误（红）；空串 = 无 */
@@ -413,8 +487,61 @@ async function exportAllWorkflows (): Promise<void> {
 }
 
 /**
- * @description 从 YAML 文件导入工作流：打开对话框 → 解析 → 预览确认（名称与步骤数）
- *              → 构建（一律新 id，步骤全内联）入 store 并选中第一条
+ * @description 导出内置目录（随包 + 扩展包）为多文档 YAML：附 scope/id/hidden 元数据，
+ *              可再导入恢复或同步到其他设备（无内置时 no-op）
+ * @returns Promise<void>
+ *
+ * @example void exportBuiltins()
+ *
+ */
+async function exportBuiltins (): Promise<void> {
+    if (!builtinCatalog(store).length) {
+        return
+    }
+    resetIoMessages()
+    try {
+        const result = await exportBuiltinsToFile(builtinCatalog(store), store.workflowCtl.removed)
+        if (!result) {
+            return
+        }
+        ioNotice.value = t('settings.workflowExportDone')
+    } catch (error) {
+        ioError.value = t('settings.workflowExportFailed', { message: String(error) })
+    }
+}
+
+/**
+ * @description 导入的内置文档 upsert 进扩展包：稳定 id（doc id 或名称 slug）+ builtin-
+ *              前缀；文档带 hidden 标记时同步进隐藏清单
+ * @param docs 内置文档列表
+ * @returns void
+ *
+ */
+function upsertBuiltinPackDocs (docs: ImportedWorkflowDoc[]): void {
+    for (const doc of docs) {
+        const id = `${BUILTIN_WORKFLOW_ID_PREFIX}${doc.workflow.id ?? builtinSlugFromName(doc.workflow.name)}`
+        const built = buildImportedWorkflow(doc.workflow, id)
+        const index = store.workflowCtl.packs.findIndex(pack => pack.id === id)
+        if (index === -1) {
+            store.workflowCtl.packs.push(built)
+        } else {
+            store.workflowCtl.packs.splice(index, 1, built)
+        }
+        if (doc.hidden) {
+            hideBuiltinWorkflow(store, id)
+        } else {
+            const removedIndex = store.workflowCtl.removed.indexOf(id)
+            if (removedIndex !== -1) {
+                store.workflowCtl.removed.splice(removedIndex, 1)
+            }
+        }
+    }
+}
+
+/**
+ * @description 从 YAML 文件导入工作流（bundle 解析按 scope 分流）：user 文档走既有
+ *              流程（预览确认 → 新 id 入用户列表）；builtin 文档 upsert 进内置扩展包
+ *              并同步 hidden 标记
  * @returns Promise<void>
  *
  * @example void importWorkflows()
@@ -422,28 +549,49 @@ async function exportAllWorkflows (): Promise<void> {
  */
 async function importWorkflows (): Promise<void> {
     resetIoMessages()
-    let parsed: YamlWorkflow[]
+    let docs: ImportedWorkflowDoc[]
     try {
         const result = await importWorkflowsFromFile()
         if (!result) {
             return
         }
-        parsed = result.workflows
+        docs = result.docs
     } catch (error) {
         ioError.value = error instanceof WorkflowYamlError
             ? t(`settings.workflowImport${error.code}`)
             : t('settings.workflowImportFailed', { message: String(error) })
         return
     }
-    const summary = parsed
-        .map(item => `${item.name}（${item.steps.length}）`)
-        .join('、')
-    confirmAction(t('settings.workflowImportConfirmBody', { count: parsed.length, names: summary }), () => {
-        for (const item of parsed) {
-            store.workflows.push(buildImportedWorkflow(item))
+    const builtinDocs = docs.filter(doc => doc.scope === 'builtin')
+    const userDocs = docs.filter(doc => doc.scope !== 'builtin')
+    const importUser = (): void => {
+        for (const doc of userDocs) {
+            store.workflows.push(buildImportedWorkflow(doc.workflow))
         }
-        selectedWorkflowId.value = store.workflows[store.workflows.length - parsed.length]?.id ?? null
-        ioNotice.value = t('settings.workflowImportDone', { count: parsed.length })
+        selectedWorkflowId.value = store.workflows[store.workflows.length - userDocs.length]?.id ?? null
+    }
+    if (builtinDocs.length) {
+        confirmAction(
+            t('settings.workflowImportBuiltinConfirmBody', {
+                count: builtinDocs.length,
+                names: builtinDocs.map(doc => `${doc.workflow.name}（${doc.workflow.steps.length}）`).join('、'),
+            }),
+            () => {
+                upsertBuiltinPackDocs(builtinDocs)
+                ioNotice.value = t('settings.workflowImportBuiltinDone', { count: builtinDocs.length })
+                if (userDocs.length) {
+                    importUser()
+                    ioNotice.value = t('settings.workflowImportDone', { count: docs.length })
+                }
+            })
+        return
+    }
+    const summary = userDocs
+        .map(doc => `${doc.workflow.name}（${doc.workflow.steps.length}）`)
+        .join('、')
+    confirmAction(t('settings.workflowImportConfirmBody', { count: userDocs.length, names: summary }), () => {
+        importUser()
+        ioNotice.value = t('settings.workflowImportDone', { count: userDocs.length })
     })
 }
 </script>
@@ -470,27 +618,88 @@ async function importWorkflows (): Promise<void> {
                     <Download :size="14" />
                     <span>{{ t('settings.workflowExportAll') }}</span>
                 </button>
+                <button
+                    class="profile-new-button"
+                    :disabled="!builtinCatalog(store).length"
+                    @click="void exportBuiltins()"
+                >
+                    <Download :size="14" />
+                    <span>{{ t('settings.workflowExportBuiltins') }}</span>
+                </button>
+                <button
+                    v-if="hiddenBuiltinCount > 0"
+                    class="profile-new-button"
+                    @click="confirmResetBuiltins"
+                >
+                    <RotateCcw :size="14" />
+                    <span>{{ t('settings.workflowBuiltinReset', { count: hiddenBuiltinCount }) }}</span>
+                </button>
             </div>
             <p v-if="ioNotice" class="hint wf-io-notice">{{ ioNotice }}</p>
             <p v-if="ioError" class="hint wf-validation-error">{{ ioError }}</p>
             <button
-                v-for="workflow in store.workflows"
+                v-for="workflow in allWorkflows"
                 :key="workflow.id"
                 class="profile-item"
-                :class="{ active: workflow.id === wfDraft?.id }"
+                :class="{ active: workflow.id === selectedWorkflow?.id && (isBuiltinId(workflow.id) || workflow.id === wfDraft?.id) }"
                 @click="selectWorkflow(workflow)"
             >
                 <span class="profile-item-head">
                     <span class="profile-item-name">{{ workflow.name || t('settings.workflowUntitled') }}</span>
+                    <span v-if="isBuiltinId(workflow.id)" class="wf-builtin-badge">{{ t('settings.workflowBuiltinBadge') }}</span>
                     <span class="wf-mode-badge">{{ workflow.execution === 'joined' ? '&&' : '⇥' }}</span>
                 </span>
                 <span class="profile-item-command">{{ previewWorkflow(workflow, store.quickCommands) }}</span>
             </button>
-            <p v-if="store.workflows.length === 0" class="hint">
+            <p v-if="allWorkflows.length === 0" class="hint">
                 {{ t('settings.workflowEmptyHint') }}
             </p>
         </div>
-        <div v-if="wfDraft" class="detail-content">
+        <div v-if="isBuiltinSelected && selectedWorkflow" class="detail-content">
+            <div class="settings-section">
+                <div class="settings-card">
+                    <div class="settings-card-row">
+                        <Label>{{ t('settings.workflowName') }}</Label>
+                        <span class="wf-builtin-name">
+                            {{ selectedWorkflow.name }}
+                            <span class="wf-builtin-badge">{{ t('settings.workflowBuiltinBadge') }}</span>
+                        </span>
+                    </div>
+                    <div v-if="selectedWorkflow.description" class="settings-card-row">
+                        <Label>{{ t('settings.workflowDescription') }}</Label>
+                        <span class="wf-builtin-desc">{{ selectedWorkflow.description }}</span>
+                    </div>
+                    <div class="settings-card-row stacked">
+                        <Label>{{ t('settings.workflowSteps') }}</Label>
+                        <div v-for="(step, index) in selectedWorkflow.steps" :key="step.id" class="wf-step">
+                            <div class="wf-step-head">
+                                <span class="wf-step-index">{{ index + 1 }}</span>
+                                <span class="wf-step-preview">{{ stepPreview(step) }}</span>
+                            </div>
+                        </div>
+                        <p v-if="collectWorkflowParams(selectedWorkflow.steps, store.quickCommands).length" class="hint wf-params-hint">
+                            {{ t('settings.quickCommandParams', { names: collectWorkflowParams(selectedWorkflow.steps, store.quickCommands).join(', ') }) }}
+                        </p>
+                    </div>
+                    <p class="hint">{{ t('settings.workflowBuiltinReadonlyHint') }}</p>
+                    <div class="settings-card-row actions">
+                        <Button size="sm" @click="deriveBuiltinWorkflow(selectedWorkflow)">
+                            <Copy :size="14" />
+                            {{ t('settings.workflowBuiltinDerive') }}
+                        </Button>
+                        <Button variant="outline" size="sm" @click="void exportSelectedWorkflow()">
+                            <Download :size="14" />
+                            {{ t('settings.workflowExport') }}
+                        </Button>
+                        <Button variant="destructive-outline" size="sm" @click="confirmHideBuiltin(selectedWorkflow)">
+                            <EyeOff :size="14" />
+                            {{ t('settings.workflowBuiltinHide') }}
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div v-else-if="wfDraft" class="detail-content">
             <div class="settings-section">
                 <div class="settings-card">
                     <div class="settings-card-row">
@@ -680,6 +889,28 @@ async function importWorkflows (): Promise<void> {
 </template>
 
 <style scoped>
+.wf-builtin-badge {
+    flex-shrink: 0;
+    padding: 0 4px;
+    border-radius: 4px;
+    border: 1px solid var(--color-border);
+    color: var(--color-muted-foreground);
+    font-size: 10px;
+    line-height: 14px;
+}
+
+.wf-builtin-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+}
+
+.wf-builtin-desc {
+    font-size: 12px;
+    color: var(--color-muted-foreground);
+}
+
 .wf-mode-badge {
     flex-shrink: 0;
     padding: 0 4px;

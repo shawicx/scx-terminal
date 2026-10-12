@@ -62,6 +62,7 @@ export function defaultConfig (): ConfigStore {
         quickCommands: [],
         quickCommandGroups: [],
         workflows: [],
+        workflowCtl: { removed: [], packs: [] },
         hotkeys: defaultHotkeys(),
     }
 }

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { parse as parseYaml } from 'yaml'
 import type { QuickCommand, Workflow, WorkflowStep } from '@/stores/config'
 import {
-    buildImportedWorkflow, parseWorkflowYaml, serializeWorkflowYaml, serializeWorkflowsYaml,
+    buildImportedWorkflow, parseWorkflowBundle, parseWorkflowYaml, serializeWorkflowYaml, serializeWorkflowsYaml,
     WorkflowYamlError, WORKFLOW_YAML_FORMAT,
 } from './workflowYaml'
 
@@ -151,5 +151,60 @@ describe('buildImportedWorkflow', () => {
         expect(imported.steps[0]!.id).toMatch(/^step-/)
         expect(imported.steps[0]!.command).toBe('ls')
         expect('name' in imported.steps[0]!).toBe(false)
+    })
+})
+
+describe('scope/id/hidden 内置目录语义', () => {
+    it('scope=builtin 序列化附 scope/id/hidden，缺省不写', () => {
+        const base = workflow([{ id: 's1', kind: 'raw', command: 'a' }])
+        const builtin = serializeWorkflowYaml(base, quickCommands, { scope: 'builtin', id: 'git-undo-add', hidden: true })
+        const doc = parseYaml(builtin.yaml)
+        expect(doc.scope).toBe('builtin')
+        expect(doc.workflow.id).toBe('git-undo-add')
+        expect(doc.workflow.hidden).toBe(true)
+        // 缺省导出不携带任何元数据（向后兼容）
+        const plain = parseYaml(serializeWorkflowYaml(base, quickCommands).yaml)
+        expect(plain.scope).toBeUndefined()
+        expect(plain.workflow.id).toBeUndefined()
+        expect(plain.workflow.hidden).toBeUndefined()
+    })
+
+    it('parseWorkflowBundle 返回 scope/hidden 元信息，user 缺省归一化', () => {
+        const yaml = [
+            `format: ${WORKFLOW_YAML_FORMAT}\nversion: 1\nscope: builtin\nworkflow: { id: a, name: 内置, steps: [{ command: ls }] }`,
+            `format: ${WORKFLOW_YAML_FORMAT}\nversion: 1\nworkflow: { name: 用户, steps: [{ command: pwd }] }`,
+        ].join('\n---\n')
+        const { docs } = parseWorkflowBundle(yaml)
+        expect(docs).toHaveLength(2)
+        expect(docs[0]!.scope).toBe('builtin')
+        expect(docs[0]!.hidden).toBe(false)
+        expect(docs[0]!.workflow.id).toBe('a')
+        expect(docs[1]!.scope).toBe('user')
+        expect(docs[1]!.workflow.name).toBe('用户')
+        // parseWorkflowYaml 兼容路径仍只返回形状
+        expect(parseWorkflowYaml(yaml)).toHaveLength(2)
+    })
+
+    it('未知 scope / 非法 id 报错', () => {
+        try {
+            parseWorkflowBundle(`format: ${WORKFLOW_YAML_FORMAT}\nversion: 1\nscope: cloud\nworkflow: { name: x, steps: [{ command: ls }] }`)
+            expect.unreachable()
+        } catch (error) {
+            expect((error as WorkflowYamlError).code).toBe('badScope')
+        }
+        try {
+            parseWorkflowBundle(`format: ${WORKFLOW_YAML_FORMAT}\nversion: 1\nworkflow: { id: 'bad id!', name: x, steps: [{ command: ls }] }`)
+            expect.unreachable()
+        } catch (error) {
+            expect((error as WorkflowYamlError).code).toBe('badShape')
+        }
+    })
+
+    it('稳定 id 透传 buildImportedWorkflow（扩展包 upsert 语义）', () => {
+        const imported = buildImportedWorkflow({
+            id: 'my-entry', name: 'x', execution: 'joined', stepIntervalMs: 500, stopOnError: true,
+            steps: [{ command: 'ls' }],
+        }, 'builtin-my-entry')
+        expect(imported.id).toBe('builtin-my-entry')
     })
 })

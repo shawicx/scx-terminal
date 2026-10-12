@@ -35,6 +35,7 @@ pub(crate) fn load_internal(state: &ConfigState) -> Result<Option<ConfigSnapshot
                 "advanced" => snapshot.advanced = Some(value),
                 "recents" => snapshot.recents = Some(value),
                 "monitor" => snapshot.monitor = Some(value),
+                "workflowCtl" => snapshot.workflow_ctl = Some(value),
                 _ => snapshot.appearance = Some(value),
             }
         }

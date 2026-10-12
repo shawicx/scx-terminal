@@ -17,6 +17,7 @@ import {
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { fuzzyMatch } from '@/lib/utils/fuzzy'
 import { collectWorkflowParams, previewWorkflow } from '@/lib/workflows'
+import { visibleWorkflows } from '@/lib/builtinWorkflows'
 import { overlayEnter, overlayExit, moveHighlight } from '@/lib/motion'
 
 const { t } = useI18n()
@@ -74,7 +75,7 @@ interface VisibleItem {
 
 /** 按搜索词过滤工作流列表（名称/预览/描述模糊匹配；仅保留有可执行步骤的） */
 const visibleItems = computed<VisibleItem[]>(() =>
-    config.store.workflows
+    visibleWorkflows(config.store)
         .filter(workflow => workflow.steps.length > 0)
         .filter(workflow =>
             fuzzyMatch(query.value, workflow.name) !== null ||
@@ -111,7 +112,7 @@ function open (): void {
     hotkeys.disable()
     exitTween?.kill()
     exitTween = null
-    const pending = config.store.workflows.find(workflow => workflow.id === pendingWorkflowId.value)
+    const pending = visibleWorkflows(config.store).find(workflow => workflow.id === pendingWorkflowId.value)
     pendingWorkflowId.value = null
     if (pending) {
         enterFillParams(pending)
@@ -427,9 +428,9 @@ watch(workflowPaletteOpen, value => {
                             <span v-else class="palette-item-hotkey">{{ item.workflow.execution === 'joined' ? '&&' : '⇥' }}</span>
                         </button>
                         <div v-if="visibleItems.length === 0" class="palette-empty">
-                            <span>{{ config.store.workflows.length ? t('palette.noResults') : t('settings.workflowEmptyHint') }}</span>
+                            <span>{{ visibleWorkflows(config.store).length ? t('palette.noResults') : t('settings.workflowEmptyHint') }}</span>
                             <button
-                                v-if="!config.store.workflows.length"
+                                v-if="!visibleWorkflows(config.store).length"
                                 class="palette-empty-action"
                                 @click="close(); tabs.openSettingsTab()"
                             >

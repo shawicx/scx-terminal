@@ -9,7 +9,7 @@ import { isPlainObject } from './defaults'
 import type {
     AdvancedConfig, AppearanceConfig, ConfigStore, LocalGroup, MonitorConfig,
     QuickCommand, QuickCommandGroup, RecentsConfig, SshGroup, TabGroup, TerminalConfig,
-    TerminalProfile, Workflow,
+    TerminalProfile, Workflow, WorkflowCtlConfig,
 } from './types'
 
 /** 上次已持久化状态的基线（各实体存键排序后的稳定序列化串，用于 diff） */
@@ -19,6 +19,7 @@ export interface SavedBaseline {
     advanced: string
     recents: string
     monitor: string
+    workflowCtl: string
     hotkeys: Record<string, string>
     profiles: Record<string, string>
     quickCommands: Record<string, string>
@@ -32,7 +33,7 @@ export interface SavedBaseline {
 
 /** 一条待执行的持久化操作；saved 为该实体写入成功后记入基线的快照串 */
 export type FlushOp =
-    | { kind: 'settingsSection'; key: 'terminal' | 'appearance' | 'advanced' | 'recents' | 'monitor'; value: TerminalConfig | AppearanceConfig | AdvancedConfig | RecentsConfig | MonitorConfig; saved: string }
+    | { kind: 'settingsSection'; key: 'terminal' | 'appearance' | 'advanced' | 'recents' | 'monitor' | 'workflowCtl'; value: TerminalConfig | AppearanceConfig | AdvancedConfig | RecentsConfig | MonitorConfig | WorkflowCtlConfig; saved: string }
     | { kind: 'hotkey'; action: string; bindings: string[][]; saved: string }
     | { kind: 'profileCreate'; profile: TerminalProfile; saved: string }
     | { kind: 'profileUpdate'; profile: TerminalProfile; saved: string }
@@ -134,6 +135,10 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
     const monitor = stableStringify(store.monitor)
     if (monitor !== saved.monitor) {
         ops.push({ kind: 'settingsSection', key: 'monitor', value: store.monitor, saved: monitor })
+    }
+    const workflowCtl = stableStringify(store.workflowCtl)
+    if (workflowCtl !== saved.workflowCtl) {
+        ops.push({ kind: 'settingsSection', key: 'workflowCtl', value: store.workflowCtl, saved: workflowCtl })
     }
 
     // 热键取两侧 action 并集：saved-only 的 action 视为清空绑定（[]）
@@ -240,7 +245,7 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
 
 /** 空基线：任何非空 store 与之 diff 都会产出全量导入操作（legacy 迁移用） */
 export function emptyBaseline (): SavedBaseline {
-    return { terminal: '', appearance: '', advanced: '', recents: '', monitor: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, workflows: {}, localGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
+    return { terminal: '', appearance: '', advanced: '', recents: '', monitor: '', workflowCtl: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, workflows: {}, localGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
 }
 
 /**
@@ -258,6 +263,7 @@ export function captureBaseline (store: ConfigStore): SavedBaseline {
         advanced: stableStringify(store.advanced),
         recents: stableStringify(store.recents),
         monitor: stableStringify(store.monitor),
+        workflowCtl: stableStringify(store.workflowCtl),
         hotkeys: Object.fromEntries(Object.entries(store.hotkeys).map(([action, bindings]) => [action, stableStringify(bindings)])),
         profiles: Object.fromEntries(store.profiles.map(profile => [profile.id, stableStringify(profile)])),
         quickCommands: Object.fromEntries(store.quickCommands.map(command => [command.id, stableStringify(command)])),

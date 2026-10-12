@@ -26,8 +26,9 @@ pub use state::ConfigState;
 
 pub(crate) use state::{mark_initialized, meta_get, meta_set};
 
-/// settings 表分片白名单（load 聚合读取与 settings 写入校验共用）
-pub(super) const SETTINGS_KEYS: [&str; 5] = ["terminal", "appearance", "advanced", "recents", "monitor"];
+/// settings 表分片白名单（load 聚合读取与 settings 写入校验共用）；
+/// workflowCtl = 内置工作流控制状态（隐藏清单 + 导入的内置扩展包）
+pub(super) const SETTINGS_KEYS: [&str; 6] = ["terminal", "appearance", "advanced", "recents", "monitor", "workflowCtl"];
 
 ///
 /// @description 暴露配置库所在目录（设置页展示/在 Finder 打开；config.db 与 secrets.db 同目录）

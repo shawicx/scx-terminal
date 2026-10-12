@@ -17,6 +17,7 @@ import GroupAccordion from '@/components/settings/GroupAccordion.vue'
 import { useConfigStore, reorderGroups, type QuickCommand } from '@/stores/config'
 import { groupQuickCommandSections, parseQuickCommandParams, previewQuickCommand } from '@/lib/quickCommands'
 import { findQuickCommandRefs, previewWorkflow } from '@/lib/workflows'
+import { visibleWorkflows } from '@/lib/builtinWorkflows'
 import { confirmAction } from '@/components/settings/useConfirmAction'
 import { useDraftEditor } from '@/components/settings/useDraftEditor'
 import { openCreateQuickCommandGroup, openRenameQuickCommandGroup } from '@/components/settings/useGroupNameDialog'
@@ -212,7 +213,7 @@ function deleteQuickCommand (id: string): void {
  */
 function confirmDeleteQuickCommand (quickCommand: QuickCommand): void {
     const name = quickCommand.name || previewQuickCommand(quickCommand.command)
-    const refs = findQuickCommandRefs(store.workflows, quickCommand.id)
+    const refs = findQuickCommandRefs(visibleWorkflows(store), quickCommand.id)
     if (refs.length) {
         const refNames = refs.map(workflow => workflow.name || previewWorkflow(workflow, store.quickCommands)).join('、')
         confirmAction(

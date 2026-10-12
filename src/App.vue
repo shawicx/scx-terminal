@@ -22,6 +22,7 @@ import { useTransfersStore } from '@/stores/transfers'
 import { useForwardingStore } from '@/stores/forwarding'
 import { useMonitorStore } from '@/stores/monitor'
 import { useCommands } from '@/services/commands'
+import { visibleWorkflows } from '@/lib/builtinWorkflows'
 import { initMonitorEvents } from '@/services/monitor'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { pendingHostKey, resolvePendingHostKey, pendingKbdChallenge, resolvePendingKbd } from '@/services/sshConnections'
@@ -71,7 +72,7 @@ onMounted(() => {
     registerDefaults()
     registerProfileCommands(config.store.profiles)
     registerQuickCommandCommands(config.store.quickCommands)
-    registerWorkflowCommands(config.store.workflows)
+    registerWorkflowCommands(visibleWorkflows(config.store))
     bindHotkeys()
     void transfersStore.init()
     void forwardingStore.init()
@@ -102,8 +103,8 @@ watch(() => config.store.quickCommands, quickCommands => {
 }, { deep: true })
 
 // 工作流增删改后同步命令面板里的对应条目
-watch(() => config.store.workflows, workflows => {
-    registerWorkflowCommands(workflows)
+watch(() => [config.store.workflows, config.store.workflowCtl], () => {
+    registerWorkflowCommands(visibleWorkflows(config.store))
 }, { deep: true })
 
 // 标签栏位置（bottom 时标题栏不再内嵌标签条，由下方独立标签条接管）

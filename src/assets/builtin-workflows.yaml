@@ -1,0 +1,305 @@
+# @description 内置工作流目录（随安装包分发）：精选自 Warp 官方工作流库
+#              （github.com/warpdotdev/workflows，MIT），统一走 scx-terminal-workflow
+#              v1 自包含格式（scope: builtin + 稳定 id）；命令模板支持 {{参数}} 占位符。
+#              维护指南：新增条目 id 必须稳定（用户隐藏状态引用它），删除条目即不再展示。
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: git-delete-local-branch
+  name: Git 删除本地分支
+  description: 删除已合并到上游的本地分支（强制删除请在命令中加 --force）
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "git branch --delete {{branch_name}}"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: git-delete-remote-branch
+  name: Git 删除远程分支
+  description: 删除远程仓库上的分支
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "git push origin --delete {{branch_name}}"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: git-rename-local-branch
+  name: Git 重命名本地分支
+  description: 重命名当前或指定本地分支
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "git branch -m {{old_name}} {{new_name}}"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: git-undo-last-commit
+  name: Git 撤销最近一次提交
+  description: 撤销最近一次提交但保留改动在工作区（soft 重置）
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "git reset --soft HEAD~1"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: git-undo-add
+  name: Git 撤销暂存（undo add）
+  description: 把文件移出暂存区但保留工作区改动
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "git restore --staged {{file}}"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: git-sync-with-remote
+  name: Git 同步本地到远程
+  description: 把本地分支硬重置为远程分支状态（丢弃本地提交，慎用）
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "git fetch {{remote}} && git reset --hard {{remote}}/{{branch_name}}"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: git-squash-last-n-commits
+  name: Git 压缩最近 N 个提交
+  description: 以 soft 重置把最近 N 个提交合并为一个后重新提交
+  execution: sequential
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "git reset --soft HEAD~{{count}}"
+    - command: "git commit -m \"{{message}}\""
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: git-push-tag
+  name: Git 推送标签
+  description: 把指定标签推送到远程
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "git push origin {{tag_name}}"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: git-set-upstream
+  name: Git 设置上游分支
+  description: 为当前分支设置上游跟踪分支
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "git push --set-upstream origin {{branch_name}}"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: git-remove-submodule
+  name: Git 移除子模块
+  description: 完整移除一个 git 子模块（含配置与缓存目录）
+  execution: sequential
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "git submodule deinit -f {{submodule_path}}"
+    - command: "git rm -f {{submodule_path}}"
+    - command: "rm -rf .git/modules/{{submodule_path}}"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: shell-kill-port
+  name: 杀掉占用端口的进程
+  description: 查找并终止监听指定端口的进程
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "kill $(lsof -t -i:{{port}})"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: shell-list-port
+  name: 查看端口占用进程
+  description: 列出监听指定端口的进程详情
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "lsof -i:{{port}}"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: fs-clean-node-modules
+  name: 批量删除 node_modules
+  description: 递归查找当前目录下所有 node_modules 并删除（清理磁盘）
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "find . -name node_modules -type d -prune -exec rm -rf {} +"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: fs-find-replace-recursive
+  name: 递归查找替换
+  description: 在目录内所有文件中递归替换文本（macOS/BSD sed 语法）
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "grep -rl {{find}} . | xargs sed -i '' 's/{{find}}/{{replace}}/g'"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: fs-search-by-extension
+  name: 按扩展名递归搜索
+  description: 在指定扩展名的文件中搜索文本
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "grep -rn --include=\"*.{{extension}}\" {{pattern}} ."
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: fs-find-files-with-string
+  name: 查找含指定文本的文件
+  description: 列出目录内包含指定字符串的文件
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "grep -rl {{pattern}} {{directory}}"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: docker-clean-containers
+  name: Docker 清理已停止容器
+  description: 删除所有已停止的容器
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "docker rm $(docker ps -aq -f status=exited)"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: docker-remove-image
+  name: Docker 删除镜像
+  description: 删除本地指定镜像
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "docker rmi {{image}}"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: docker-shell-into
+  name: Docker 进入容器 shell
+  description: 在运行中的容器里启动 bash 交互 shell
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "docker exec -it {{container}} /bin/bash"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: docker-copy-from
+  name: Docker 拷贝文件到宿主
+  description: 从容器内拷贝文件/目录到宿主当前目录
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "docker cp {{container}}:{{container_path}} ."
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: ssh-generate-github-key
+  name: 生成 GitHub SSH 密钥
+  description: 生成 ed25519 SSH 密钥（邮箱用于标识）
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "ssh-keygen -t ed25519 -C \"{{email}}\""
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: curl-post-json
+  name: curl POST JSON
+  description: 向指定地址发送 JSON POST 请求
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "curl -X POST -H \"Content-Type: application/json\" -d '{{json_body}}' {{url}}"
+---
+format: scx-terminal-workflow
+version: 1
+scope: builtin
+workflow:
+  id: curl-bearer-header
+  name: curl 携带 Bearer Token
+  description: 以 Bearer 鉴权头发起 GET 请求
+  execution: joined
+  stepIntervalMs: 500
+  stopOnError: true
+  steps:
+    - command: "curl -H \"Authorization: Bearer {{token}}\" {{url}}"

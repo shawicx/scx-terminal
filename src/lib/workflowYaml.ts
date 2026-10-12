@@ -21,8 +21,10 @@ export interface YamlStep {
     capture?: StepCapture
 }
 
-/** YAML 中的工作流形状（不含本机 id） */
+/** YAML 中的工作流形状（不含本机 id；内置包文档可带稳定 id 与隐藏标记） */
 export interface YamlWorkflow {
+    /** 稳定 id（可选；scope=builtin 的文档用于 upsert 语义） */
+    id?: string
     name: string
     description?: string
     execution: 'joined' | 'sequential'
@@ -31,8 +33,17 @@ export interface YamlWorkflow {
     steps: YamlStep[]
 }
 
+/** 文档 scope：user = 用户工作流（缺省）；builtin = 内置目录条目（导入进扩展包） */
+export type YamlWorkflowScope = 'user' | 'builtin'
+
+/** 解析后的单条文档元信息：scope 与隐藏标记（跟在同 index 的工作流形状上） */
+export interface YamlWorkflowMeta {
+    scope: YamlWorkflowScope
+    hidden: boolean
+}
+
 /** 解析/校验错误码（UI 层据此翻译） */
-export type WorkflowYamlErrorCode = 'badFormat' | 'badVersion' | 'badShape'
+export type WorkflowYamlErrorCode = 'badFormat' | 'badVersion' | 'badShape' | 'badScope'
 
 /** 带错误码的解析异常 */
 export class WorkflowYamlError extends Error {
@@ -47,17 +58,33 @@ export interface WorkflowYamlExport {
     droppedSteps: number
 }
 
+/** 序列化选项：scope=builtin 时附稳定 id 与隐藏标记（内置目录导出语义） */
+export interface WorkflowYamlSerializeOptions {
+    /** 文档 scope；缺省 = user（不写 scope 字段，向后兼容） */
+    scope?: YamlWorkflowScope
+    /** 稳定 id（upsert 语义）；缺省不写 */
+    id?: string
+    /** 隐藏标记（内置目录导出时反映用户的隐藏状态）；缺省不写 */
+    hidden?: boolean
+}
+
 /**
  * @description 序列化一条工作流为自包含 YAML：quickCommand 步骤解引用为内联命令
- *              文本（保留原快捷命令名为 name 注释），引用悬空的步骤丢弃并计数
+ *              文本（保留原快捷命令名为 name 注释），引用悬空的步骤丢弃并计数；
+ *              options.scope=builtin 时写 scope/id/hidden 元数据（内置目录语义）
  * @param workflow 目标工作流
  * @param quickCommands 快捷命令列表（引用解析用）
+ * @param options 序列化选项（scope/id/hidden；缺省 = 用户工作流语义）
  * @returns WorkflowYamlExport YAML 文本与丢弃计数
  *
  * @example serializeWorkflowYaml(workflow, quickCommands).yaml
  *
  */
-export function serializeWorkflowYaml (workflow: Workflow, quickCommands: QuickCommand[]): WorkflowYamlExport {
+export function serializeWorkflowYaml (
+    workflow: Workflow,
+    quickCommands: QuickCommand[],
+    options: WorkflowYamlSerializeOptions = {},
+): WorkflowYamlExport {
     let droppedSteps = 0
     const steps: YamlStep[] = []
     for (const step of workflow.steps) {
@@ -83,11 +110,15 @@ export function serializeWorkflowYaml (workflow: Workflow, quickCommands: QuickC
             ...(step.capture ? { capture: step.capture } : {}),
         })
     }
+    const isBuiltin = options.scope === 'builtin'
     const doc = {
         format: WORKFLOW_YAML_FORMAT,
         version: WORKFLOW_YAML_VERSION,
+        ...(isBuiltin ? { scope: 'builtin' } : {}),
         workflow: {
             name: workflow.name,
+            ...(isBuiltin && options.id ? { id: options.id } : {}),
+            ...(isBuiltin && options.hidden ? { hidden: true } : {}),
             ...(workflow.description ? { description: workflow.description } : {}),
             execution: workflow.execution,
             stepIntervalMs: workflow.stepIntervalMs,
@@ -121,7 +152,8 @@ export function serializeWorkflowsYaml (workflows: Workflow[], quickCommands: Qu
 /**
  * @description 解析 YAML 文本（支持多文档）为工作流形状列表：校验格式/版本/步骤
  *              结构（command 非空、wait/capture 形状、paramValues 字符串表），
- *              非法抛 WorkflowYamlError
+ *              非法抛 WorkflowYamlError；仅取用户语义（scope 元数据丢弃，导入
+ *              内置包请用 parseWorkflowBundle）
  * @param text YAML 文本
  * @returns YamlWorkflow[] 解析出的工作流形状列表
  *
@@ -129,6 +161,19 @@ export function serializeWorkflowsYaml (workflows: Workflow[], quickCommands: Qu
  *
  */
 export function parseWorkflowYaml (text: string): YamlWorkflow[] {
+    return parseWorkflowBundle(text).docs.map(doc => doc.workflow)
+}
+
+/**
+ * @description 解析 YAML 多文档为「工作流形状 + 元信息」对：scope（缺省 user）与
+ *              hidden 标记逐文档返回，供导入分流（builtin → 内置扩展包 upsert）
+ * @param text YAML 文本
+ * @returns { docs } 按文档顺序的 { workflow, scope, hidden } 列表
+ *
+ * @example parseWorkflowBundle(text).docs[0].scope // 'user'
+ *
+ */
+export function parseWorkflowBundle (text: string): { docs: Array<{ workflow: YamlWorkflow, scope: YamlWorkflowScope, hidden: boolean }> } {
     const trimmed = text.trim()
     if (!trimmed) {
         throw new WorkflowYamlError('badShape', 'empty file')
@@ -139,17 +184,21 @@ export function parseWorkflowYaml (text: string): YamlWorkflow[] {
     } catch (error) {
         throw new WorkflowYamlError('badShape', `invalid yaml: ${String(error)}`)
     }
-    return docs.map(doc => parseOneDocument(doc))
+    return { docs: docs.map(doc => parseOneDocument(doc)) }
 }
 
-/** 校验并归一化单个文档 */
-function parseOneDocument (doc: unknown): YamlWorkflow {
+/** 校验并归一化单个文档（含 scope/hidden 元信息） */
+function parseOneDocument (doc: unknown): { workflow: YamlWorkflow, scope: YamlWorkflowScope, hidden: boolean } {
     if (!isPlainObject(doc) || doc.format !== WORKFLOW_YAML_FORMAT) {
         throw new WorkflowYamlError('badFormat', 'missing or unknown format')
     }
     if (doc.version !== WORKFLOW_YAML_VERSION) {
         throw new WorkflowYamlError('badVersion', `unsupported version: ${String(doc.version)}`)
     }
+    if (doc.scope !== undefined && doc.scope !== 'user' && doc.scope !== 'builtin') {
+        throw new WorkflowYamlError('badScope', `unknown scope: ${String(doc.scope)}`)
+    }
+    const scope: YamlWorkflowScope = doc.scope === 'builtin' ? 'builtin' : 'user'
     const workflow = doc.workflow
     if (!isPlainObject(workflow) || typeof workflow.name !== 'string' || !Array.isArray(workflow.steps)) {
         throw new WorkflowYamlError('badShape', 'workflow.name/steps missing')
@@ -163,13 +212,24 @@ function parseOneDocument (doc: unknown): YamlWorkflow {
     if (workflow.description !== undefined && typeof workflow.description !== 'string') {
         throw new WorkflowYamlError('badShape', 'workflow.description must be a string')
     }
+    if (workflow.id !== undefined && (typeof workflow.id !== 'string' || !/^[\w-]+$/.test(workflow.id))) {
+        throw new WorkflowYamlError('badShape', 'workflow.id must match [\\w-]+')
+    }
+    if (workflow.hidden !== undefined && typeof workflow.hidden !== 'boolean') {
+        throw new WorkflowYamlError('badShape', 'workflow.hidden must be a boolean')
+    }
     return {
-        name: workflow.name,
-        ...(typeof workflow.description === 'string' && workflow.description ? { description: workflow.description } : {}),
-        execution,
-        stepIntervalMs,
-        stopOnError,
-        steps,
+        workflow: {
+            ...(typeof workflow.id === 'string' && workflow.id ? { id: workflow.id } : {}),
+            name: workflow.name,
+            ...(typeof workflow.description === 'string' && workflow.description ? { description: workflow.description } : {}),
+            execution,
+            stepIntervalMs,
+            stopOnError,
+            steps,
+        },
+        scope,
+        hidden: workflow.hidden === true,
     }
 }
 
@@ -248,17 +308,19 @@ function parseCapture (capture: unknown, index: number): StepCapture {
 }
 
 /**
- * @description 把解析出的工作流形状构建为本机 Workflow：新 id、步骤全部内联
- *              （kind=raw、新 step id），绝不与现有工作流冲突
+ * @description 把解析出的工作流形状构建为本机 Workflow：新 id（可显式传入稳定 id，
+ *              内置扩展包 upsert 语义用）、步骤全部内联（kind=raw、新 step id），
+ *              绝不与现有工作流冲突
  * @param parsed YAML 解析出的工作流形状
+ * @param stableId 可选的稳定 id（内置扩展包条目用；缺省 = 生成新 id）
  * @returns Workflow 可直接入 store 的新工作流
  *
  * @example buildImportedWorkflow(parsed).steps[0].kind // 'raw'
  *
  */
-export function buildImportedWorkflow (parsed: YamlWorkflow): Workflow {
+export function buildImportedWorkflow (parsed: YamlWorkflow, stableId?: string): Workflow {
     return {
-        id: `wf-${nanoid(8)}`,
+        id: stableId ?? `wf-${nanoid(8)}`,
         name: parsed.name,
         ...(parsed.description ? { description: parsed.description } : {}),
         execution: parsed.execution,

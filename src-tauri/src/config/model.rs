@@ -121,6 +121,8 @@ pub struct ConfigSnapshot {
     pub advanced: Option<Value>,
     pub recents: Option<Value>,
     pub monitor: Option<Value>,
+    /// 内置工作流控制状态（隐藏清单 + 导入的内置扩展包；形状由前端拥有）
+    pub workflow_ctl: Option<Value>,
     pub hotkeys: BTreeMap<String, Value>,
     pub profiles: Vec<Value>,
     pub color_schemes: Vec<Value>,

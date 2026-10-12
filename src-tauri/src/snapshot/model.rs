@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 pub const BACKUP_FORMAT: &str = "scx-terminal-backup";
 /// 快照格式版本（不识别即拒绝导入）
 pub const BACKUP_VERSION: i64 = 1;
-/// 导出纳入的 settings 分片（recents/tabSession 为机器本地数据，排除）
-pub(super) const BACKUP_SETTINGS_KEYS: [&str; 3] = ["terminal", "appearance", "advanced"];
+/// 导出纳入的 settings 分片（recents/tabSession 为机器本地数据，排除；workflowCtl 为用户偏好纳入）
+pub(super) const BACKUP_SETTINGS_KEYS: [&str; 4] = ["terminal", "appearance", "advanced", "workflowCtl"];
 
 /// KDF 参数（随快照明文携带，导入端按同参数重派生）
 #[derive(Debug, Clone, Serialize, Deserialize)]
