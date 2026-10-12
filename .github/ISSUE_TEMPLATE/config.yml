@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全漏洞报告
+    url: https://github.com/shawicx/scx-terminal/security/advisories/new
+    about: 请通过 GitHub 私密漏洞报告提交，勿公开披露（见 SECURITY.md）
+  - name: 阅读文档
+    url: https://github.com/shawicx/scx-terminal/blob/main/README.md
+    about: 安装、使用与开发指引

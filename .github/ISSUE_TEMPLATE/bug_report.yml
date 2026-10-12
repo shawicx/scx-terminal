@@ -1,0 +1,70 @@
+name: Bug 报告
+description: 报告 scx-terminal 的问题
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 感谢反馈！请先搜索现有 Issue，避免重复提交。日志请先脱敏（IP、主机名、密钥等）。
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 简明描述遇到的问题
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 附截图或录屏更佳
+  - type: input
+    id: version
+    attributes:
+      label: 应用版本
+      description: 设置页「关于」可查
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 操作系统
+      options:
+        - Windows x64
+        - macOS Apple Silicon
+        - macOS Intel
+    validations:
+      required: true
+  - type: checkboxes
+    id: connection
+    attributes:
+      label: 连接类型
+      options:
+        - label: 本地 shell
+        - label: SSH
+        - label: Mosh
+        - label: 串口 / 其他
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: 设置页可开启调试日志；日志目录见 README「数据目录」
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息

@@ -1,0 +1,10 @@
+name: ⚙️ 安全漏洞
+about: 请勿在此报告安全漏洞
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **请勿通过公开 Issue 报告安全漏洞。**
+
+        请使用 GitHub 的 [私密漏洞报告](https://github.com/shawicx/scx-terminal/security/advisories/new) 提交，详见 [SECURITY.md](https://github.com/shawicx/scx-terminal/blob/main/SECURITY.md)。
