@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<!--
+  @description scx-terminal 官网单页（静态、零依赖，可部署至 GitHub Pages）
+  结构：开机引导层 → 导航 → Hero（活体终端）→ 跑马灯 → 特性 bento → 架构分屏 → 数字带 → 下载 → 页脚
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>scx-terminal — 为原生体验而生的跨平台终端</title>
+  <meta name="description" content="基于 Tauri v2 + Rust + Vue 3 的跨平台终端应用。WebGL 渲染、本地/SSH/Mosh 会话、SFTP、端口转发，轻量且原生。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./style.css" />
+  <link rel="alternate" hreflang="zh-CN" href="./index.html" />
+  <link rel="alternate" hreflang="en" href="./en/index.html" />
+</head>
+<body>
+
+  <!-- ===================== CRT 氛围层（扫描线 / 颗粒 / 聚光） ===================== -->
+  <div class="fx-scanlines" aria-hidden="true"></div>
+  <div class="fx-grain" aria-hidden="true"></div>
+  <div class="fx-spotlight" id="spotlight" aria-hidden="true"></div>
+
+  <!-- ===================== 开机引导层 ===================== -->
+  <div class="boot" id="boot" aria-hidden="true">
+    <pre class="boot__log" id="bootLog"></pre>
+    <div class="boot__bar"><span id="bootBar"></span></div>
+  </div>
+
+  <!-- ===================== 导航 ===================== -->
+  <header class="nav" id="nav">
+    <a class="nav__logo" href="#top">
+      <span class="nav__prompt">▮_</span> scx<span class="accent">-terminal</span>
+    </a>
+    <nav class="nav__links">
+      <a href="#features">特性</a>
+      <a href="#architecture">架构</a>
+      <a href="#download">下载</a>
+      <a href="https://github.com/shawicx/scx-terminal" target="_blank" rel="noopener">GitHub ↗</a>
+      <a href="./en/index.html" hreflang="en" lang="en" class="nav__lang" aria-label="Switch to English">EN</a>
+    </nav>
+    <button class="nav__kbtn" id="paletteBtn" type="button">
+      <kbd>⌘</kbd><kbd>K</kbd><span>命令面板</span>
+    </button>
+  </header>
+
+  <main id="top">
+
+    <!-- ===================== HERO ===================== -->
+    <section class="hero">
+      <div class="hero__glow" aria-hidden="true"></div>
+      <div class="hero__grid" aria-hidden="true"></div>
+
+      <p class="hero__eyebrow reveal">
+        <span class="tag">v0.2.3</span> 由 Tabby 改造 · 架构全面重写
+      </p>
+
+      <h1 class="hero__title">
+        <span class="hero__line reveal">终端，</span>
+        <span class="hero__line hero__line--accent reveal">回归原生。</span>
+      </h1>
+
+      <p class="hero__sub reveal">
+        Rust 后端驱动 PTY，xterm.js 以 WebGL 渲染每一个字符。<br />
+        Windows 与 macOS 上的轻量跨平台终端 —— 本地、SSH、Mosh，一个都不缺。
+      </p>
+
+      <div class="hero__cta reveal">
+        <a class="btn btn--primary" href="#download" data-magnetic>
+          <span class="btn__shine" aria-hidden="true"></span>下载最新版
+        </a>
+        <a class="btn btn--ghost" href="https://github.com/shawicx/scx-terminal" target="_blank" rel="noopener" data-magnetic>
+          查看源码
+        </a>
+      </div>
+
+      <!-- 活体终端：JS 逐字打出真实命令与输出 -->
+      <div class="term reveal" id="heroTerm" role="img" aria-label="scx-terminal 终端演示动画">
+        <div class="term__bar">
+          <span class="term__dot"></span><span class="term__dot"></span><span class="term__dot"></span>
+          <span class="term__title">scx-terminal — zsh</span>
+        </div>
+        <pre class="term__body" id="termBody"></pre>
+        <div class="term__crt" aria-hidden="true"></div>
+      </div>
+    </section>
+
+    <!-- ===================== 技术跑马灯 ===================== -->
+    <section class="marquee" aria-hidden="true">
+      <div class="marquee__track">
+        <span>TAURI V2</span><i>◆</i><span>RUST</span><i>◆</i><span>VUE 3</span><i>◆</i>
+        <span>XTERM.JS · WEBGL</span><i>◆</i><span>PTTY</span><i>◆</i><span>SFTP</span><i>◆</i>
+        <span>PORT FORWARDING</span><i>◆</i><span>MOSH</span><i>◆</i><span>SSH</span><i>◆</i>
+        <span>PINIA</span><i>◆</i><span>RXJS</span><i>◆</i><span>GSAP</span><i>◆</i>
+        <!-- 复制一份实现无缝循环 -->
+        <span>TAURI V2</span><i>◆</i><span>RUST</span><i>◆</i><span>VUE 3</span><i>◆</i>
+        <span>XTERM.JS · WEBGL</span><i>◆</i><span>PTY</span><i>◆</i><span>SFTP</span><i>◆</i>
+        <span>PORT FORWARDING</span><i>◆</i><span>MOSH</span><i>◆</i><span>SSH</span><i>◆</i>
+        <span>PINIA</span><i>◆</i><span>RXJS</span><i>◆</i><span>GSAP</span><i>◆</i>
+      </div>
+    </section>
+
+    <!-- ===================== 特性 bento 网格 ===================== -->
+    <section class="section" id="features">
+      <h2 class="section__title reveal"><span class="accent">$</span> 特性</h2>
+      <p class="section__sub reveal">每一格都会响应你的指针 —— 就像终端响应每一次按键。</p>
+
+      <div class="bento">
+        <article class="cell cell--wide reveal" data-tilt>
+          <div class="cell__glare" aria-hidden="true"></div>
+          <h3>WebGL 加速渲染</h3>
+          <p>xterm.js WebGL 优先渲染，Canvas 自动降级。大输出、全屏 vim、htop 监控，帧率稳如原生。</p>
+          <div class="cell__demo mono" aria-hidden="true">fps <b id="fpsMeter">60</b> ▮<span class="caret"></span></div>
+        </article>
+
+        <article class="cell reveal" data-tilt>
+          <div class="cell__glare" aria-hidden="true"></div>
+          <h3>本地 / SSH / Mosh</h3>
+          <p>统一会话工厂按配置档案创建会话，本地 shell、远程 SSH、弱网 Mosh 无缝切换。</p>
+        </article>
+
+        <article class="cell reveal" data-tilt>
+          <div class="cell__glare" aria-hidden="true"></div>
+          <h3>SFTP 文件传输</h3>
+          <p>远程会话内直接浏览与传输文件，无需再开一个客户端。</p>
+        </article>
+
+        <article class="cell reveal" data-tilt>
+          <div class="cell__glare" aria-hidden="true"></div>
+          <h3>端口转发</h3>
+          <p>可视化规则管理，本地 / 远程 / 动态转发一键配置。</p>
+        </article>
+
+        <article class="cell cell--wide reveal" data-tilt>
+          <div class="cell__glare" aria-hidden="true"></div>
+          <h3>命令面板 + 系统级集成</h3>
+          <p>⌘K 唤起命令面板；系统通知、剪贴板、应用内自动更新全部经由 Tauri 官方插件原生接入。</p>
+          <div class="cell__demo mono" aria-hidden="true">› 试试在本页按下 <kbd>⌘K</kbd></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ===================== 架构分屏（滚动进度动画） ===================== -->
+    <section class="section section--arch" id="architecture">
+      <h2 class="section__title reveal"><span class="accent">$</span> 架构</h2>
+      <p class="section__sub reveal">能力按边界划分：前端只管渲染与交互，系统层交给 Rust。</p>
+
+      <div class="arch" id="archDiagram">
+        <div class="arch__col reveal" data-arch="fe">
+          <div class="arch__head">前端 · Vue 3</div>
+          <div class="arch__node">xterm.js（WebGL）</div>
+          <div class="arch__node">Pinia · RxJS</div>
+          <div class="arch__node">GSAP 动效中枢</div>
+        </div>
+        <div class="arch__wire" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="arch__col reveal" data-arch="ipc">
+          <div class="arch__head arch__head--mid">Tauri IPC</div>
+          <div class="arch__node arch__node--mid">invoke / command</div>
+        </div>
+        <div class="arch__wire" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="arch__col reveal" data-arch="be">
+          <div class="arch__head">后端 · Rust</div>
+          <div class="arch__node">PTY 管理</div>
+          <div class="arch__node">配置持久化</div>
+          <div class="arch__node">Shell 探测</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 数字带（计数动画） ===================== -->
+    <section class="stats" id="stats">
+      <div class="stat reveal"><b class="stat__num" data-count="244">0</b><span>个生产源文件</span></div>
+      <div class="stat reveal"><b class="stat__num" data-count="40">0</b><span>个测试文件</span></div>
+      <div class="stat reveal"><b class="stat__num" data-count="3">0</b><span>种会话类型</span></div>
+      <div class="stat reveal"><b class="stat__num" data-count="2">0</b><span>大平台 · 中英双语</span></div>
+    </section>
+
+    <!-- ===================== 下载 ===================== -->
+    <section class="section section--download" id="download">
+      <h2 class="section__title reveal"><span class="accent">$</span> 下载</h2>
+      <p class="section__sub reveal">从 <a class="accent" href="https://github.com/shawicx/scx-terminal/releases" target="_blank" rel="noopener">GitHub Releases</a> 获取最新版本。</p>
+
+      <div class="dl">
+        <a class="dl__card reveal" href="https://github.com/shawicx/scx-terminal/releases" target="_blank" rel="noopener" data-magnetic>
+          <b>Windows</b><span>x64 · NSIS 安装向导</span><span class="mono">*.exe</span>
+        </a>
+        <a class="dl__card reveal" href="https://github.com/shawicx/scx-terminal/releases" target="_blank" rel="noopener" data-magnetic>
+          <b>macOS</b><span>Apple Silicon · DMG</span><span class="mono">*_aarch64.dmg</span>
+        </a>
+        <a class="dl__card reveal" href="https://github.com/shawicx/scx-terminal/releases" target="_blank" rel="noopener" data-magnetic>
+          <b>macOS</b><span>Intel · DMG</span><span class="mono">*_x64.dmg</span>
+        </a>
+      </div>
+    </section>
+
+    <!-- ===================== 页脚 ===================== -->
+    <footer class="footer">
+      <span class="mono">exit 0</span>
+      <p>MIT License · 由 Tauri v2 / Rust / Vue 3 构建</p>
+    </footer>
+  </main>
+
+  <!-- ===================== 命令面板（⌘K 彩蛋） ===================== -->
+  <div class="palette" id="palette" hidden>
+    <div class="palette__panel" role="dialog" aria-label="命令面板">
+      <div class="palette__inputrow"><span class="accent">›</span>
+        <input id="paletteInput" type="text" placeholder="输入命令或搜索…" autocomplete="off" />
+      </div>
+      <ul class="palette__list" id="paletteList"></ul>
+    </div>
+  </div>
+
+  <script src="./main.js"></script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+# ============================================================
+# @description scx-terminal 官网部署工作流（Docker → ACR → SSH → ECS）
+# ------------------------------------------------------------
+# 触发条件：
+#   - push 到 main 且变更涉及 website/**：构建 nginx 镜像 → 推送 ACR → SSH 部署
+#   - workflow_dispatch：手动触发完整流程
+#
+# 部署链路（沿用 scx-gold 架构）：
+#   docker build（nginx:alpine 直接托管 website/ 静态文件，无构建步骤）
+#   → docker tag/push（ACR_REGISTRY/<NS>/scx-terminal-web:latest + :sha-<短SHA>）
+#   → SSH 登录 ECS → docker pull
+#   → 启动 scx-terminal-web 容器（--network host，监听 6901）
+#   → 健康检查（轮询 http://localhost:6901/ 期望 200，最多 30s）
+#
+# 依赖的 GitHub Secrets（与 scx-gold 共用，零新增）：
+#   ACR_REGISTRY / ACR_NAMESPACE / ACR_USERNAME / ACR_PASSWORD
+#   ECS_HOST / ECS_USER / ECS_SSH_KEY
+# ============================================================
+
+name: Deploy Website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - '.github/workflows/deploy-website.yml'
+  workflow_dispatch:
+
+permissions: { }
+
+concurrency:
+  group: deploy-website-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build & Deploy Website
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t scx-terminal-web:latest website
+
+      - name: Login to Aliyun ACR
+        run: |
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login "${{ secrets.ACR_REGISTRY }}" \
+            -u "${{ secrets.ACR_USERNAME }}" --password-stdin
+
+      - name: Tag & Push image
+        env:
+          TARGET_NS: ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}
+          SHORT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          SHORT="${SHORT_SHA:0:7}"
+          TARGET="$TARGET_NS/scx-terminal-web"
+          echo "==> 推送 scx-terminal-web"
+          docker tag scx-terminal-web:latest "$TARGET:latest"
+          docker tag scx-terminal-web:latest "$TARGET:sha-$SHORT"
+          docker push "$TARGET:latest"
+          docker push "$TARGET:sha-$SHORT"
+          echo "    ✓ $TARGET:latest (sha-$SHORT)"
+
+      - name: SSH deploy & health check
+        # 第三方 action 一律钉 commit SHA（可变 tag 被劫持即获得 ECS_SSH_KEY 执行权）；
+        # 升级时改 SHA 并同步注释里的版本号
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        env:
+          ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+          ACR_NAMESPACE: ${{ secrets.ACR_NAMESPACE }}
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: ${{ secrets.ECS_USER }}
+          key: ${{ secrets.ECS_SSH_KEY }}
+          command_timeout: 10m
+          envs: ACR_REGISTRY,ACR_NAMESPACE,ACR_USERNAME,ACR_PASSWORD
+          script: |
+            set -euo pipefail
+
+            NS="$ACR_REGISTRY/$ACR_NAMESPACE"
+            IMAGE="$NS/scx-terminal-web:latest"
+
+            echo "==> 登录阿里云 ACR"
+            docker login "$ACR_REGISTRY" -u "$ACR_USERNAME" -p "$ACR_PASSWORD"
+
+            echo "==> 拉取镜像: $IMAGE"
+            docker pull "$IMAGE"
+
+            # 停止并删除旧容器（幂等）
+            stop_and_rm() {
+              docker stop "$1" 2>/dev/null || true
+              docker rm   "$1" 2>/dev/null || true
+            }
+
+            echo "==> 启动 scx-terminal-web nginx (6901)"
+            stop_and_rm scx-terminal-web
+            docker run -d \
+              --name scx-terminal-web \
+              --network host \
+              --restart=always \
+              -m 64m \
+              "$IMAGE"
+
+            echo "==> 清理悬空镜像"
+            docker image prune -f
+
+            # 健康检查：轮询官网端口（最多 30 秒）
+            echo "==> 健康检查: 轮询 http://localhost:6901/"
+            for i in $(seq 1 6); do
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:6901/ || echo "000")
+              if [ "$HTTP_CODE" = "200" ]; then
+                echo "健康检查通过（第 $((i*5)) 秒，HTTP 200）"
+                echo "--- 运行中的 website 容器 ---"
+                docker ps --filter "name=scx-terminal-web" --format "table {{.Names}}\t{{.Status}}"
+                exit 0
+              fi
+              echo "  等待 nginx 启动... ($i/6, HTTP $HTTP_CODE)"
+              sleep 5
+            done
+
+            echo "ERROR: 健康检查超时（30 秒内 nginx 未就绪）"
+            echo "--- scx-terminal-web 容器状态 ---"
+            docker ps -a --filter "name=scx-terminal-web" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+            echo "--- scx-terminal-web 容器最近日志 ---"
+            docker logs --tail 80 scx-terminal-web || true
+            exit 1

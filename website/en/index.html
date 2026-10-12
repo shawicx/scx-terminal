@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<!--
+  @description scx-terminal official website (English edition) — static, zero-dependency, GitHub Pages ready
+  Structure: boot layer → nav → hero (live terminal) → marquee → bento features → architecture → stats → download → footer
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>scx-terminal — A cross-platform terminal, back to native</title>
+  <meta name="description" content="A cross-platform terminal built on Tauri v2 + Rust + Vue 3. WebGL rendering, local/SSH/Mosh sessions, SFTP and port forwarding — lightweight and native." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../style.css" />
+  <link rel="alternate" hreflang="zh-CN" href="../index.html" />
+  <link rel="alternate" hreflang="en" href="./index.html" />
+</head>
+<body>
+
+  <!-- ===================== CRT atmosphere layers (scanlines / grain / spotlight) ===================== -->
+  <div class="fx-scanlines" aria-hidden="true"></div>
+  <div class="fx-grain" aria-hidden="true"></div>
+  <div class="fx-spotlight" id="spotlight" aria-hidden="true"></div>
+
+  <!-- ===================== Boot layer ===================== -->
+  <div class="boot" id="boot" aria-hidden="true">
+    <pre class="boot__log" id="bootLog"></pre>
+    <div class="boot__bar"><span id="bootBar"></span></div>
+  </div>
+
+  <!-- ===================== Nav ===================== -->
+  <header class="nav" id="nav">
+    <a class="nav__logo" href="#top">
+      <span class="nav__prompt">▮_</span> scx<span class="accent">-terminal</span>
+    </a>
+    <nav class="nav__links">
+      <a href="#features">Features</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#download">Download</a>
+      <a href="https://github.com/shawicx/scx-terminal" target="_blank" rel="noopener">GitHub ↗</a>
+      <a href="../index.html" hreflang="zh-CN" lang="zh-CN" class="nav__lang" aria-label="切换到中文">中文</a>
+    </nav>
+    <button class="nav__kbtn" id="paletteBtn" type="button">
+      <kbd>⌘</kbd><kbd>K</kbd><span>Command Palette</span>
+    </button>
+  </header>
+
+  <main id="top">
+
+    <!-- ===================== HERO ===================== -->
+    <section class="hero">
+      <div class="hero__glow" aria-hidden="true"></div>
+      <div class="hero__grid" aria-hidden="true"></div>
+
+      <p class="hero__eyebrow reveal">
+        <span class="tag">v0.2.3</span> Rebuilt from Tabby · fully rewritten architecture
+      </p>
+
+      <h1 class="hero__title">
+        <span class="hero__line reveal">The terminal,</span>
+        <span class="hero__line hero__line--accent reveal">back to native.</span>
+      </h1>
+
+      <p class="hero__sub reveal">
+        A Rust backend drives the PTY; xterm.js renders every glyph over WebGL.<br />
+        A lightweight cross-platform terminal for Windows &amp; macOS — local, SSH and Mosh, all included.
+      </p>
+
+      <div class="hero__cta reveal">
+        <a class="btn btn--primary" href="#download" data-magnetic>
+          <span class="btn__shine" aria-hidden="true"></span>Download latest
+        </a>
+        <a class="btn btn--ghost" href="https://github.com/shawicx/scx-terminal" target="_blank" rel="noopener" data-magnetic>
+          View source
+        </a>
+      </div>
+
+      <!-- Live terminal: JS types out real commands and output -->
+      <div class="term reveal" id="heroTerm" role="img" aria-label="scx-terminal terminal demo animation">
+        <div class="term__bar">
+          <span class="term__dot"></span><span class="term__dot"></span><span class="term__dot"></span>
+          <span class="term__title">scx-terminal — zsh</span>
+        </div>
+        <pre class="term__body" id="termBody"></pre>
+        <div class="term__crt" aria-hidden="true"></div>
+      </div>
+    </section>
+
+    <!-- ===================== Tech marquee ===================== -->
+    <section class="marquee" aria-hidden="true">
+      <div class="marquee__track">
+        <span>TAURI V2</span><i>◆</i><span>RUST</span><i>◆</i><span>VUE 3</span><i>◆</i>
+        <span>XTERM.JS · WEBGL</span><i>◆</i><span>PTY</span><i>◆</i><span>SFTP</span><i>◆</i>
+        <span>PORT FORWARDING</span><i>◆</i><span>MOSH</span><i>◆</i><span>SSH</span><i>◆</i>
+        <span>PINIA</span><i>◆</i><span>RXJS</span><i>◆</i><span>GSAP</span><i>◆</i>
+        <!-- duplicated for a seamless loop -->
+        <span>TAURI V2</span><i>◆</i><span>RUST</span><i>◆</i><span>VUE 3</span><i>◆</i>
+        <span>XTERM.JS · WEBGL</span><i>◆</i><span>PTY</span><i>◆</i><span>SFTP</span><i>◆</i>
+        <span>PORT FORWARDING</span><i>◆</i><span>MOSH</span><i>◆</i><span>SSH</span><i>◆</i>
+        <span>PINIA</span><i>◆</i><span>RXJS</span><i>◆</i><span>GSAP</span><i>◆</i>
+      </div>
+    </section>
+
+    <!-- ===================== Feature bento grid ===================== -->
+    <section class="section" id="features">
+      <h2 class="section__title reveal"><span class="accent">$</span> Features</h2>
+      <p class="section__sub reveal">Every cell responds to your pointer — just like a terminal responds to every keystroke.</p>
+
+      <div class="bento">
+        <article class="cell cell--wide reveal" data-tilt>
+          <div class="cell__glare" aria-hidden="true"></div>
+          <h3>WebGL-accelerated rendering</h3>
+          <p>xterm.js with WebGL-first rendering and automatic Canvas fallback. Massive output, fullscreen vim, htop — frame rate stays rock solid.</p>
+          <div class="cell__demo mono" aria-hidden="true">fps <b id="fpsMeter">60</b> ▮<span class="caret"></span></div>
+        </article>
+
+        <article class="cell reveal" data-tilt>
+          <div class="cell__glare" aria-hidden="true"></div>
+          <h3>Local / SSH / Mosh</h3>
+          <p>A unified session factory creates sessions from profiles — local shell, remote SSH, or Mosh on flaky networks.</p>
+        </article>
+
+        <article class="cell reveal" data-tilt>
+          <div class="cell__glare" aria-hidden="true"></div>
+          <h3>SFTP transfers</h3>
+          <p>Browse and transfer files inside remote sessions. No extra client needed.</p>
+        </article>
+
+        <article class="cell reveal" data-tilt>
+          <div class="cell__glare" aria-hidden="true"></div>
+          <h3>Port forwarding</h3>
+          <p>Visual rule management — local, remote and dynamic forwarding in one place.</p>
+        </article>
+
+        <article class="cell cell--wide reveal" data-tilt>
+          <div class="cell__glare" aria-hidden="true"></div>
+          <h3>Command palette + native integration</h3>
+          <p>Hit ⌘K for the command palette. Notifications, clipboard and in-app auto-updates all flow through official Tauri plugins.</p>
+          <div class="cell__demo mono" aria-hidden="true">› try pressing <kbd>⌘K</kbd> on this page</div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ===================== Architecture split (scroll-triggered) ===================== -->
+    <section class="section section--arch" id="architecture">
+      <h2 class="section__title reveal"><span class="accent">$</span> Architecture</h2>
+      <p class="section__sub reveal">Capabilities divided by boundary: the frontend renders and interacts; Rust owns the system layer.</p>
+
+      <div class="arch" id="archDiagram">
+        <div class="arch__col reveal" data-arch="fe">
+          <div class="arch__head">Frontend · Vue 3</div>
+          <div class="arch__node">xterm.js (WebGL)</div>
+          <div class="arch__node">Pinia · RxJS</div>
+          <div class="arch__node">GSAP motion core</div>
+        </div>
+        <div class="arch__wire" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="arch__col reveal" data-arch="ipc">
+          <div class="arch__head arch__head--mid">Tauri IPC</div>
+          <div class="arch__node arch__node--mid">invoke / command</div>
+        </div>
+        <div class="arch__wire" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="arch__col reveal" data-arch="be">
+          <div class="arch__head">Backend · Rust</div>
+          <div class="arch__node">PTY management</div>
+          <div class="arch__node">Config persistence</div>
+          <div class="arch__node">Shell detection</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== Stats band (count-up) ===================== -->
+    <section class="stats" id="stats">
+      <div class="stat reveal"><b class="stat__num" data-count="244">0</b><span>production source files</span></div>
+      <div class="stat reveal"><b class="stat__num" data-count="40">0</b><span>test files</span></div>
+      <div class="stat reveal"><b class="stat__num" data-count="3">0</b><span>session types</span></div>
+      <div class="stat reveal"><b class="stat__num" data-count="2">0</b><span>platforms · bilingual</span></div>
+    </section>
+
+    <!-- ===================== Download ===================== -->
+    <section class="section section--download" id="download">
+      <h2 class="section__title reveal"><span class="accent">$</span> Download</h2>
+      <p class="section__sub reveal">Grab the latest release from <a class="accent" href="https://github.com/shawicx/scx-terminal/releases" target="_blank" rel="noopener">GitHub Releases</a>.</p>
+
+      <div class="dl">
+        <a class="dl__card reveal" href="https://github.com/shawicx/scx-terminal/releases" target="_blank" rel="noopener" data-magnetic>
+          <b>Windows</b><span>x64 · NSIS installer</span><span class="mono">*.exe</span>
+        </a>
+        <a class="dl__card reveal" href="https://github.com/shawicx/scx-terminal/releases" target="_blank" rel="noopener" data-magnetic>
+          <b>macOS</b><span>Apple Silicon · DMG</span><span class="mono">*_aarch64.dmg</span>
+        </a>
+        <a class="dl__card reveal" href="https://github.com/shawicx/scx-terminal/releases" target="_blank" rel="noopener" data-magnetic>
+          <b>macOS</b><span>Intel · DMG</span><span class="mono">*_x64.dmg</span>
+        </a>
+      </div>
+    </section>
+
+    <!-- ===================== Footer ===================== -->
+    <footer class="footer">
+      <span class="mono">exit 0</span>
+      <p>MIT License · Built with Tauri v2 / Rust / Vue 3</p>
+    </footer>
+  </main>
+
+  <!-- ===================== Command palette (⌘K easter egg) ===================== -->
+  <div class="palette" id="palette" hidden>
+    <div class="palette__panel" role="dialog" aria-label="Command palette">
+      <div class="palette__inputrow"><span class="accent">›</span>
+        <input id="paletteInput" type="text" placeholder="Type a command or search…" autocomplete="off" />
+      </div>
+      <ul class="palette__list" id="paletteList"></ul>
+    </div>
+  </div>
+
+  <script src="../main.js"></script>
+</body>
+</html>
