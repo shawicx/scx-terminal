@@ -153,4 +153,8 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh api -X PATCH 'repos/${{ github.repository }}/releases/${{ needs.changelog.outputs.release_id }}' -F draft=false
+          # PATCH 只发 draft=false 时 GitHub 会重解析 tag，已存在的 tag 反而被
+          # 生成 untagged-<hash> 轻量 tag 顶替（v0.2.2/v0.2.3 实测），必须回传
+          # tag_name 强制绑定；ref 名经 env 传递，禁止内插进 run:
+          TAG_NAME: ${{ github.ref_name }}
+        run: gh api -X PATCH 'repos/${{ github.repository }}/releases/${{ needs.changelog.outputs.release_id }}' -F draft=false -f tag_name="$TAG_NAME"
