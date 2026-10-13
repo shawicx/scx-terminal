@@ -289,5 +289,11 @@ export const panels = {
         retry: '重试',
         enterHint: '双击进入 {name}',
         actionFiles: '文件',
+        download: '下载到…',
+        dropHint: '松开上传到 {path}',
+        conflictTitle: '上传冲突',
+        conflictMessage: '「{name}」在目标目录已存在，覆盖吗？',
+        conflictOk: '覆盖',
+        conflictCancel: '跳过',
     },
 }

@@ -7,6 +7,10 @@
               优先窗格 OSC 7/1337 上报的 cwd（TerminalTabContent 轮询下发），
               远端 shell 未配置上报 hook 时退化为面板自跟踪路径（初始 = 远端
               home，双击导航时乐观更新），此限制下终端手动 cd 不会同步面板。
+              传输：条目右键「下载到…」（save/open 对话框选本地目标，目录递归）；
+              expose upload(localPaths) 供 TerminalTabContent 拖入系统文件上传到
+              面板当前路径（同名冲突逐个确认）；传输终态经 transfers store 自动
+              刷新列表。
 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
@@ -14,8 +18,10 @@ import { useI18n } from 'vue-i18n'
 import { listen } from '@tauri-apps/api/event'
 import { ArrowUp, File, Folder, FolderOpen, Link, PanelRightClose, RefreshCw } from 'lucide-vue-next'
 import { useConfigStore } from '@/stores/config'
-import { closeSftp, openSftp, readSftpDir, type SftpFileEntry } from '@/services/sftp'
-import { breadcrumbSegments, parentPanePath, sortPaneEntries, type PaneEntry } from '@/lib/sftpPane'
+import { useTransfersStore } from '@/stores/transfers'
+import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
+import { closeSftp, openSftp, readSftpDir, sftpDownload, sftpUpload, type SftpFileEntry } from '@/services/sftp'
+import { breadcrumbSegments, joinPanePath, parentPanePath, sortPaneEntries, type PaneEntry } from '@/lib/sftpPane'
 
 const props = defineProps<{
     /** 活动窗格的 SSH 会话 id（null = 非 SSH 窗格或未连接） */
@@ -35,6 +41,9 @@ const config = useConfigStore()
 const open = computed(() => config.store.files.open === true)
 const width = computed(() => config.store.files.width)
 
+/** 跟随设置的终端字号（设置 → 终端 → 字体大小） */
+const fontSize = computed(() => config.store.terminal.fontSize)
+
 // ---- SFTP 会话状态 ----
 const sftpId = ref('')
 const home = ref('')
@@ -45,8 +54,9 @@ const entries = ref<PaneEntry[]>([])
 const loading = ref(false)
 const errorText = ref('')
 
-/** 实际列目录路径：窗格上报 cwd 优先，其次面板自跟踪，最后远端 home */
-const effectivePath = computed(() => props.cwd ?? trackedPath.value ?? home.value ?? null)
+/** 实际列目录路径：窗格上报 cwd 优先，其次面板自跟踪，最后远端 home；
+ *  空串一律视为未设置（?? 不跳过 ''，历史上曾因此解析出空路径而误判空目录） */
+const effectivePath = computed(() => props.cwd || trackedPath.value || home.value || null)
 
 /** 上报 cwd 与自跟踪路径出现分歧（远端上报恢复/变化）时，重置自跟踪跟随上报 */
 watch(() => props.cwd, reported => {
@@ -74,9 +84,12 @@ function resetSession (): void {
     errorText.value = ''
 }
 
+/** 当前 SFTP 会话绑定的 SSH 会话 id（与活动窗格 sshId 严格一致，切换即重开） */
+const boundSshId = ref('')
+
 /**
  * @description 打开 SFTP 会话（面板展开且 sshId 就绪时调用；打开失败进错误横幅，
- *              重复调用在会话存续期内短路）
+ *              进行中或已绑定同一会话时短路）
  * @param sshId 目标 SSH 会话 id
  * @returns void
  *
@@ -84,16 +97,21 @@ function resetSession (): void {
  *
  */
 function openSession (sshId: string): void {
-    if (sftpId.value || opening.value) {
+    if (opening.value || (sftpId.value && boundSshId.value === sshId)) {
         return
     }
+    boundSshId.value = sshId
     opening.value = true
     errorText.value = ''
     openSftp(sshId)
         .then(result => {
-            if (config.store.files.open && props.sshId === sshId) {
+            if (config.store.files.open && props.sshId === sshId && boundSshId.value === sshId) {
                 sftpId.value = result.id
                 home.value = result.home
+                // 无 OSC 上报时从远端 home 出发自主浏览
+                if (!props.cwd && !trackedPath.value) {
+                    trackedPath.value = result.home
+                }
             } else {
                 void closeSftp(result.id).catch(() => {})
             }
@@ -106,10 +124,19 @@ function openSession (sshId: string): void {
         })
 }
 
-// 面板展开且 sshId 就绪时打开 SFTP 会话；sshId 变化/收起不主动关闭（多路复用
-// 开销低），仅断开或组件卸载时关闭
+// 面板展开时 SFTP 会话严格跟随活动窗格 sshId：sshId 变化（切换分屏窗格）即关闭旧
+// 会话并为新窗格重开，避免列目录继续打在已失活的旧连接上；收起不关闭（多路复用开销低）
 watch([open, () => props.sshId], ([isOpen, sshId]) => {
-    if (isOpen && sshId) {
+    if (!isOpen) {
+        return
+    }
+    if (!sshId) {
+        resetSession()
+        boundSshId.value = ''
+        return
+    }
+    if (boundSshId.value !== sshId) {
+        resetSession()
         openSession(sshId)
     }
 }, { immediate: true })
@@ -262,6 +289,127 @@ function onDragEnd () {
         draggingWidth.value = null
     }
 }
+
+/* ---- 下载 / 拖入上传（传输任务入 TransferManager，进度走全局传输中心） ---- */
+const transfersStore = useTransfersStore()
+/** 传输入队/执行错误（与列目录错误分开展示，不遮蔽列表） */
+const transferError = ref('')
+
+/**
+ * @description 右键菜单目标条目（menu open 时由行 contextmenu 事件记录）
+ */
+const pendingEntry = ref<PaneEntry | null>(null)
+const menuItems = computed<ContextMenuItemSpec[]>(() => [
+    { key: 'download', label: t('files.download'), disabled: !pendingEntry.value || !sftpId.value },
+])
+
+/**
+ * @description 下载一个条目到本地：文件走 save 对话框（默认 下载/<文件名>），
+ *              目录走 open 目录选择 + 拼接目录名（sftp_download 目录自动递归）
+ * @param entry 待下载条目
+ * @returns Promise<void>
+ *
+ * @example downloadEntry(entry)
+ *
+ */
+async function downloadEntry (entry: PaneEntry): Promise<void> {
+    if (!sftpId.value) {
+        return
+    }
+    const dialog = await import('@tauri-apps/plugin-dialog')
+    const { join, downloadDir } = await import('@tauri-apps/api/path')
+    let target: string | null
+    if (entry.isDir) {
+        const picked = await dialog.open({ directory: true, title: t('files.download') })
+        target = picked ? await join(picked, entry.name) : null
+    } else {
+        target = await dialog.save({ defaultPath: await join(await downloadDir(), entry.name) })
+    }
+    if (!target) {
+        return
+    }
+    try {
+        await sftpDownload(sftpId.value, entry.path, target)
+    } catch (err) {
+        transferError.value = String(err)
+    }
+}
+
+/**
+ * @description 右键菜单选择分发
+ * @param key 菜单项 key
+ * @returns void
+ *
+ * @example onMenuSelect('download')
+ *
+ */
+function onMenuSelect (key: string): void {
+    if (key === 'download' && pendingEntry.value) {
+        void downloadEntry(pendingEntry.value)
+    }
+}
+
+/**
+ * @description 系统文件拖入上传（TerminalTabContent 的 webview 拖放事件调用）：
+ *              上传到面板当前路径，同名条目逐个确认（覆盖/跳过）
+ * @param localPaths 本地文件绝对路径列表
+ * @returns Promise<void>
+ *
+ * @example upload(['/Users/scx/a.tar.gz'])
+ *
+ */
+async function upload (localPaths: string[]): Promise<void> {
+    const base = effectivePath.value
+    if (!sftpId.value || !base || localPaths.length === 0) {
+        return
+    }
+    const existing = new Set(entries.value.map(entry => entry.name))
+    const dialog = await import('@tauri-apps/plugin-dialog')
+    for (const localPath of localPaths) {
+        const name = localPath.split('/').pop() ?? localPath
+        if (existing.has(name)) {
+            const overwrite = await dialog.ask(t('files.conflictMessage', { name }), {
+                title: t('files.conflictTitle'),
+                okLabel: t('files.conflictOk'),
+                cancelLabel: t('files.conflictCancel'),
+            })
+            if (overwrite !== true) {
+                continue
+            }
+        }
+        try {
+            await sftpUpload(sftpId.value, localPath, joinPanePath(base, name))
+        } catch (err) {
+            transferError.value = String(err)
+        }
+    }
+}
+
+defineExpose({
+    /** 当前面板浏览路径（拖放上传目标提示用） */
+    currentPath: () => effectivePath.value,
+    upload,
+})
+
+// 传输终态（完成/失败/取消）自动刷新列表：仅看本面板连接的任务，跨版本去重防抖
+const knownStatuses = new Map<string, string>()
+watch(() => transfersStore.version, () => {
+    let finished = false
+    for (const transfer of transfersStore.transfers) {
+        if (transfer.sshId !== props.sshId) {
+            continue
+        }
+        const prev = knownStatuses.get(transfer.id)
+        if (prev && prev !== transfer.status
+            && (transfer.status === 'done' || transfer.status === 'error' || transfer.status === 'canceled')) {
+            finished = true
+        }
+        knownStatuses.set(transfer.id, transfer.status)
+    }
+    if (finished) {
+        refresh()
+    }
+})
 </script>
 
 <template>
@@ -305,9 +453,10 @@ function onDragEnd () {
                                 <PanelRightClose class="h-4 w-4" />
                             </button>
                         </div>
-                        <div v-if="breadcrumbs.length" class="breadcrumb">
+                        <div v-if="breadcrumbs.length" class="breadcrumb" :style="{ fontSize: `${Math.max(10, fontSize - 2)}px` }">
                             <template v-for="(segment, index) in breadcrumbs" :key="segment.path">
-                                <span v-if="index > 0" class="crumb-sep">/</span>
+                                <!-- index > 1 才加分隔符：根段 label 本身是 '/'，避免渲染成 '//' -->
+                                <span v-if="index > 1" class="crumb-sep">/</span>
                                 <button
                                     class="crumb"
                                     :class="{ current: index === breadcrumbs.length - 1 }"
@@ -327,23 +476,31 @@ function onDragEnd () {
                     </div>
                     <div v-else-if="loading && !entries.length" class="files-banner">{{ t('files.loading') }}</div>
 
-                    <div v-if="sftpId && !errorText" class="entry-list">
-                        <div
-                            v-for="entry in entries"
-                            :key="entry.path"
-                            class="entry-row"
-                            :class="{ dir: entry.isDir }"
-                            :title="entry.isDir ? t('files.enterHint', { name: entry.name }) : entry.path"
-                            @dblclick="entry.isDir && navigateTo(entry.path)"
-                        >
-                            <Folder v-if="entry.isDir" class="h-3.5 w-3.5 entry-icon dir" />
-                            <File v-else class="h-3.5 w-3.5 entry-icon" />
-                            <Link v-if="entry.isSymlink" class="h-3 w-3 entry-icon symlink" />
-                            <span class="entry-name">{{ entry.name }}</span>
-                            <span class="entry-size">{{ fmtSize(entry.size) }}</span>
-                        </div>
-                        <div v-if="!entries.length && !loading" class="files-banner">{{ t('files.empty') }}</div>
+                    <div v-if="transferError" class="transfer-error">
+                        {{ transferError }}
+                        <button class="retry-btn" @click="transferError = ''">✕</button>
                     </div>
+
+                    <ContextMenu :items="menuItems" @select="onMenuSelect">
+                        <div v-if="sftpId && !errorText" class="entry-list" :style="{ fontSize: `${fontSize}px` }">
+                            <div
+                                v-for="entry in entries"
+                                :key="entry.path"
+                                class="entry-row"
+                                :class="{ dir: entry.isDir }"
+                                :title="entry.isDir ? t('files.enterHint', { name: entry.name }) : entry.path"
+                                @contextmenu="pendingEntry = entry"
+                                @dblclick="entry.isDir && navigateTo(entry.path)"
+                            >
+                                <Folder v-if="entry.isDir" class="h-3.5 w-3.5 entry-icon dir" />
+                                <File v-else class="h-3.5 w-3.5 entry-icon" />
+                                <Link v-if="entry.isSymlink" class="h-3 w-3 entry-icon symlink" />
+                                <span class="entry-name">{{ entry.name }}</span>
+                                <span class="entry-size">{{ fmtSize(entry.size) }}</span>
+                            </div>
+                            <div v-if="!entries.length && !loading" class="files-banner">{{ t('files.empty') }}</div>
+                        </div>
+                    </ContextMenu>
                 </div>
             </template>
 
@@ -467,7 +624,6 @@ function onDragEnd () {
     color: var(--color-muted-foreground);
     cursor: pointer;
     font-family: inherit;
-    font-size: 11px;
     max-width: 120px;
     overflow: hidden;
     padding: 1px 4px;
@@ -483,7 +639,6 @@ function onDragEnd () {
 }
 .crumb-sep {
     color: var(--color-muted-foreground);
-    font-size: 11px;
     opacity: 0.6;
 }
 .files-banner {
@@ -505,6 +660,22 @@ function onDragEnd () {
     padding: 0;
     text-decoration: underline;
 }
+.transfer-error {
+    align-items: center;
+    background: color-mix(in oklch, var(--color-destructive) 12%, transparent);
+    border: 1px solid color-mix(in oklch, var(--color-destructive) 40%, transparent);
+    border-radius: var(--radius);
+    color: var(--color-foreground);
+    display: flex;
+    flex: none;
+    font-size: 11px;
+    gap: 6px;
+    justify-content: space-between;
+    overflow: hidden;
+    padding: 4px 8px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .entry-list {
     display: flex;
     flex: 1;
@@ -518,7 +689,6 @@ function onDragEnd () {
     border-radius: var(--radius-sm);
     color: var(--color-foreground);
     display: flex;
-    font-size: 12px;
     gap: 5px;
     min-width: 0;
     padding: 3px 6px;
@@ -553,7 +723,7 @@ function onDragEnd () {
     color: var(--color-muted-foreground);
     flex: none;
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 0.85em;
     font-variant-numeric: tabular-nums;
 }
 .sidebar-collapsed-handle {

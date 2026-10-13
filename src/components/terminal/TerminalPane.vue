@@ -224,7 +224,9 @@ defineExpose({
     sendText,
     paneKey: () => paneKey,
     tapOutput,
-    getSshId: () => sshSessionId.value,
+    // 直读会话而非 sshSessionId computed：该 computed 无响应式依赖会被 Vue 永久
+    // 缓存首次结果（启动前读到 null 即永远 null），文件侧栏轮询需要每次取实时值
+    getSshId: () => (session instanceof SshSession ? session.sshSessionId : null),
     openSftpTab: () => {
         if (props.profile.type === 'ssh') {
             tabsStore.openSftpTab(props.profile.id)

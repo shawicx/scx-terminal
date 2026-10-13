@@ -34,6 +34,9 @@ const viewContentEl = ref<HTMLElement>()
 const open = computed(() => config.store.monitor.open === true)
 const width = computed(() => config.store.monitor.width)
 
+/** 跟随设置的终端字号（设置 → 终端 → 字体大小），作用于数据内容区 */
+const fontSize = computed(() => config.store.terminal.fontSize)
+
 const latest = computed(() => monitor.latest[props.profileId] ?? null)
 
 /* 入场 stagger 每个展开周期只播一次：latest 每次采样都变，若无闸会在每个采样
@@ -345,7 +348,7 @@ function diskTone (percent: number): string {
                         </button>
                     </nav>
 
-                    <div v-if="latest" ref="viewContentEl" class="view-content">
+                    <div v-if="latest" ref="viewContentEl" class="view-content" :style="{ fontSize: `${fontSize}px` }">
                         <div v-show="activeView === 'overview'" data-view="overview" class="view-overview">
                             <div ref="chartsEl" class="overview-inner">
                                 <div class="info-grid">
@@ -571,7 +574,7 @@ function diskTone (percent: number): string {
     border-radius: var(--radius);
     color: var(--color-muted-foreground);
     flex: none;
-    font-size: 12px;
+    font-size: 0.9em;
     padding: 8px 10px;
     text-align: center;
 }
@@ -656,7 +659,6 @@ function diskTone (percent: number): string {
     color: var(--color-muted-foreground);
     display: flex;
     flex: 1;
-    font-size: 12px;
     justify-content: center;
 }
 .info-grid {
@@ -676,7 +678,7 @@ function diskTone (percent: number): string {
 }
 .info-label {
     color: var(--color-muted-foreground);
-    font-size: 10px;
+    font-size: 0.85em;
     letter-spacing: 0.04em;
     text-transform: uppercase;
 }
@@ -684,7 +686,7 @@ function diskTone (percent: number): string {
     color: var(--color-foreground);
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 11px;
+    font-size: 0.95em;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -698,7 +700,7 @@ function diskTone (percent: number): string {
 .disk-head {
     align-items: baseline;
     display: flex;
-    font-size: 11px;
+    font-size: 0.95em;
     gap: 8px;
     margin-bottom: 4px;
 }
@@ -713,7 +715,7 @@ function diskTone (percent: number): string {
 .disk-size {
     color: var(--color-muted-foreground);
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 0.85em;
     white-space: nowrap;
 }
 .disk-pct {
@@ -748,7 +750,7 @@ function diskTone (percent: number): string {
     color: var(--color-muted-foreground);
     display: flex;
     align-items: center;
-    font-size: 10px;
+    font-size: 0.85em;
     font-weight: 500;
     gap: 6px;
     letter-spacing: 0.04em;
@@ -759,9 +761,9 @@ function diskTone (percent: number): string {
     background: var(--color-secondary);
     border-radius: 999px;
     color: var(--color-muted-foreground);
-    font-size: 10px;
+    font-size: 0.85em;
     font-variant-numeric: tabular-nums;
-    line-height: 15px;
+    line-height: 1.4;
     padding: 0 6px;
 }
 .sort-seg {
@@ -793,7 +795,7 @@ function diskTone (percent: number): string {
 }
 .process-table {
     border-collapse: collapse;
-    font-size: 11px;
+    font-size: 0.95em;
     width: 100%;
 }
 .process-table th {

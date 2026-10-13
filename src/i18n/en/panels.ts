@@ -289,5 +289,11 @@ export const panels = {
         retry: 'Retry',
         enterHint: 'Double-click to enter {name}',
         actionFiles: 'Files',
+        download: 'Download to…',
+        dropHint: 'Drop to upload to {path}',
+        conflictTitle: 'Upload conflict',
+        conflictMessage: '"{name}" already exists in the target directory. Overwrite?',
+        conflictOk: 'Overwrite',
+        conflictCancel: 'Skip',
     },
 }
