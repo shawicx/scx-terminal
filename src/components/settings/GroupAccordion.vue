@@ -2,6 +2,7 @@
   @description 设置页左列表通用手风琴分组（本地档案/SSH/快捷命令共用）：单开互斥分段、
                 首次渲染自动展开 preferredKey（缺省首段，仅一次）、可折叠组头（箭头/名称/
                 计数/徽标/悬停操作钮/手动排序）；成员内容由调用方经默认作用域插槽（data 为原始分段）渲染。
+                拖拽排序时展示跟随指针的幽灵组头（drag ghost），提供即时跟随反馈。
 -->
 <script setup lang="ts" generic="T">
 import { ref, watch } from 'vue'
@@ -51,6 +52,33 @@ let dragStartX = 0
 let dragStartY = 0
 let dragMoved = false
 let suppressHeaderClick = false
+/** 跟随指针的幽灵组头状态；null = 未处于拖拽态 */
+const dragGhost = ref<{ title: string, count?: number, left: number, top: number } | null>(null)
+/** 按下时指针相对组头左上角的偏移（保证幽灵相对指针的位置与按下时组头一致） */
+let dragGrabOffsetX = 0
+let dragGrabOffsetY = 0
+
+/**
+ * @description 计算按下时指针相对组头左上角的抓取偏移，并缓存到拖拽运行时状态
+ * @param grip 手柄元素（组头后代）
+ * @param clientX 指针 X 坐标
+ * @param clientY 指针 Y 坐标
+ * @returns void
+ *
+ * @example captureGrabOffset(event.currentTarget, event.clientX, event.clientY)
+ *
+ */
+function captureGrabOffset (grip: EventTarget | null, clientX: number, clientY: number): void {
+    const header = grip instanceof Element ? grip.closest<HTMLElement>('.group-header') : null
+    if (!header) {
+        dragGrabOffsetX = 0
+        dragGrabOffsetY = 0
+        return
+    }
+    const rect = header.getBoundingClientRect()
+    dragGrabOffsetX = clientX - rect.left
+    dragGrabOffsetY = clientY - rect.top
+}
 
 /**
  * @description 输出分组拖拽调试日志（仅开发模式，便于定位 Tauri/浏览器事件链差异）
@@ -205,6 +233,7 @@ function startGroupDrag (section: AccordionSection<T>, event: PointerEvent): voi
     dragPointerId = event.pointerId
     dragStartX = event.clientX
     dragStartY = event.clientY
+    captureGrabOffset(event.currentTarget, event.clientX, event.clientY)
     currentTarget.setPointerCapture(event.pointerId)
     window.addEventListener('pointermove', traceGroupDrag)
     window.addEventListener('pointerup', endGroupDrag)
@@ -212,7 +241,8 @@ function startGroupDrag (section: AccordionSection<T>, event: PointerEvent): voi
 }
 
 /**
- * @description 命中测试当前指针下的目标分组；移动超过阈值后才进入拖拽态
+ * @description 命中测试当前指针下的目标分组；移动超过阈值后进入拖拽态，
+ *              并驱动幽灵组头跟随指针移动（left/top 按抓取偏移换算）
  * @param event 指针移动事件
  * @returns void
  *
@@ -228,6 +258,12 @@ function traceGroupDrag (event: PointerEvent): void {
     }
     dragMoved = true
     dragKey.value = dragSource.key
+    dragGhost.value = {
+        title: dragSource.title,
+        count: dragSource.count,
+        left: event.clientX - dragGrabOffsetX,
+        top: event.clientY - dragGrabOffsetY,
+    }
     const target = findGroupDropTarget(event.clientX, event.clientY)
     debugGroupDrag('drag:hit-test', {
         sourceKey: dragSource.key,
@@ -295,6 +331,7 @@ function cleanupGroupDrag (): void {
     dragMoved = false
     dragKey.value = ''
     dropKey.value = ''
+    dragGhost.value = null
 }
 
 /**
@@ -376,6 +413,12 @@ function onHeaderClick (section: AccordionSection<T>): void {
             </div>
         </div>
     </template>
+    <!-- 拖拽跟随幽灵组头：超过 4px 阈值后出现，松手/取消即消失 -->
+    <div v-if="dragGhost" class="drag-ghost" :style="{ left: `${dragGhost.left}px`, top: `${dragGhost.top}px` }">
+        <GripVertical :size="12" />
+        <span class="drag-ghost-title">{{ dragGhost.title }}</span>
+        <span v-if="dragGhost.count !== undefined" class="drag-ghost-count">{{ dragGhost.count }}</span>
+    </div>
 </template>
 
 <style scoped>
@@ -533,5 +576,39 @@ function onHeaderClick (section: AccordionSection<T>): void {
 
 .group-body.collapsed .group-body-inner {
     opacity: 0;
+}
+
+/* 拖拽跟随幽灵组头：视觉令牌对齐 SFTP 面板的 drag-ghost（浮层、不拦截命中测试） */
+.drag-ghost {
+    position: fixed;
+    z-index: var(--z-drag-ghost, 1000);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--color-border);
+    background: var(--color-popover);
+    color: var(--color-popover-foreground);
+    font-size: 12px;
+    pointer-events: none;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    max-width: 260px;
+}
+
+.drag-ghost-title {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.drag-ghost-count {
+    flex: none;
+    font-size: 11px;
+    color: var(--color-muted-foreground);
 }
 </style>
