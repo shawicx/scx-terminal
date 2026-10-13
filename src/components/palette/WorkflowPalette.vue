@@ -16,8 +16,8 @@ import {
 } from '@/services/workflowRunService'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { fuzzyMatch } from '@/lib/utils/fuzzy'
-import { collectWorkflowParams, previewWorkflow } from '@/lib/workflows'
-import { visibleWorkflows } from '@/lib/builtinWorkflows'
+import { collectWorkflowParams, groupWorkflowSections, previewWorkflow } from '@/lib/workflows'
+import { visibleWorkflows, workflowDisplayGroups } from '@/lib/builtinWorkflows'
 import { overlayEnter, overlayExit, moveHighlight } from '@/lib/motion'
 
 const { t } = useI18n()
@@ -71,7 +71,23 @@ interface VisibleItem {
     preview: string
     /** 描述（可选备注，空串 = 未填写） */
     description: string
+    /** 所属分组 id（空串 = 未分组，仅分区归并使用） */
+    groupId: string
 }
+
+/** 分组分区条目：可见项 + 过滤后扁平列表中的索引（键盘选中与高亮定位用） */
+type SectionItem = VisibleItem & { flatIndex: number }
+
+/** 分组分区（未分组在前，其余按展示分组顺序）：带扁平索引导航 */
+const visibleSections = computed<{ title: string | null, items: SectionItem[] }[]>(() => {
+    let flat = 0
+    return groupWorkflowSections(visibleItems.value, workflowDisplayGroups(config.store))
+        .filter(section => section.items.length > 0)
+        .map(section => ({
+            title: section.title,
+            items: section.items.map(item => ({ ...item, flatIndex: flat++ })),
+        }))
+})
 
 /** 按搜索词过滤工作流列表（名称/预览/描述模糊匹配；仅保留有可执行步骤的） */
 const visibleItems = computed<VisibleItem[]>(() =>
@@ -86,6 +102,7 @@ const visibleItems = computed<VisibleItem[]>(() =>
             label: workflow.name || previewWorkflow(workflow, config.store.quickCommands),
             preview: previewWorkflow(workflow, config.store.quickCommands),
             description: workflow.description ?? '',
+            groupId: workflow.groupId ?? '',
         })))
 
 watch(visibleItems, () => {
@@ -411,22 +428,25 @@ watch(workflowPaletteOpen, value => {
                     />
                     <div ref="listEl" class="palette-list">
                         <div ref="highlightEl" class="palette-highlight" aria-hidden="true"></div>
-                        <button
-                            v-for="(item, index) in visibleItems"
-                            :key="item.workflow.id"
-                            class="palette-item"
-                            :class="{ selected: index === selectedIndex }"
-                            @click="pick(index)"
-                            @mousemove="selectedIndex = index"
-                        >
-                            <span class="palette-item-main">
-                                <span class="palette-item-label">{{ item.label }}</span>
-                                <span v-if="item.description" class="palette-item-description">{{ item.description }}</span>
-                                <span class="palette-item-preview">{{ item.preview }}</span>
-                            </span>
-                            <span v-if="isWorkflowRunning(item.workflow.id)" class="palette-item-hotkey wf-running-badge">▶</span>
-                            <span v-else class="palette-item-hotkey">{{ item.workflow.execution === 'joined' ? '&&' : '⇥' }}</span>
-                        </button>
+                        <template v-for="section in visibleSections" :key="section.title ?? '__ungrouped'">
+                            <div v-if="section.title" class="palette-section-title">{{ section.title }}</div>
+                            <button
+                                v-for="item in section.items"
+                                :key="item.workflow.id"
+                                class="palette-item"
+                                :class="{ selected: item.flatIndex === selectedIndex }"
+                                @click="pick(item.flatIndex)"
+                                @mousemove="selectedIndex = item.flatIndex"
+                            >
+                                <span class="palette-item-main">
+                                    <span class="palette-item-label">{{ item.label }}</span>
+                                    <span v-if="item.description" class="palette-item-description">{{ item.description }}</span>
+                                    <span class="palette-item-preview">{{ item.preview }}</span>
+                                </span>
+                                <span v-if="isWorkflowRunning(item.workflow.id)" class="palette-item-hotkey wf-running-badge">▶</span>
+                                <span v-else class="palette-item-hotkey">{{ item.workflow.execution === 'joined' ? '&&' : '⇥' }}</span>
+                            </button>
+                        </template>
                         <div v-if="visibleItems.length === 0" class="palette-empty">
                             <span>{{ visibleWorkflows(config.store).length ? t('palette.noResults') : t('settings.workflowEmptyHint') }}</span>
                             <button
@@ -464,6 +484,15 @@ watch(workflowPaletteOpen, value => {
 
 <style scoped>
 /* 共用样式（遮罩/面板/输入框/条目/动画）见 src/assets/styles/palette.css */
+.palette-section-title {
+    padding: 8px 10px 4px;
+    font-size: 11px;
+    color: var(--color-muted-foreground);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    user-select: none;
+}
+
 .palette-item-main {
     display: flex;
     flex-direction: column;

@@ -147,6 +147,55 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         )
         .map_err(|e| format!("failed to add workflows stop_on_error column: {e}"))?;
     }
+    if version < 8 {
+        conn.execute_batch(
+            "ALTER TABLE workflows ADD COLUMN group_name TEXT;
+             PRAGMA user_version = 8;",
+        )
+        .map_err(|e| format!("failed to add workflows group_name column: {e}"))?;
+    }
+    if version < 9 {
+        // 工作流分组实体化：group_name 字符串列升级为 workflow_groups 表 + group_id 引用；
+        // 存量分组名迁移为分组行（id 按名确定性派生，避免重复插入）
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS workflow_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL
+            );
+             ALTER TABLE workflows ADD COLUMN group_id TEXT;",
+        )
+        .map_err(|e| format!("failed to create workflow_groups schema: {e}"))?;
+        let legacy_groups: Vec<(String, String)> = {
+            let mut stmt = conn
+                .prepare("SELECT DISTINCT group_name FROM workflows WHERE group_name IS NOT NULL AND group_name != ''")
+                .map_err(|e| format!("failed to read legacy workflow groups: {e}"))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    let name: String = row.get(0)?;
+                    let id = format!("wfgroup-{}", name.trim().replace(char::is_whitespace, "-"));
+                    Ok((id, name))
+                })
+                .map_err(|e| format!("failed to read legacy workflow groups: {e}"))?;
+            rows.filter_map(|row| row.ok()).collect()
+        };
+        for (index, (id, name)) in legacy_groups.into_iter().enumerate() {
+            conn.execute(
+                "INSERT OR IGNORE INTO workflow_groups (id, name, sort_order) VALUES (?1, ?2, ?3)",
+                rusqlite::params![id, name, index as i64],
+            )
+            .map_err(|e| format!("failed to migrate legacy workflow group {id}: {e}"))?;
+            conn.execute(
+                "UPDATE workflows SET group_id = ?1 WHERE group_name = ?2",
+                rusqlite::params![id, name],
+            )
+            .map_err(|e| format!("failed to migrate workflow group refs of {id}: {e}"))?;
+        }
+        conn.execute_batch(
+            "PRAGMA user_version = 9;",
+        )
+        .map_err(|e| format!("failed to bump user_version to 9: {e}"))?;
+    }
     Ok(())
 }
 

@@ -131,6 +131,49 @@ export function buildWorkflowCommand (
     return { text: steps.join(' && '), sequential: steps }
 }
 
+/** 工作流分组分区（未分组在前，其余按 groups 顺序） */
+export interface WorkflowSection<T> {
+    /** 分组名；null = 未分组 */
+    title: string | null
+    /** 分组 id；null = 未分组 */
+    groupId: string | null
+    items: T[]
+}
+
+/**
+ * @description 把工作流列表按 groupId 归并为分区（未分组区在最前，其余按 groups
+ *              顺序；引用不存在分组的条目归入未分组）；供设置页与工作流选择器共用
+ * @param workflows 工作流列表
+ * @param groups 分组列表（config 顺序）
+ * @returns WorkflowSection[] 分区列表（保持各区内原有顺序）
+ *
+ * @example groupWorkflowSections([{ name: 'a' }], [{ id: 'g1', name: 'Git' }])[0].title // null
+ *
+ */
+export function groupWorkflowSections<T extends { groupId?: string }> (
+    workflows: T[],
+    groups: { id: string, name: string }[],
+): WorkflowSection<T>[] {
+    const known = new Set(groups.map(group => group.id))
+    const byGroup = new Map<string | null, T[]>()
+    for (const workflow of workflows) {
+        const key = workflow.groupId && known.has(workflow.groupId) ? workflow.groupId : null
+        if (!byGroup.has(key)) {
+            byGroup.set(key, [])
+        }
+        byGroup.get(key)!.push(workflow)
+    }
+    const sections: WorkflowSection<T>[] = []
+    const ungrouped = byGroup.get(null) ?? []
+    if (ungrouped.length) {
+        sections.push({ title: null, groupId: null, items: ungrouped })
+    }
+    for (const group of groups) {
+        sections.push({ title: group.name, groupId: group.id, items: byGroup.get(group.id) ?? [] })
+    }
+    return sections
+}
+
 /**
  * @description 查询引用某条快捷命令的工作流列表（删除快捷命令前的引用保护）
  * @param workflows 工作流列表

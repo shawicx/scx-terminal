@@ -9,7 +9,7 @@ import { isPlainObject } from './defaults'
 import type {
     AdvancedConfig, AppearanceConfig, ConfigStore, FilesConfig, LocalGroup, MonitorConfig,
     QuickCommand, QuickCommandGroup, RecentsConfig, SshGroup, TabGroup, TerminalConfig,
-    TerminalProfile, Workflow, WorkflowCtlConfig,
+    TerminalProfile, Workflow, WorkflowCtlConfig, WorkflowGroup,
 } from './types'
 
 /** 上次已持久化状态的基线（各实体存键排序后的稳定序列化串，用于 diff） */
@@ -26,6 +26,7 @@ export interface SavedBaseline {
     quickCommands: Record<string, string>
     quickCommandGroups: Record<string, string>
     workflows: Record<string, string>
+    workflowGroups: Record<string, string>
     localGroups: Record<string, string>
     sshGroups: Record<string, string>
     tabGroups: Record<string, string>
@@ -48,6 +49,9 @@ export type FlushOp =
     | { kind: 'workflowCreate'; workflow: Workflow; saved: string }
     | { kind: 'workflowUpdate'; workflow: Workflow; saved: string }
     | { kind: 'workflowDelete'; id: string }
+    | { kind: 'workflowGroupCreate'; group: WorkflowGroup; saved: string }
+    | { kind: 'workflowGroupUpdate'; group: WorkflowGroup; saved: string }
+    | { kind: 'workflowGroupDelete'; id: string }
     | { kind: 'localGroupCreate'; group: LocalGroup; saved: string }
     | { kind: 'localGroupUpdate'; group: LocalGroup; saved: string }
     | { kind: 'localGroupDelete'; id: string }
@@ -199,6 +203,17 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
         ops.push({ kind: 'workflowUpdate', workflow, saved: stableStringify(workflow) })
     }
 
+    const workflowGroupDiff = diffById(store.workflowGroups, saved.workflowGroups)
+    for (const id of workflowGroupDiff.deletes) {
+        ops.push({ kind: 'workflowGroupDelete', id })
+    }
+    for (const group of workflowGroupDiff.creates) {
+        ops.push({ kind: 'workflowGroupCreate', group, saved: stableStringify(group) })
+    }
+    for (const group of workflowGroupDiff.updates) {
+        ops.push({ kind: 'workflowGroupUpdate', group, saved: stableStringify(group) })
+    }
+
     const localGroupDiff = diffById(store.localGroups, saved.localGroups)
     for (const id of localGroupDiff.deletes) {
         ops.push({ kind: 'localGroupDelete', id })
@@ -250,7 +265,7 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
 
 /** 空基线：任何非空 store 与之 diff 都会产出全量导入操作（legacy 迁移用） */
 export function emptyBaseline (): SavedBaseline {
-    return { terminal: '', appearance: '', advanced: '', recents: '', monitor: '', files: '', workflowCtl: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, workflows: {}, localGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
+    return { terminal: '', appearance: '', advanced: '', recents: '', monitor: '', files: '', workflowCtl: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, workflows: {}, workflowGroups: {}, localGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
 }
 
 /**
@@ -275,6 +290,7 @@ export function captureBaseline (store: ConfigStore): SavedBaseline {
         quickCommands: Object.fromEntries(store.quickCommands.map(command => [command.id, stableStringify(command)])),
         quickCommandGroups: Object.fromEntries(store.quickCommandGroups.map(group => [group.id, stableStringify(group)])),
         workflows: Object.fromEntries(store.workflows.map(workflow => [workflow.id, stableStringify(workflow)])),
+        workflowGroups: Object.fromEntries(store.workflowGroups.map(group => [group.id, stableStringify(group)])),
         localGroups: Object.fromEntries(store.localGroups.map(group => [group.id, stableStringify(group)])),
         sshGroups: Object.fromEntries(store.sshGroups.map(group => [group.id, stableStringify(group)])),
         tabGroups: Object.fromEntries(store.tabGroups.map(group => [group.id, stableStringify(group)])),
@@ -331,6 +347,15 @@ export async function runFlushOp (op: FlushOp): Promise<void> {
             break
         case 'workflowDelete':
             await invoke('workflow_delete', { id: op.id })
+            break
+        case 'workflowGroupCreate':
+            await invoke('workflow_group_create', { group: op.group })
+            break
+        case 'workflowGroupUpdate':
+            await invoke('workflow_group_update', { group: op.group })
+            break
+        case 'workflowGroupDelete':
+            await invoke('workflow_group_delete', { id: op.id })
             break
         case 'localGroupCreate':
             await invoke('local_group_create', { group: op.group })
@@ -410,6 +435,13 @@ export function commitOp (saved: SavedBaseline, op: FlushOp): void {
             break
         case 'workflowDelete':
             delete saved.workflows[op.id]
+            break
+        case 'workflowGroupCreate':
+        case 'workflowGroupUpdate':
+            saved.workflowGroups[op.group.id] = op.saved
+            break
+        case 'workflowGroupDelete':
+            delete saved.workflowGroups[op.id]
             break
         case 'localGroupCreate':
         case 'localGroupUpdate':

@@ -51,7 +51,7 @@ fn schema_is_versioned() {
     let state = temp_state("version");
     let conn = state.lock_conn();
     let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 9);
 }
 
 #[test]
@@ -184,11 +184,13 @@ fn workflow_crud_round_trip() {
         id: "wf1".into(), name: "deploy".into(), description: String::new(),
         execution: "joined".into(), step_interval_ms: 500, steps: steps.clone(),
         stop_on_error: true,
+        group_id: None,
     }).unwrap();
     workflow_create_internal(&state, &WorkflowRecord {
         id: "wf2".into(), name: "release".into(), description: "发布流程".into(),
         execution: "joined".into(), step_interval_ms: 500, steps: Vec::new(),
         stop_on_error: true,
+        group_id: None,
     }).unwrap();
 
     // 更新换执行模式 + 步骤 + 关 stopOnError，排序不变
@@ -196,6 +198,7 @@ fn workflow_crud_round_trip() {
         id: "wf2".into(), name: "release".into(), description: "发布流程".into(),
         execution: "sequential".into(), step_interval_ms: 800, steps: steps.clone(),
         stop_on_error: false,
+        group_id: None,
     }).unwrap();
 
     let snapshot = load_internal(&state).unwrap().unwrap();
@@ -212,10 +215,35 @@ fn workflow_crud_round_trip() {
     workflow_delete_internal(&state, "wf1").unwrap();
     assert!(workflow_update_internal(&state, &WorkflowRecord {
         id: "wf1".into(), name: "x".into(), description: String::new(),
+        group_id: None,
         execution: "joined".into(), step_interval_ms: 500, steps: Vec::new(),
         stop_on_error: true,
     }).is_err());
     assert_eq!(load_internal(&state).unwrap().unwrap().workflows.len(), 1);
+}
+
+#[test]
+fn workflow_group_crud_round_trip() {
+    use super::model::WorkflowGroupRecord;
+    let state = temp_state("wf-group");
+    workflow_group_create_internal(&state, &WorkflowGroupRecord { id: "wg1".into(), name: "Git".into(), sort_order: 0 }).unwrap();
+    workflow_group_create_internal(&state, &WorkflowGroupRecord { id: "wg2".into(), name: "Docker".into(), sort_order: 1 }).unwrap();
+
+    // 更新改名 + 重排；缺 id 更新被拒
+    workflow_group_update_internal(&state, &WorkflowGroupRecord { id: "wg1".into(), name: "GitOps".into(), sort_order: 2 }).unwrap();
+    assert!(workflow_group_update_internal(&state, &WorkflowGroupRecord { id: "gone".into(), name: "x".into(), sort_order: 0 }).is_err());
+
+    // 工作流引用分组；删组级联降级为未分组
+    workflow_create_internal(&state, &WorkflowRecord {
+        id: "wf1".into(), name: "cleanup".into(), description: String::new(), group_id: Some("wg1".into()),
+        execution: "joined".into(), step_interval_ms: 500, steps: Vec::new(), stop_on_error: true,
+    }).unwrap();
+    workflow_group_delete_internal(&state, "wg1").unwrap();
+
+    let snapshot = load_internal(&state).unwrap().unwrap();
+    assert_eq!(snapshot.workflow_groups.len(), 1);
+    assert_eq!(snapshot.workflow_groups[0].id, "wg2");
+    assert!(snapshot.workflows[0].group_id.is_none());
 }
 
 #[test]

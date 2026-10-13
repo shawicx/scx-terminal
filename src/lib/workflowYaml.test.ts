@@ -90,6 +90,21 @@ describe('serializeWorkflowYaml', () => {
         expect(imported.steps[0]!.paramValues).toEqual({ branch: 'dev' })
         expect(imported.steps[1]!.wait).toEqual({ kind: 'fixed', ms: 200 })
     })
+
+    it('groupId 经 groups 解析为分组名导出，解析还原分组名，缺省不写', () => {
+        const groups = [{ id: 'wfgroup-git', name: 'Git' }]
+        const grouped: Workflow = { ...workflow([]), groupId: 'wfgroup-git' }
+        const withGroup = serializeWorkflowYaml(grouped, quickCommands, {}, groups).yaml
+        expect(withGroup).toContain('group: Git')
+        const [parsed] = parseWorkflowYaml(withGroup)
+        expect(parsed.group).toBe('Git')
+        // 悬空 groupId（groups 缺失）不写分组
+        const dangling = serializeWorkflowYaml(grouped, quickCommands).yaml
+        expect(dangling).not.toContain('group:')
+        const plainYaml = serializeWorkflowYaml(workflow([]), quickCommands).yaml
+        const [plainParsed] = parseWorkflowYaml(plainYaml)
+        expect(plainParsed.group).toBeUndefined()
+    })
 })
 
 describe('serializeWorkflowsYaml / parseWorkflowYaml 多文档', () => {

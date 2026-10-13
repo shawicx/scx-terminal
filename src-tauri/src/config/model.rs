@@ -37,6 +37,17 @@ pub struct QuickCommandGroupRecord {
     pub description: String,
 }
 
+/// 工作流分组记录（真实列存储；内置虚拟分组不入库）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowGroupRecord {
+    pub id: String,
+    pub name: String,
+    /// 手动排序号（对应 SQLite sort_order）
+    #[serde(default)]
+    pub sort_order: i64,
+}
+
 /// 工作流记录（真实列存储；步骤列表整体存 steps JSON 列，形状随前端演进，对齐 profiles data 先例）
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,6 +57,9 @@ pub struct WorkflowRecord {
     /// 描述（可选备注，空串 = 未填写）
     #[serde(default)]
     pub description: String,
+    /// 所属分组 id（workflow_groups 表引用）；None = 未分组
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     /// 执行模式：joined 合并为一条发送 / sequential 逐步发送
     #[serde(default = "default_execution")]
     pub execution: String,
@@ -131,6 +145,7 @@ pub struct ConfigSnapshot {
     pub quick_commands: Vec<QuickCommandRecord>,
     pub quick_command_groups: Vec<QuickCommandGroupRecord>,
     pub workflows: Vec<WorkflowRecord>,
+    pub workflow_groups: Vec<WorkflowGroupRecord>,
     pub local_groups: Vec<LocalGroupRecord>,
     pub ssh_groups: Vec<SshGroupRecord>,
     pub tab_groups: Vec<TabGroupRecord>,

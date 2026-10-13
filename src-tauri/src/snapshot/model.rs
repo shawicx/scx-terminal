@@ -99,6 +99,9 @@ pub struct WorkflowRow {
     /// v7 新增；default 使 v6 备份缺字段仍可导入
     #[serde(default = "default_stop_on_error")]
     pub stop_on_error: bool,
+    /// v9 新增分组 id 引用；default 使旧备份缺字段仍可导入
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
 }
 
 fn default_stop_on_error() -> bool {
@@ -122,6 +125,9 @@ pub struct BackupConfig {
     /// 工作流（v6 新增；default 使旧备份缺字段仍可导入）
     #[serde(default)]
     pub workflows: Vec<WorkflowRow>,
+    /// 工作流分组（v9 新增；default 使旧备份缺字段仍可导入）
+    #[serde(default)]
+    pub workflow_groups: Vec<GroupRow>,
 }
 
 /// 备份快照文件根结构

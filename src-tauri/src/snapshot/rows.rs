@@ -114,7 +114,7 @@ pub(super) fn read_config_rows(config: &ConfigState) -> Result<BackupConfig, Str
 
     {
         let mut stmt = conn
-            .prepare("SELECT id, name, description, execution, step_interval_ms, sort_order, steps, stop_on_error FROM workflows ORDER BY sort_order")
+            .prepare("SELECT id, name, description, execution, step_interval_ms, sort_order, steps, stop_on_error, group_id FROM workflows ORDER BY sort_order")
             .map_err(|e| format!("failed to read workflows: {e}"))?;
         let result = stmt
             .query_map([], |row| {
@@ -128,6 +128,7 @@ pub(super) fn read_config_rows(config: &ConfigState) -> Result<BackupConfig, Str
                     sort_order: row.get(5)?,
                     steps: serde_json::from_str(&steps_raw).unwrap_or(serde_json::Value::Array(Vec::new())),
                     stop_on_error: row.get::<_, i64>(7)? != 0,
+                    group_id: row.get(8)?,
                 })
             })
             .map_err(|e| format!("failed to read workflows: {e}"))?;
@@ -139,6 +140,7 @@ pub(super) fn read_config_rows(config: &ConfigState) -> Result<BackupConfig, Str
     for (table, into) in [
         ("quick_command_groups", &mut rows.quick_command_groups),
         ("ssh_groups", &mut rows.ssh_groups),
+        ("workflow_groups", &mut rows.workflow_groups),
     ] {
         let mut stmt = conn
             .prepare(&format!("SELECT id, name, sort_order FROM {table} ORDER BY sort_order"))
@@ -270,10 +272,18 @@ pub(super) fn write_config_rows(config: &ConfigState, rows: &BackupConfig) -> Re
         )
         .map_err(|e| format!("failed to import ssh group {}: {e}", row.id))?;
     }
+    tx.execute("DELETE FROM workflow_groups", []).map_err(|e| format!("failed to clear workflow groups: {e}"))?;
+    for row in &rows.workflow_groups {
+        tx.execute(
+            "INSERT INTO workflow_groups (id, name, sort_order) VALUES (?1, ?2, ?3)",
+            rusqlite::params![row.id, row.name, row.sort_order],
+        )
+        .map_err(|e| format!("failed to import workflow group {}: {e}", row.id))?;
+    }
     tx.execute("DELETE FROM workflows", []).map_err(|e| format!("failed to clear workflows: {e}"))?;
     for row in &rows.workflows {
         tx.execute(
-            "INSERT INTO workflows (id, name, description, execution, step_interval_ms, sort_order, steps, stop_on_error) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO workflows (id, name, description, execution, step_interval_ms, sort_order, steps, stop_on_error, group_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
                 row.id,
                 row.name,
@@ -282,7 +292,8 @@ pub(super) fn write_config_rows(config: &ConfigState, rows: &BackupConfig) -> Re
                 row.step_interval_ms,
                 row.sort_order,
                 row.steps.to_string(),
-                row.stop_on_error
+                row.stop_on_error,
+                row.group_id
             ],
         )
         .map_err(|e| format!("failed to import workflow {}: {e}", row.id))?;

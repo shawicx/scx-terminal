@@ -12,16 +12,19 @@ import { useI18n } from 'vue-i18n'
 import { Copy, Download, EyeOff, Pencil, Plus, RotateCcw, Trash2, Upload } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import Label from '@/components/ui/Label.vue'
-import { useConfigStore, type Workflow, type WorkflowStep } from '@/stores/config'
-import { previewWorkflow, stepCommandTemplate, collectWorkflowParams } from '@/lib/workflows'
+import { useConfigStore, reorderGroups, type Workflow, type WorkflowStep } from '@/stores/config'
+import { previewWorkflow, stepCommandTemplate, collectWorkflowParams, groupWorkflowSections } from '@/lib/workflows'
 import { previewQuickCommand } from '@/lib/quickCommands'
 import {
-    BUILTIN_WORKFLOW_ID_PREFIX, builtinCatalog, builtinSlugFromName, hideBuiltinWorkflow,
-    isBuiltinId, resetBuiltinWorkflows, visibleBuiltinWorkflows, visibleWorkflows,
+    BUILTIN_WORKFLOW_ID_PREFIX, builtinCatalog, builtinSlugFromName, ensureWorkflowGroupIdByName,
+    hideBuiltinWorkflow, isBuiltinId, isBuiltinWorkflowGroupId, resetBuiltinWorkflows,
+    visibleBuiltinWorkflows, visibleWorkflows, workflowDisplayGroups,
 } from '@/lib/builtinWorkflows'
 import { buildImportedWorkflow, WorkflowYamlError } from '@/lib/workflowYaml'
 import { confirmAction } from '@/components/settings/useConfirmAction'
+import { openCreateWorkflowGroup, openRenameWorkflowGroup } from '@/components/settings/useGroupNameDialog'
 import { exportAllWorkflowsToFile, exportBuiltinsToFile, exportWorkflowToFile, importWorkflowsFromFile, type ImportedWorkflowDoc } from '@/services/workflowYamlIo'
+import GroupAccordion from '@/components/settings/GroupAccordion.vue'
 import WorkflowFormDialog from '@/components/settings/pages/WorkflowFormDialog.vue'
 
 const { t } = useI18n()
@@ -86,6 +89,97 @@ function selectedParamNames (workflow: Workflow): string[] {
 
 /** 可见工作流全集（可见内置在前 + 用户工作流在后）：列表/选中统一数据源 */
 const allWorkflows = computed(() => visibleWorkflows(store))
+
+/** 展示分组合集：用户自建分组（sortOrder）在前，内置虚拟分组在后 */
+const displayGroups = computed(() => workflowDisplayGroups(store))
+
+/** 分组分区（未分组在前，其余按 displayGroups 顺序）：手风琴渲染数据源 */
+const workflowSections = computed(() => groupWorkflowSections(allWorkflows.value, displayGroups.value))
+
+/** 未分组段在手风琴分段键中的键 */
+const WORKFLOW_UNGROUPED_KEY = '__ungrouped'
+
+/** 手风琴分段视图（GroupAccordion 消费）：用户分组可管理/可排序，内置虚拟分组只读 */
+const workflowAccordionSections = computed(() => workflowSections.value.map(section => ({
+    key: section.groupId ?? WORKFLOW_UNGROUPED_KEY,
+    title: section.title ?? t('settings.workflowGroupUngrouped'),
+    count: section.items.length,
+    manageable: section.groupId !== null && !isBuiltinWorkflowGroupId(section.groupId),
+    sortable: section.groupId !== null && !isBuiltinWorkflowGroupId(section.groupId),
+    data: section,
+})))
+
+/** 自动展开目标：选中工作流所在分段 */
+const selectedWorkflowSectionKey = computed(() =>
+    workflowAccordionSections.value.find(section => section.data.items.some(workflow => workflow.id === selectedWorkflow.value?.id))?.key)
+
+/**
+ * @description 删除工作流分组：组内工作流降级为未分组（groupId 清空；内置虚拟分组
+ *              不可达——手风琴对其不渲染删除钮）
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example deleteWorkflowGroup('wfgroup-a1b2')
+ *
+ */
+function deleteWorkflowGroup (id: string): void {
+    const index = store.workflowGroups.findIndex(group => group.id === id)
+    if (index === -1) {
+        return
+    }
+    store.workflowGroups.splice(index, 1)
+    for (const workflow of store.workflows) {
+        if (workflow.groupId === id) {
+            delete workflow.groupId
+        }
+    }
+}
+
+/**
+ * @description 删除工作流分组（经确认弹窗；组内工作流降级为未分组）
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example confirmDeleteWorkflowGroup('wfgroup-a1b2')
+ *
+ */
+function confirmDeleteWorkflowGroup (id: string): void {
+    const group = store.workflowGroups.find(item => item.id === id)
+    if (group) {
+        confirmAction(t('settings.deleteConfirmBody', { name: group.name }), () => deleteWorkflowGroup(id))
+    }
+}
+
+/**
+ * @description 手动排序工作流分组（未分组虚拟段固定置顶）
+ * @param sourceKey 被移动分组 id
+ * @param targetKey 放置目标分组 id
+ * @returns void
+ *
+ * @example reorderWorkflowGroups('wg2', 'wg1')
+ *
+ */
+function reorderWorkflowGroups (sourceKey: string, targetKey: string): void {
+    if (sourceKey === WORKFLOW_UNGROUPED_KEY || targetKey === WORKFLOW_UNGROUPED_KEY) {
+        return
+    }
+    store.workflowGroups = reorderGroups(store.workflowGroups, sourceKey, targetKey)
+}
+
+/**
+ * @description 解析分组 id 的展示名（详情卡「分组」行用）；未分组返回空串
+ * @param groupId 分组 id
+ * @returns string 分组名；未解析到返回空串
+ *
+ * @example workflowGroupName('wfgroup-a1b2')
+ *
+ */
+function workflowGroupName (groupId: string | undefined): string {
+    if (!groupId) {
+        return ''
+    }
+    return displayGroups.value.find(group => group.id === groupId)?.name ?? ''
+}
 
 /** 可见内置目录（隐藏清单已过滤） */
 const visibleBuiltins = computed(() => visibleBuiltinWorkflows(store))
@@ -297,7 +391,7 @@ async function exportSelectedWorkflow (): Promise<void> {
     }
     resetIoMessages()
     try {
-        const result = await exportWorkflowToFile(workflow, store.quickCommands)
+        const result = await exportWorkflowToFile(workflow, store.quickCommands, displayGroups.value)
         if (!result) {
             return
         }
@@ -322,7 +416,7 @@ async function exportAllWorkflows (): Promise<void> {
     }
     resetIoMessages()
     try {
-        const result = await exportAllWorkflowsToFile(store.workflows, store.quickCommands)
+        const result = await exportAllWorkflowsToFile(store.workflows, store.quickCommands, displayGroups.value)
         if (!result) {
             return
         }
@@ -348,7 +442,7 @@ async function exportBuiltins (): Promise<void> {
     }
     resetIoMessages()
     try {
-        const result = await exportBuiltinsToFile(builtinCatalog(store), store.workflowCtl.removed)
+        const result = await exportBuiltinsToFile(builtinCatalog(store), store.workflowCtl.removed, displayGroups.value)
         if (!result) {
             return
         }
@@ -369,6 +463,10 @@ function upsertBuiltinPackDocs (docs: ImportedWorkflowDoc[]): void {
     for (const doc of docs) {
         const id = `${BUILTIN_WORKFLOW_ID_PREFIX}${doc.workflow.id ?? builtinSlugFromName(doc.workflow.name)}`
         const built = buildImportedWorkflow(doc.workflow, id)
+        const groupId = ensureWorkflowGroupIdByName(store, doc.workflow.group ?? '')
+        if (groupId) {
+            built.groupId = groupId
+        }
         const index = store.workflowCtl.packs.findIndex(pack => pack.id === id)
         if (index === -1) {
             store.workflowCtl.packs.push(built)
@@ -414,7 +512,12 @@ async function importWorkflows (): Promise<void> {
     const userDocs = docs.filter(doc => doc.scope !== 'builtin')
     const importUser = (): void => {
         for (const doc of userDocs) {
-            store.workflows.push(buildImportedWorkflow(doc.workflow))
+            const built = buildImportedWorkflow(doc.workflow)
+            const groupId = ensureWorkflowGroupIdByName(store, doc.workflow.group ?? '')
+            if (groupId) {
+                built.groupId = groupId
+            }
+            store.workflows.push(built)
         }
         selectedWorkflowId.value = store.workflows[store.workflows.length - userDocs.length]?.id ?? null
     }
@@ -454,6 +557,10 @@ async function importWorkflows (): Promise<void> {
                     <Plus :size="14" />
                     <span>{{ t('settings.workflowNew') }}</span>
                 </button>
+                <button class="profile-new-button" @click="openCreateWorkflowGroup">
+                    <Plus :size="14" />
+                    <span>{{ t('settings.workflowNewGroup') }}</span>
+                </button>
                 <button class="profile-new-button" @click="void importWorkflows()">
                     <Upload :size="14" />
                     <span>{{ t('settings.workflowImport') }}</span>
@@ -485,20 +592,34 @@ async function importWorkflows (): Promise<void> {
             </div>
             <p v-if="ioNotice" class="hint wf-io-notice">{{ ioNotice }}</p>
             <p v-if="ioError" class="hint wf-validation-error">{{ ioError }}</p>
-            <button
-                v-for="workflow in allWorkflows"
-                :key="workflow.id"
-                class="profile-item"
-                :class="{ active: workflow.id === selectedWorkflow?.id }"
-                @click="selectWorkflow(workflow)"
+            <GroupAccordion
+                :sections="workflowAccordionSections"
+                :preferred-key="selectedWorkflowSectionKey"
+                :rename-title="t('settings.workflowRenameGroup')"
+                :delete-title="t('settings.workflowDeleteGroup')"
+                :move-up-title="t('settings.groupMoveUp')"
+                :move-down-title="t('settings.groupMoveDown')"
+                @rename="openRenameWorkflowGroup"
+                @delete="confirmDeleteWorkflowGroup"
+                @reorder="reorderWorkflowGroups"
             >
-                <span class="profile-item-head">
-                    <span class="profile-item-name">{{ workflow.name || t('settings.workflowUntitled') }}</span>
-                    <span v-if="isBuiltinId(workflow.id)" class="wf-builtin-badge">{{ t('settings.workflowBuiltinBadge') }}</span>
-                    <span class="wf-mode-badge">{{ workflow.execution === 'joined' ? '&&' : '⇥' }}</span>
-                </span>
-                <span class="profile-item-command">{{ previewWorkflow(workflow, store.quickCommands) }}</span>
-            </button>
+                <template #default="{ data }">
+                    <button
+                        v-for="workflow in data.items"
+                        :key="workflow.id"
+                        class="profile-item"
+                        :class="{ active: workflow.id === selectedWorkflow?.id }"
+                        @click="selectWorkflow(workflow)"
+                    >
+                        <span class="profile-item-head">
+                            <span class="profile-item-name">{{ workflow.name || t('settings.workflowUntitled') }}</span>
+                            <span v-if="isBuiltinId(workflow.id)" class="wf-builtin-badge">{{ t('settings.workflowBuiltinBadge') }}</span>
+                            <span class="wf-mode-badge">{{ workflow.execution === 'joined' ? '&&' : '⇥' }}</span>
+                        </span>
+                        <span class="profile-item-command">{{ previewWorkflow(workflow, store.quickCommands) }}</span>
+                    </button>
+                </template>
+            </GroupAccordion>
             <p v-if="allWorkflows.length === 0" class="hint">
                 {{ t('settings.workflowEmptyHint') }}
             </p>
@@ -516,6 +637,10 @@ async function importWorkflows (): Promise<void> {
                     <div v-if="selectedWorkflow.description" class="settings-card-row">
                         <Label>{{ t('settings.workflowDescription') }}</Label>
                         <span class="wf-builtin-desc">{{ selectedWorkflow.description }}</span>
+                    </div>
+                    <div v-if="selectedWorkflow.groupId" class="settings-card-row">
+                        <Label>{{ t('settings.workflowGroupLabel') }}</Label>
+                        <span class="wf-builtin-desc">{{ workflowGroupName(selectedWorkflow.groupId) }}</span>
                     </div>
                     <div class="settings-card-row">
                         <Label>{{ t('settings.workflowExecution') }}</Label>
@@ -578,6 +703,7 @@ async function importWorkflows (): Promise<void> {
         :initial="formInitial"
         :is-new="formIsNew"
         :quick-commands="store.quickCommands"
+        :groups="displayGroups"
         @submit="onFormSubmit"
     />
     </div>

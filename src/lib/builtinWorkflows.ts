@@ -6,14 +6,35 @@
  *              config.workflowCtl.packs，与本目录合并展示。
  */
 import bundledYaml from '@/assets/builtin-workflows.yaml?raw'
-import type { ConfigStore, Workflow } from '@/stores/config'
+import { nanoid } from 'nanoid'
+import type { ConfigStore, Workflow, WorkflowGroup } from '@/stores/config'
+import { nextGroupSortOrder } from '@/stores/config/defaults'
 import { buildImportedWorkflow, parseWorkflowBundle } from '@/lib/workflowYaml'
 
 /** 内置工作流 id 前缀（稳定 id 判定与隐藏清单引用均依赖它） */
 export const BUILTIN_WORKFLOW_ID_PREFIX = 'builtin-'
 
+/** 内置虚拟分组 id 前缀（分组名 slug 派生；不入库、不可编辑，展示时合并进分组列表） */
+export const BUILTIN_WORKFLOW_GROUP_ID_PREFIX = 'builtin-wfg-'
+
+/**
+ * @description 由内置分组名生成确定性虚拟分组 id（同一分组名跨会话/跨设备稳定，
+ *              供内置条目 groupId 引用与展示分组去重）
+ * @param name 分组名
+ * @returns string 虚拟分组 id
+ *
+ * @example builtinWorkflowGroupId('Git') // 'builtin-wfg-Git'
+ *
+ */
+export function builtinWorkflowGroupId (name: string): string {
+    return `${BUILTIN_WORKFLOW_GROUP_ID_PREFIX}${builtinSlugFromName(name)}`
+}
+
 /** 随包内置目录缓存（模块级单例：YAML 只解析一次） */
 let bundledCache: Workflow[] | null = null
+
+/** 随包内置分组名缓存（模块级单例；与目录同源，首次解析后固定） */
+let bundledGroupNamesCache: string[] | null = null
 
 /**
  * @description 判定工作流 id 是否为内置（随包目录或导入扩展包，均带固定前缀）
@@ -41,7 +62,8 @@ export function builtinSlugFromName (name: string): string {
 
 /**
  * @description 实例化随包内置目录：解析 asset YAML（与导入文件同一 parser，天然做
- *              格式回归校验）并构建为只读 Workflow（稳定 id、步骤全内联）
+ *              格式回归校验）并构建为只读 Workflow（稳定 id、步骤全内联、分组指向
+ *              确定性虚拟分组 id）
  * @returns Workflow[] 随包内置工作流列表（模块级缓存）
  *
  * @example bundledBuiltinWorkflows()[0].id // 'builtin-git-delete-local-branch'
@@ -50,10 +72,18 @@ export function builtinSlugFromName (name: string): string {
 export function bundledBuiltinWorkflows (): Workflow[] {
     if (bundledCache === null) {
         const { docs } = parseWorkflowBundle(bundledYaml)
-        bundledCache = docs.map(doc => buildImportedWorkflow(
-            doc.workflow,
-            doc.workflow.id ? `${BUILTIN_WORKFLOW_ID_PREFIX}${doc.workflow.id}` : `${BUILTIN_WORKFLOW_ID_PREFIX}${builtinSlugFromName(doc.workflow.name)}`,
-        ))
+        const groupNames: string[] = []
+        bundledCache = docs.map(doc => {
+            if (doc.workflow.group && !groupNames.includes(doc.workflow.group)) {
+                groupNames.push(doc.workflow.group)
+            }
+            const workflow = buildImportedWorkflow(
+                doc.workflow,
+                doc.workflow.id ? `${BUILTIN_WORKFLOW_ID_PREFIX}${doc.workflow.id}` : `${BUILTIN_WORKFLOW_ID_PREFIX}${builtinSlugFromName(doc.workflow.name)}`,
+            )
+            return doc.workflow.group ? { ...workflow, groupId: builtinWorkflowGroupId(doc.workflow.group) } : workflow
+        })
+        bundledGroupNamesCache = groupNames
     }
     return bundledCache
 }
@@ -137,4 +167,78 @@ export function unhideBuiltinWorkflow (store: ConfigStore, id: string): void {
  */
 export function resetBuiltinWorkflows (store: ConfigStore): void {
     store.workflowCtl.removed = []
+}
+
+/**
+ * @description 判定分组 id 是否为内置虚拟分组（设置页据此锁定重命名/删除/排序）
+ * @param id 分组 id
+ * @returns boolean 是否内置虚拟分组
+ *
+ * @example isBuiltinWorkflowGroupId('builtin-wfg-Git') // true
+ *
+ */
+export function isBuiltinWorkflowGroupId (id: string): boolean {
+    return id.startsWith(BUILTIN_WORKFLOW_GROUP_ID_PREFIX)
+}
+
+/**
+ * @description 内置虚拟分组列表（随包 YAML 分组名派生，展示顺序与目录首次出现顺序一致）
+ * @returns WorkflowGroup[] 虚拟分组列表（sortOrder 排在用户分组之后）
+ *
+ * @example builtinVirtualGroups()[0].name // 'Git'
+ *
+ */
+export function builtinVirtualGroups (): WorkflowGroup[] {
+    bundledBuiltinWorkflows()
+    return (bundledGroupNamesCache ?? []).map((name, index) => ({
+        id: builtinWorkflowGroupId(name),
+        name,
+        sortOrder: 10_000 + index,
+    }))
+}
+
+/**
+ * @description 展示分组合集：用户自建分组在前（sortOrder 升序），内置虚拟分组在后；
+ *              设置页手风琴、选择器面板与表单下拉共用
+ * @param store 配置 store
+ * @returns WorkflowGroup[] 展示分组列表
+ *
+ * @example workflowDisplayGroups(store)[0].id // 'wfgroup-…'
+ *
+ */
+export function workflowDisplayGroups (store: ConfigStore): WorkflowGroup[] {
+    return [...store.workflowGroups, ...builtinVirtualGroups()]
+}
+
+/**
+ * @description 按分组名解析/落组：与随包内置分组同名 → 虚拟分组 id；否则找同名用户
+ *              分组，找不到则新建（YAML 导入与内置扩展包 upsert 时把文档分组名
+ *              落到本机分组体系）
+ * @param store 配置 store（命中新建时原地 push workflowGroups）
+ * @param name 分组名（trim 后为空返回 undefined = 不落组）
+ * @returns string | undefined 分组 id；无分组返回 undefined
+ *
+ * @example ensureWorkflowGroupIdByName(store, 'Git').startsWith('builtin-wfg-') // true
+ *
+ */
+export function ensureWorkflowGroupIdByName (store: ConfigStore, name: string): string | undefined {
+    bundledBuiltinWorkflows()
+    const trimmed = name.trim()
+    if (!trimmed) {
+        return undefined
+    }
+    if ((bundledGroupNamesCache ?? []).includes(trimmed)) {
+        return builtinWorkflowGroupId(trimmed)
+    }
+    const existing = store.workflowGroups.find(group => group.name === trimmed)
+    if (existing) {
+        return existing.id
+    }
+    const created: WorkflowGroup = {
+        id: `wfgroup-${nanoid(6)}`,
+        name: trimmed,
+        sortOrder: nextGroupSortOrder(store.workflowGroups),
+    }
+    store.workflowGroups.push(created)
+    return created.id
 }

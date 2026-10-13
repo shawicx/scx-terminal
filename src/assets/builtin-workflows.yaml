@@ -9,6 +9,7 @@ workflow:
   id: git-delete-local-branch
   name: Git 删除本地分支
   description: 删除已合并到上游的本地分支（强制删除请在命令中加 --force）
+  group: Git
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -22,6 +23,7 @@ workflow:
   id: git-delete-remote-branch
   name: Git 删除远程分支
   description: 删除远程仓库上的分支
+  group: Git
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -35,6 +37,7 @@ workflow:
   id: git-rename-local-branch
   name: Git 重命名本地分支
   description: 重命名当前或指定本地分支
+  group: Git
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -48,6 +51,7 @@ workflow:
   id: git-undo-last-commit
   name: Git 撤销最近一次提交
   description: 撤销最近一次提交但保留改动在工作区（soft 重置）
+  group: Git
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -61,6 +65,7 @@ workflow:
   id: git-undo-add
   name: Git 撤销暂存（undo add）
   description: 把文件移出暂存区但保留工作区改动
+  group: Git
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -74,6 +79,7 @@ workflow:
   id: git-sync-with-remote
   name: Git 同步本地到远程
   description: 把本地分支硬重置为远程分支状态（丢弃本地提交，慎用）
+  group: Git
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -87,6 +93,7 @@ workflow:
   id: git-squash-last-n-commits
   name: Git 压缩最近 N 个提交
   description: 以 soft 重置把最近 N 个提交合并为一个后重新提交
+  group: Git
   execution: sequential
   stepIntervalMs: 500
   stopOnError: true
@@ -101,6 +108,7 @@ workflow:
   id: git-push-tag
   name: Git 推送标签
   description: 把指定标签推送到远程
+  group: Git
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -114,6 +122,7 @@ workflow:
   id: git-set-upstream
   name: Git 设置上游分支
   description: 为当前分支设置上游跟踪分支
+  group: Git
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -127,6 +136,7 @@ workflow:
   id: git-remove-submodule
   name: Git 移除子模块
   description: 完整移除一个 git 子模块（含配置与缓存目录）
+  group: Git
   execution: sequential
   stepIntervalMs: 500
   stopOnError: true
@@ -142,6 +152,7 @@ workflow:
   id: shell-kill-port
   name: 杀掉占用端口的进程
   description: 查找并终止监听指定端口的进程
+  group: Shell
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -155,6 +166,7 @@ workflow:
   id: shell-list-port
   name: 查看端口占用进程
   description: 列出监听指定端口的进程详情
+  group: Shell
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -168,6 +180,7 @@ workflow:
   id: fs-clean-node-modules
   name: 批量删除 node_modules
   description: 递归查找当前目录下所有 node_modules 并删除（清理磁盘）
+  group: 文件
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -181,6 +194,7 @@ workflow:
   id: fs-find-replace-recursive
   name: 递归查找替换
   description: 在目录内所有文件中递归替换文本（macOS/BSD sed 语法）
+  group: 文件
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -194,6 +208,7 @@ workflow:
   id: fs-search-by-extension
   name: 按扩展名递归搜索
   description: 在指定扩展名的文件中搜索文本
+  group: 文件
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -207,6 +222,7 @@ workflow:
   id: fs-find-files-with-string
   name: 查找含指定文本的文件
   description: 列出目录内包含指定字符串的文件
+  group: 文件
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -220,6 +236,7 @@ workflow:
   id: docker-clean-containers
   name: Docker 清理已停止容器
   description: 删除所有已停止的容器
+  group: Docker
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -233,6 +250,7 @@ workflow:
   id: docker-remove-image
   name: Docker 删除镜像
   description: 删除本地指定镜像
+  group: Docker
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -246,6 +264,7 @@ workflow:
   id: docker-shell-into
   name: Docker 进入容器 shell
   description: 在运行中的容器里启动 bash 交互 shell
+  group: Docker
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -259,6 +278,7 @@ workflow:
   id: docker-copy-from
   name: Docker 拷贝文件到宿主
   description: 从容器内拷贝文件/目录到宿主当前目录
+  group: Docker
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -272,6 +292,7 @@ workflow:
   id: ssh-generate-github-key
   name: 生成 GitHub SSH 密钥
   description: 生成 ed25519 SSH 密钥（邮箱用于标识）
+  group: SSH
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -285,6 +306,7 @@ workflow:
   id: curl-post-json
   name: curl POST JSON
   description: 向指定地址发送 JSON POST 请求
+  group: 网络
   execution: joined
   stepIntervalMs: 500
   stopOnError: true
@@ -298,6 +320,7 @@ workflow:
   id: curl-bearer-header
   name: curl 携带 Bearer Token
   description: 以 Bearer 鉴权头发起 GET 请求
+  group: 网络
   execution: joined
   stepIntervalMs: 500
   stopOnError: true

@@ -1,9 +1,9 @@
-//! @description 工作流域写入：CRUD（真实列存储，步骤列表整体存 steps JSON 列）。
-//! 命令薄包装，逻辑在 *_internal 供单测复用。
+//! @description 工作流域写入：工作流与分组 CRUD（真实列存储，步骤列表整体存
+//! steps JSON 列）。命令薄包装，逻辑在 *_internal 供单测复用。
 
 use tauri::State;
 
-use super::model::WorkflowRecord;
+use super::model::{WorkflowGroupRecord, WorkflowRecord};
 use super::state::{mark_initialized, next_sort_order};
 use super::ConfigState;
 
@@ -15,12 +15,13 @@ pub(super) fn workflow_create_internal(state: &ConfigState, workflow: &WorkflowR
     let steps = serde_json::to_string(&workflow.steps)
         .map_err(|e| format!("failed to serialize workflow {} steps: {e}", workflow.id))?;
     tx.execute(
-        "INSERT INTO workflows (id, name, description, execution, step_interval_ms, sort_order, steps, stop_on_error)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO workflows (id, name, description, group_id, execution, step_interval_ms, sort_order, steps, stop_on_error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         rusqlite::params![
             workflow.id,
             workflow.name,
             workflow.description,
+            workflow.group_id,
             workflow.execution,
             workflow.step_interval_ms,
             sort_order,
@@ -41,10 +42,11 @@ pub(super) fn workflow_update_internal(state: &ConfigState, workflow: &WorkflowR
         .map_err(|e| format!("failed to serialize workflow {} steps: {e}", workflow.id))?;
     let changed = tx
         .execute(
-            "UPDATE workflows SET name = ?1, description = ?2, execution = ?3, step_interval_ms = ?4, steps = ?5, stop_on_error = ?6 WHERE id = ?7",
+            "UPDATE workflows SET name = ?1, description = ?2, group_id = ?3, execution = ?4, step_interval_ms = ?5, steps = ?6, stop_on_error = ?7 WHERE id = ?8",
             rusqlite::params![
                 workflow.name,
                 workflow.description,
+                workflow.group_id,
                 workflow.execution,
                 workflow.step_interval_ms,
                 steps,
@@ -68,6 +70,49 @@ pub(super) fn workflow_delete_internal(state: &ConfigState, id: &str) -> Result<
         .map_err(|e| format!("failed to delete workflow {id}: {e}"))?;
     mark_initialized(&tx).map_err(|e| format!("failed to mark config initialized: {e}"))?;
     tx.commit().map_err(|e| format!("failed to commit workflow delete: {e}"))
+}
+
+/// 新增工作流分组
+pub(super) fn workflow_group_create_internal(state: &ConfigState, group: &WorkflowGroupRecord) -> Result<(), String> {
+    let mut conn = state.lock_conn();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let sort_order = next_sort_order(&tx, "workflow_groups").map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO workflow_groups (id, name, sort_order) VALUES (?1, ?2, ?3)",
+        rusqlite::params![group.id, group.name, sort_order],
+    )
+    .map_err(|e| format!("failed to create workflow group {}: {e}", group.id))?;
+    mark_initialized(&tx).map_err(|e| format!("failed to mark config initialized: {e}"))?;
+    tx.commit().map_err(|e| format!("failed to commit workflow group create: {e}"))
+}
+
+/// 更新工作流分组（按 id）
+pub(super) fn workflow_group_update_internal(state: &ConfigState, group: &WorkflowGroupRecord) -> Result<(), String> {
+    let mut conn = state.lock_conn();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let changed = tx
+        .execute(
+            "UPDATE workflow_groups SET name = ?1, sort_order = ?2 WHERE id = ?3",
+            rusqlite::params![group.name, group.sort_order, group.id],
+        )
+        .map_err(|e| format!("failed to update workflow group {}: {e}", group.id))?;
+    if changed == 0 {
+        return Err(format!("workflow group not found: {}", group.id));
+    }
+    mark_initialized(&tx).map_err(|e| format!("failed to mark config initialized: {e}"))?;
+    tx.commit().map_err(|e| format!("failed to commit workflow group update: {e}"))
+}
+
+/// 删除工作流分组：单事务内删组并把组内工作流降级为未分组（对齐 SSH/快捷命令「删组降级」语义）
+pub(super) fn workflow_group_delete_internal(state: &ConfigState, id: &str) -> Result<(), String> {
+    let mut conn = state.lock_conn();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM workflow_groups WHERE id = ?1", [id])
+        .map_err(|e| format!("failed to delete workflow group {id}: {e}"))?;
+    tx.execute("UPDATE workflows SET group_id = NULL WHERE group_id = ?1", [id])
+        .map_err(|e| format!("failed to ungroup workflows of {id}: {e}"))?;
+    mark_initialized(&tx).map_err(|e| format!("failed to mark config initialized: {e}"))?;
+    tx.commit().map_err(|e| format!("failed to commit workflow group delete: {e}"))
 }
 
 ///
@@ -101,4 +146,37 @@ pub fn workflow_update(state: State<'_, ConfigState>, workflow: WorkflowRecord) 
 #[tauri::command]
 pub fn workflow_delete(state: State<'_, ConfigState>, id: String) -> Result<(), String> {
     workflow_delete_internal(&state, &id)
+}
+
+///
+/// @description 新增工作流分组
+/// @param state 配置库状态
+/// @param group 分组记录
+/// @returns Result<(), String>
+///
+#[tauri::command]
+pub fn workflow_group_create(state: State<'_, ConfigState>, group: WorkflowGroupRecord) -> Result<(), String> {
+    workflow_group_create_internal(&state, &group)
+}
+
+///
+/// @description 更新工作流分组（按 id）
+/// @param state 配置库状态
+/// @param group 分组记录（按 id 匹配）
+/// @returns Result<(), String>
+///
+#[tauri::command]
+pub fn workflow_group_update(state: State<'_, ConfigState>, group: WorkflowGroupRecord) -> Result<(), String> {
+    workflow_group_update_internal(&state, &group)
+}
+
+///
+/// @description 删除工作流分组（组内工作流降级为未分组）
+/// @param state 配置库状态
+/// @param id 分组 id
+/// @returns Result<(), String>
+///
+#[tauri::command]
+pub fn workflow_group_delete(state: State<'_, ConfigState>, id: String) -> Result<(), String> {
+    workflow_group_delete_internal(&state, &id)
 }

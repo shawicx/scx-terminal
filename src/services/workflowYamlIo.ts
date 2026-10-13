@@ -35,14 +35,16 @@ export interface WorkflowImportResult {
  * @description 导出一条工作流到 YAML 文件（保存对话框选路径；取消返回 null）
  * @param workflow 目标工作流
  * @param quickCommands 快捷命令列表（引用解引用用）
+ * @param groups 展示分组合集（groupId 解析分组名用；缺省 = 不写分组）
  * @returns Promise<WorkflowExportResult | null> 导出结果；用户取消返回 null
  *
- * @example const result = await exportWorkflowToFile(workflow, quickCommands)
+ * @example const result = await exportWorkflowToFile(workflow, quickCommands, groups)
  *
  */
 export async function exportWorkflowToFile (
     workflow: Workflow,
     quickCommands: QuickCommand[],
+    groups: Array<{ id: string, name: string }> = [],
 ): Promise<WorkflowExportResult | null> {
     const { save } = await import('@tauri-apps/plugin-dialog')
     const defaultName = `${(workflow.name || 'workflow').replace(/[/:*?"<>|\\]/g, '_').trim() || 'workflow'}.yml`
@@ -53,7 +55,7 @@ export async function exportWorkflowToFile (
     if (typeof path !== 'string') {
         return null
     }
-    const { yaml, droppedSteps } = serializeWorkflowYaml(workflow, quickCommands)
+    const { yaml, droppedSteps } = serializeWorkflowYaml(workflow, quickCommands, {}, groups)
     await invoke('fs_write_text_file', { path, contents: yaml })
     return { path, droppedSteps }
 }
@@ -62,14 +64,16 @@ export async function exportWorkflowToFile (
  * @description 导出全部工作流到多文档 YAML 文件（保存对话框选路径；取消返回 null）
  * @param workflows 工作流列表
  * @param quickCommands 快捷命令列表（引用解引用用）
+ * @param groups 展示分组合集（groupId 解析分组名用；缺省 = 不写分组）
  * @returns Promise<WorkflowExportResult | null> 导出结果；用户取消返回 null
  *
- * @example const result = await exportAllWorkflowsToFile(workflows, quickCommands)
+ * @example const result = await exportAllWorkflowsToFile(workflows, quickCommands, groups)
  *
  */
 export async function exportAllWorkflowsToFile (
     workflows: Workflow[],
     quickCommands: QuickCommand[],
+    groups: Array<{ id: string, name: string }> = [],
 ): Promise<WorkflowExportResult | null> {
     if (!workflows.length) {
         return null
@@ -82,7 +86,7 @@ export async function exportAllWorkflowsToFile (
     if (typeof path !== 'string') {
         return null
     }
-    const { yaml, droppedSteps } = serializeWorkflowsYaml(workflows, quickCommands)
+    const { yaml, droppedSteps } = serializeWorkflowsYaml(workflows, quickCommands, groups)
     await invoke('fs_write_text_file', { path, contents: yaml })
     return { path, droppedSteps }
 }
@@ -92,14 +96,16 @@ export async function exportAllWorkflowsToFile (
  *              可再经导入恢复/同步到其他设备（保存对话框选路径；取消返回 null）
  * @param catalog 内置目录全集（随包 + 扩展包；id 统一 builtin- 前缀）
  * @param removed 用户隐藏的内置 id 集合
+ * @param groups 展示分组合集（groupId 解析分组名用；缺省 = 不写分组）
  * @returns Promise<WorkflowExportResult | null> 导出结果；用户取消返回 null
  *
- * @example const result = await exportBuiltinsToFile(catalog, store.workflowCtl.removed)
+ * @example const result = await exportBuiltinsToFile(catalog, store.workflowCtl.removed, groups)
  *
  */
 export async function exportBuiltinsToFile (
     catalog: Workflow[],
     removed: string[],
+    groups: Array<{ id: string, name: string }> = [],
 ): Promise<WorkflowExportResult | null> {
     if (!catalog.length) {
         return null
@@ -117,7 +123,7 @@ export async function exportBuiltinsToFile (
         id: workflow.id.replace(/^builtin-/, ''),
         hidden: removed.includes(workflow.id),
     })
-    const parts = catalog.map(workflow => serializeWorkflowYaml(workflow, [], optionsFor(workflow)).yaml.trimEnd())
+    const parts = catalog.map(workflow => serializeWorkflowYaml(workflow, [], optionsFor(workflow), groups).yaml.trimEnd())
     await invoke('fs_write_text_file', { path, contents: parts.join('\n---\n') + '\n' })
     return { path, droppedSteps: 0 }
 }

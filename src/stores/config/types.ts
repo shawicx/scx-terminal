@@ -114,6 +114,14 @@ export interface QuickCommandGroup {
     description?: string
 }
 
+/** 工作流分组（管理用实体，工作流以 groupId 单选引用；内置虚拟分组不入库） */
+export interface WorkflowGroup {
+    id: string
+    name: string
+    /** 手动排序号（SQLite sort_order；加载按该值升序） */
+    sortOrder: number
+}
+
 /** 快捷命令：command 支持 {{参数}} 占位符（Warp Workflow 式），autoRun 控制写入后是否补换行执行 */
 export interface QuickCommand {
     id: string
@@ -161,6 +169,8 @@ export interface Workflow {
     name: string
     /** 描述（可选备注） */
     description?: string
+    /** 所属分组 id（见 WorkflowGroup）；缺省 = 未分组。内置项可引用虚拟内置分组（builtin-wfg- 前缀） */
+    groupId?: string
     /** joined = 渲染后以 && 合并为一条发送；sequential = 逐步发送、步间延时 */
     execution: 'joined' | 'sequential'
     /** sequential 模式步间延时 ms（默认 500） */
@@ -276,6 +286,8 @@ export interface ConfigStore {
     quickCommands: QuickCommand[]
     quickCommandGroups: QuickCommandGroup[]
     workflows: Workflow[]
+    /** 工作流分组（用户自建；内置虚拟分组不入库，展示时合并） */
+    workflowGroups: WorkflowGroup[]
 }
 
 /** config_load 返回的库内快照（仅含已持久化的键，缺省由默认值兜底） */
@@ -296,4 +308,5 @@ export interface ConfigSnapshot {
     quickCommands?: QuickCommand[]
     quickCommandGroups?: QuickCommandGroup[]
     workflows?: Workflow[]
+    workflowGroups?: WorkflowGroup[]
 }

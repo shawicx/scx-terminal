@@ -9,7 +9,7 @@ import { nanoid } from 'nanoid'
 import { nextGroupSortOrder, useConfigStore } from '@/stores/config'
 import { ref } from 'vue'
 
-type GroupNameDialogKind = 'ssh-create' | 'ssh-rename' | 'qc-create' | 'qc-rename' | 'local-create' | 'local-rename'
+type GroupNameDialogKind = 'ssh-create' | 'ssh-rename' | 'qc-create' | 'qc-rename' | 'local-create' | 'local-rename' | 'wf-create' | 'wf-rename'
 
 interface GroupNameDialog { kind: GroupNameDialogKind, groupId: string | null, draft: string, descriptionDraft: string }
 
@@ -46,6 +46,12 @@ export function useGroupNameDialog () {
         if (dialog.kind === 'local-rename') {
             return t('settings.localRenameGroup')
         }
+        if (dialog.kind === 'wf-create') {
+            return t('settings.workflowNewGroup')
+        }
+        if (dialog.kind === 'wf-rename') {
+            return t('settings.workflowRenameGroup')
+        }
         return dialog.kind === 'qc-create' ? t('settings.quickCommandNewGroup') : t('settings.quickCommandRenameGroup')
     })
 
@@ -66,6 +72,8 @@ export function useGroupNameDialog () {
             store.quickCommandGroups.push({ id: `qcgroup-${nanoid(6)}`, name, sortOrder: nextGroupSortOrder(store.quickCommandGroups), description: description || undefined })
         } else if (dialog.kind === 'local-create') {
             store.localGroups.push({ id: `localgroup-${nanoid(6)}`, name, builtin: false, sortOrder: nextGroupSortOrder(store.localGroups) })
+        } else if (dialog.kind === 'wf-create') {
+            store.workflowGroups.push({ id: `wfgroup-${nanoid(6)}`, name, sortOrder: nextGroupSortOrder(store.workflowGroups) })
         } else if (dialog.kind === 'ssh-rename') {
             const group = store.sshGroups.find(g => g.id === dialog.groupId)
             if (group) {
@@ -76,6 +84,11 @@ export function useGroupNameDialog () {
             if (group) {
                 group.name = name
                 group.description = description || undefined
+            }
+        } else if (dialog.kind === 'wf-rename') {
+            const group = store.workflowGroups.find(g => g.id === dialog.groupId)
+            if (group) {
+                group.name = name
             }
         } else {
             const group = store.localGroups.find(g => g.id === dialog.groupId)
@@ -172,5 +185,32 @@ export function openRenameQuickCommandGroup (id: string): void {
     const group = store.quickCommandGroups.find(g => g.id === id)
     if (group) {
         groupNameDialog.value = { kind: 'qc-rename', groupId: id, draft: group.name, descriptionDraft: group.description ?? '' }
+    }
+}
+
+/**
+ * @description 打开工作流分组新建弹窗
+ * @returns void
+ *
+ * @example openCreateWorkflowGroup()
+ *
+ */
+export function openCreateWorkflowGroup (): void {
+    groupNameDialog.value = { kind: 'wf-create', groupId: null, draft: '', descriptionDraft: '' }
+}
+
+/**
+ * @description 打开工作流分组重命名弹窗（预填当前组名；内置虚拟分组锁定不可达）
+ * @param id 分组 id
+ * @returns void
+ *
+ * @example openRenameWorkflowGroup('wfgroup-a1b2')
+ *
+ */
+export function openRenameWorkflowGroup (id: string): void {
+    const store = useConfigStore().store
+    const group = store.workflowGroups.find(g => g.id === id)
+    if (group) {
+        groupNameDialog.value = { kind: 'wf-rename', groupId: id, draft: group.name, descriptionDraft: '' }
     }
 }

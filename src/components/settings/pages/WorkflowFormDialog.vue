@@ -33,6 +33,8 @@ const props = defineProps<{
     isNew?: boolean
     /** 现有快捷命令（步骤引用下拉与预览解析） */
     quickCommands: QuickCommand[]
+    /** 展示分组合集（分组下拉选项：用户自建 + 内置虚拟；缺省 = 无分组可选） */
+    groups?: Array<{ id: string, name: string }>
 }>()
 
 const emit = defineEmits<{
@@ -101,6 +103,24 @@ const quickCommandOptions = computed(() =>
         value: command.id,
         label: command.name || previewQuickCommand(command.command),
     })))
+
+/** 分组下拉选项：未分组 + 展示分组合集（用户自建 + 内置虚拟） */
+const groupSelectOptions = computed(() => [
+    { value: '', label: t('settings.workflowGroupUngrouped') },
+    ...(props.groups ?? []).map(group => ({ value: group.id, label: group.name })),
+])
+
+/** 分组读写 model（'' = 未分组，写回时删除键保持 optional 语义） */
+const groupModel = computed({
+    get: () => draft.value.groupId ?? '',
+    set: (value: string) => {
+        if (value === '') {
+            delete draft.value.groupId
+        } else {
+            draft.value.groupId = value
+        }
+    },
+})
 
 /** 步骤编辑器实时提示：当前步骤集检测到的占位参数 */
 const draftParams = computed(() => collectWorkflowParams(draft.value.steps, quickCommands.value))
@@ -307,6 +327,10 @@ function commit (): void {
                     <span class="value-hint">{{ t('settings.workflowExecutionHint') }}</span>
                 </Label>
                 <Select v-model="executionModel" :options="executionOptions" class="flex-1" />
+            </div>
+            <div class="form-row">
+                <Label>{{ t('settings.workflowGroupLabel') }}</Label>
+                <Select v-model="groupModel" :options="groupSelectOptions" class="flex-1" />
             </div>
             <div v-if="draft.execution === 'sequential'" class="form-row">
                 <Label>

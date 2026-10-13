@@ -27,6 +27,8 @@ export interface YamlWorkflow {
     id?: string
     name: string
     description?: string
+    /** 分组名（可选；内置目录按此归类展示） */
+    group?: string
     execution: 'joined' | 'sequential'
     stepIntervalMs: number
     stopOnError: boolean
@@ -71,10 +73,12 @@ export interface WorkflowYamlSerializeOptions {
 /**
  * @description 序列化一条工作流为自包含 YAML：quickCommand 步骤解引用为内联命令
  *              文本（保留原快捷命令名为 name 注释），引用悬空的步骤丢弃并计数；
- *              options.scope=builtin 时写 scope/id/hidden 元数据（内置目录语义）
+ *              options.scope=builtin 时写 scope/id/hidden 元数据（内置目录语义）；
+ *              groups 提供 groupId → 分组名解析（导出携带分组名，缺省不写）
  * @param workflow 目标工作流
  * @param quickCommands 快捷命令列表（引用解析用）
  * @param options 序列化选项（scope/id/hidden；缺省 = 用户工作流语义）
+ * @param groups 分组列表（groupId 解析分组名用；缺省 = 不写分组）
  * @returns WorkflowYamlExport YAML 文本与丢弃计数
  *
  * @example serializeWorkflowYaml(workflow, quickCommands).yaml
@@ -84,6 +88,7 @@ export function serializeWorkflowYaml (
     workflow: Workflow,
     quickCommands: QuickCommand[],
     options: WorkflowYamlSerializeOptions = {},
+    groups: Array<{ id: string, name: string }> = [],
 ): WorkflowYamlExport {
     let droppedSteps = 0
     const steps: YamlStep[] = []
@@ -111,6 +116,7 @@ export function serializeWorkflowYaml (
         })
     }
     const isBuiltin = options.scope === 'builtin'
+    const groupName = workflow.groupId === undefined ? undefined : groups.find(group => group.id === workflow.groupId)?.name
     const doc = {
         format: WORKFLOW_YAML_FORMAT,
         version: WORKFLOW_YAML_VERSION,
@@ -120,6 +126,7 @@ export function serializeWorkflowYaml (
             ...(isBuiltin && options.id ? { id: options.id } : {}),
             ...(isBuiltin && options.hidden ? { hidden: true } : {}),
             ...(workflow.description ? { description: workflow.description } : {}),
+            ...(groupName ? { group: groupName } : {}),
             execution: workflow.execution,
             stepIntervalMs: workflow.stepIntervalMs,
             stopOnError: workflow.stopOnError,
@@ -133,16 +140,21 @@ export function serializeWorkflowYaml (
  * @description 序列化全部工作流为多文档 YAML（`---` 分隔；丢弃计数累计）
  * @param workflows 工作流列表
  * @param quickCommands 快捷命令列表（引用解析用）
+ * @param groups 分组列表（groupId 解析分组名用；缺省 = 不写分组）
  * @returns WorkflowYamlExport 多文档 YAML 与累计丢弃计数
  *
  * @example serializeWorkflowsYaml(workflows, quickCommands).yaml
  *
  */
-export function serializeWorkflowsYaml (workflows: Workflow[], quickCommands: QuickCommand[]): WorkflowYamlExport {
+export function serializeWorkflowsYaml (
+    workflows: Workflow[],
+    quickCommands: QuickCommand[],
+    groups: Array<{ id: string, name: string }> = [],
+): WorkflowYamlExport {
     const parts: string[] = []
     let droppedSteps = 0
     for (const workflow of workflows) {
-        const exported = serializeWorkflowYaml(workflow, quickCommands)
+        const exported = serializeWorkflowYaml(workflow, quickCommands, {}, groups)
         parts.push(exported.yaml.trimEnd())
         droppedSteps += exported.droppedSteps
     }
@@ -218,11 +230,15 @@ function parseOneDocument (doc: unknown): { workflow: YamlWorkflow, scope: YamlW
     if (workflow.hidden !== undefined && typeof workflow.hidden !== 'boolean') {
         throw new WorkflowYamlError('badShape', 'workflow.hidden must be a boolean')
     }
+    if (workflow.group !== undefined && typeof workflow.group !== 'string') {
+        throw new WorkflowYamlError('badShape', 'workflow.group must be a string')
+    }
     return {
         workflow: {
             ...(typeof workflow.id === 'string' && workflow.id ? { id: workflow.id } : {}),
             name: workflow.name,
             ...(typeof workflow.description === 'string' && workflow.description ? { description: workflow.description } : {}),
+            ...(typeof workflow.group === 'string' && workflow.group ? { group: workflow.group } : {}),
             execution,
             stepIntervalMs,
             stopOnError,
@@ -310,7 +326,7 @@ function parseCapture (capture: unknown, index: number): StepCapture {
 /**
  * @description 把解析出的工作流形状构建为本机 Workflow：新 id（可显式传入稳定 id，
  *              内置扩展包 upsert 语义用）、步骤全部内联（kind=raw、新 step id），
- *              绝不与现有工作流冲突
+ *              绝不与现有工作流冲突；分组名不在此解析（由调用方按名找组/建组）
  * @param parsed YAML 解析出的工作流形状
  * @param stableId 可选的稳定 id（内置扩展包条目用；缺省 = 生成新 id）
  * @returns Workflow 可直接入 store 的新工作流

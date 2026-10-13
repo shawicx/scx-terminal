@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import type { QuickCommand, Workflow, WorkflowStep } from '@/stores/config'
 import {
-    buildWorkflowCommand, collectWorkflowParams, extractCapture, findQuickCommandRefs,
+    buildWorkflowCommand, collectWorkflowParams, groupWorkflowSections, extractCapture, findQuickCommandRefs,
     matchExpect, previewWorkflow, renderWorkflowSteps, resolveStepValues, stepCommandTemplate,
     stripAnsi, validateWorkflowV2,
 } from './workflows'
@@ -204,5 +204,40 @@ describe('validateWorkflowV2', () => {
             stopOnError: false,
         }
         expect(validateWorkflowV2(wf)).toEqual([])
+    })
+})
+
+describe('groupWorkflowSections', () => {
+    const groups = [
+        { id: 'wfgroup-git', name: 'Git' },
+        { id: 'wfgroup-docker', name: 'Docker' },
+    ]
+
+    it('未分组区在最前，其余按 groups 顺序，区内保持原序', () => {
+        const a = { ...workflow([]), name: 'a' }
+        const g1 = { ...workflow([]), name: 'g1', groupId: 'wfgroup-git' }
+        const g2 = { ...workflow([]), name: 'g2', groupId: 'wfgroup-git' }
+        const d = { ...workflow([]), name: 'd', groupId: 'wfgroup-docker' }
+        const sections = groupWorkflowSections([a, g1, d, g2], groups)
+        expect(sections.map(section => section.title)).toEqual([null, 'Git', 'Docker'])
+        expect(sections[0]!.groupId).toBeNull()
+        expect(sections[0]!.items.map(item => item.name)).toEqual(['a'])
+        expect(sections[1]!.items.map(item => item.name)).toEqual(['g1', 'g2'])
+        expect(sections[2]!.items.map(item => item.name)).toEqual(['d'])
+    })
+
+    it('引用不存在分组的条目归入未分组；空分组也产出分区', () => {
+        const a = { ...workflow([]), name: 'a' }
+        const dangling = { ...workflow([]), name: 'x', groupId: 'wfgroup-gone' }
+        const sections = groupWorkflowSections([a, dangling], groups)
+        expect(sections.map(section => section.title)).toEqual([null, 'Git', 'Docker'])
+        expect(sections[0]!.items.map(item => item.name)).toEqual(['a', 'x'])
+        expect(sections[1]!.items).toEqual([])
+    })
+
+    it('全部未分组且无分组时只有一个未分组区', () => {
+        const sections = groupWorkflowSections([workflow([])], [])
+        expect(sections).toHaveLength(1)
+        expect(sections[0]!.title).toBeNull()
     })
 })
