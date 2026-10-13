@@ -1,8 +1,15 @@
 <script setup lang="ts">
+/**
+ * @description 终端标签页内容：分屏树容器 + 文件侧栏 + 监控侧栏（后两者仅 SSH 档案）。
+ *              文件侧栏跟随活动窗格：轮询窗格 cwd（OSC 7/1337）与 sshId 下发，
+ *              双击文件夹经 sendTextToLeaf 在该窗格执行 cd。
+ */
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SplitContainer from '@/components/split/SplitContainer.vue'
 import MonitorSidebar from '@/components/monitor/MonitorSidebar.vue'
+import FilesSidebar from '@/components/terminal/FilesSidebar.vue'
+import { shellQuoteSingle } from '@/lib/shellQuote'
 import {
     listLeaves,
     makeLeaf,
@@ -178,10 +185,116 @@ watch([() => props.tabActive, monitorActive], ([active, open]) => {
 
 onBeforeUnmount(() => {
     unbindDetailMonitor(profile.value.id)
+    stopFilesPolling()
     if (terminalTabApi.current === tabApi) {
         terminalTabApi.current = null
     }
 })
+
+// ---- 文件侧栏（仅 SSH 档案）：跟随活动窗格的 sshId 与当前路径 ----
+const filesActiveSshId = ref<string | null>(null)
+const filesCwd = ref<string | null>(null)
+/** cwd 轮询间隔（毫秒）：OSC 7 上报无推送通道，展开期间轻量轮询 */
+const FILES_POLL_INTERVAL_MS = 1500
+let filesPollTimer: ReturnType<typeof setInterval> | null = null
+
+/**
+ * @description 解析活动窗格的 SSH 会话 id 并同步到文件侧栏（窗格切换/连接建立后调用）
+ * @returns Promise<string | null> 活动 SSH 会话 id（非 SSH/未连接为 null）
+ *
+ * @example await refreshFilesBinding()
+ *
+ */
+async function refreshFilesBinding (): Promise<string | null> {
+    const sshId = await rootContainer.value?.getLeafSshId(activeLeafId.value)
+    const next = sshId ?? null
+    if (filesActiveSshId.value !== next) {
+        filesActiveSshId.value = next
+        if (!next) {
+            filesCwd.value = null
+        }
+    }
+    return next
+}
+
+/**
+ * @description 文件侧栏 cwd 轮询单次执行：重解析 sshId 后查询窗格 cwd，仅当活动
+ *              窗格仍是同一 SSH 会话时下发（防切换竞态写串面板）
+ * @returns Promise<void>
+ *
+ * @example await pollFilesCwd()
+ *
+ */
+async function pollFilesCwd (): Promise<void> {
+    const sshId = await refreshFilesBinding()
+    if (!sshId) {
+        return
+    }
+    const cwd = await rootContainer.value?.getLeafCwd(activeLeafId.value)
+    if (filesActiveSshId.value === sshId) {
+        filesCwd.value = cwd ?? null
+    }
+}
+
+/**
+ * @description 启动/停止 cwd 轮询：仅「SSH 档案 && 文件侧栏展开 && 标签激活」时轮询
+ * @returns void
+ *
+ * @example startFilesPolling()
+ *
+ */
+function startFilesPolling (): void {
+    if (filesPollTimer) {
+        return
+    }
+    void pollFilesCwd()
+    filesPollTimer = setInterval(() => void pollFilesCwd(), FILES_POLL_INTERVAL_MS)
+}
+
+/**
+ * @description 停止 cwd 轮询并清空面板跟随状态（收起/切走标签/卸载时）
+ * @returns void
+ *
+ * @example stopFilesPolling()
+ *
+ */
+function stopFilesPolling (): void {
+    if (filesPollTimer) {
+        clearInterval(filesPollTimer)
+        filesPollTimer = null
+    }
+    filesActiveSshId.value = null
+    filesCwd.value = null
+}
+
+const filesPolling = computed(() =>
+    isSshProfile.value && config.store.files.open === true && props.tabActive)
+watch(filesPolling, active => {
+    if (active) {
+        startFilesPolling()
+    } else {
+        stopFilesPolling()
+    }
+}, { immediate: true })
+
+// 活动窗格切换立即重绑定（不等下一个轮询周期）
+watch(activeLeafId, () => {
+    if (filesPolling.value) {
+        void refreshFilesBinding()
+    }
+})
+
+/**
+ * @description 文件侧栏导航请求：向活动窗格终端发送 cd -- '<path>' 并立即执行
+ * @param path 目标目录绝对路径
+ * @returns void
+ *
+ * @example handleFilesNavigate('/home/scx/project')
+ *
+ */
+function handleFilesNavigate (path: string): void {
+    rootContainer.value?.sendTextToLeaf(activeLeafId.value, `cd -- ${shellQuoteSingle(path)}`, true)
+}
 </script>
 
 <template>
@@ -199,6 +312,13 @@ onBeforeUnmount(() => {
             @leaf-split="(id, direction) => split(direction, id)"
             @leaf-bell="handleLeafBell"
             @tree-updated="updated => (tree = updated)"
+        />
+        <FilesSidebar
+            v-if="isSshProfile"
+            :ssh-id="filesActiveSshId"
+            :cwd="filesCwd"
+            @navigate="handleFilesNavigate"
+            @refresh-cwd="pollFilesCwd"
         />
         <MonitorSidebar v-if="isSshProfile" :profile-id="profile.id" />
     </div>

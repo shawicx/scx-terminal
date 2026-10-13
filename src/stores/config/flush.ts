@@ -7,7 +7,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { TerminalColorScheme as Scheme } from '@/lib/colorSchemes'
 import { isPlainObject } from './defaults'
 import type {
-    AdvancedConfig, AppearanceConfig, ConfigStore, LocalGroup, MonitorConfig,
+    AdvancedConfig, AppearanceConfig, ConfigStore, FilesConfig, LocalGroup, MonitorConfig,
     QuickCommand, QuickCommandGroup, RecentsConfig, SshGroup, TabGroup, TerminalConfig,
     TerminalProfile, Workflow, WorkflowCtlConfig,
 } from './types'
@@ -19,6 +19,7 @@ export interface SavedBaseline {
     advanced: string
     recents: string
     monitor: string
+    files: string
     workflowCtl: string
     hotkeys: Record<string, string>
     profiles: Record<string, string>
@@ -33,7 +34,7 @@ export interface SavedBaseline {
 
 /** 一条待执行的持久化操作；saved 为该实体写入成功后记入基线的快照串 */
 export type FlushOp =
-    | { kind: 'settingsSection'; key: 'terminal' | 'appearance' | 'advanced' | 'recents' | 'monitor' | 'workflowCtl'; value: TerminalConfig | AppearanceConfig | AdvancedConfig | RecentsConfig | MonitorConfig | WorkflowCtlConfig; saved: string }
+    | { kind: 'settingsSection'; key: 'terminal' | 'appearance' | 'advanced' | 'recents' | 'monitor' | 'files' | 'workflowCtl'; value: TerminalConfig | AppearanceConfig | AdvancedConfig | RecentsConfig | MonitorConfig | FilesConfig | WorkflowCtlConfig; saved: string }
     | { kind: 'hotkey'; action: string; bindings: string[][]; saved: string }
     | { kind: 'profileCreate'; profile: TerminalProfile; saved: string }
     | { kind: 'profileUpdate'; profile: TerminalProfile; saved: string }
@@ -135,6 +136,10 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
     const monitor = stableStringify(store.monitor)
     if (monitor !== saved.monitor) {
         ops.push({ kind: 'settingsSection', key: 'monitor', value: store.monitor, saved: monitor })
+    }
+    const files = stableStringify(store.files)
+    if (files !== saved.files) {
+        ops.push({ kind: 'settingsSection', key: 'files', value: store.files, saved: files })
     }
     const workflowCtl = stableStringify(store.workflowCtl)
     if (workflowCtl !== saved.workflowCtl) {
@@ -245,7 +250,7 @@ export function computeOps (store: ConfigStore, saved: SavedBaseline): FlushOp[]
 
 /** 空基线：任何非空 store 与之 diff 都会产出全量导入操作（legacy 迁移用） */
 export function emptyBaseline (): SavedBaseline {
-    return { terminal: '', appearance: '', advanced: '', recents: '', monitor: '', workflowCtl: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, workflows: {}, localGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
+    return { terminal: '', appearance: '', advanced: '', recents: '', monitor: '', files: '', workflowCtl: '', hotkeys: {}, profiles: {}, quickCommands: {}, quickCommandGroups: {}, workflows: {}, localGroups: {}, sshGroups: {}, tabGroups: {}, colorSchemes: {} }
 }
 
 /**
@@ -263,6 +268,7 @@ export function captureBaseline (store: ConfigStore): SavedBaseline {
         advanced: stableStringify(store.advanced),
         recents: stableStringify(store.recents),
         monitor: stableStringify(store.monitor),
+        files: stableStringify(store.files),
         workflowCtl: stableStringify(store.workflowCtl),
         hotkeys: Object.fromEntries(Object.entries(store.hotkeys).map(([action, bindings]) => [action, stableStringify(bindings)])),
         profiles: Object.fromEntries(store.profiles.map(profile => [profile.id, stableStringify(profile)])),

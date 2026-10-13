@@ -16,7 +16,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 import { createPinia, setActivePinia } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { listShells } from '@/services/shells'
-import { computeOps, defaultConfig, emptyBaseline, upsertRecentEntry, useConfigStore } from './config'
+import { captureBaseline, computeOps, defaultConfig, emptyBaseline, upsertRecentEntry, useConfigStore } from './config'
 import type { ConfigStore, LocalProfile, SshProfile, TerminalProfile } from './config'
 
 const mockInvoke = vi.mocked(invoke)
@@ -430,6 +430,16 @@ describe('recents section', () => {
         const op = ops.find(o => o.kind === 'settingsSection' && o.key === 'recents')
         expect(op).toBeDefined()
         expect(op && op.kind === 'settingsSection' ? op.saved : '').toBe('{"ssh-1":123}')
+    })
+
+    it('computeOps 对 files 变更产出 settingsSection 操作且基线捕获后无差异', () => {
+        const store = { ...defaultConfig(), files: { open: true, width: 300 } } as ConfigStore
+        const ops = computeOps(store, emptyBaseline())
+        const op = ops.find(o => o.kind === 'settingsSection' && o.key === 'files')
+        expect(op).toBeDefined()
+        expect(op && op.kind === 'settingsSection' ? op.saved : '').toBe('{"open":true,"width":300}')
+        // 未变更时对自身基线 diff 不产操作
+        expect(computeOps(store, captureBaseline(store)).some(o => o.kind === 'settingsSection' && o.key === 'files')).toBe(false)
     })
 
     it('upsertRecentEntry 更新已有条目时间戳且不修改入参', () => {

@@ -12,7 +12,7 @@ import { listShells } from '@/services/shells'
 import { sanitizeForwardings } from '@/lib/portForwarding'
 import { deepMerge, defaultConfig, isPlainObject, localGroupsFromShells, migrateLocalGroups, normalizeGroupSortOrders, profilesFromShells, upsertRecentEntry } from './defaults'
 import { captureBaseline, commitOp, computeOps, emptyBaseline, runFlushOp } from './flush'
-import type { ConfigSnapshot, ConfigStore, MonitorConfig, RecentsConfig, TerminalProfile } from './types'
+import type { ConfigSnapshot, ConfigStore, FilesConfig, MonitorConfig, RecentsConfig, TerminalProfile } from './types'
 
 /**
  * Reactive application configuration, persisted to SQLite (config.db) via
@@ -247,6 +247,18 @@ export const useConfigStore = defineStore('config', () => {
     }
 
     /**
+     * @description 更新文件侧栏配置（展开态/栏宽；config store 的 deep watch 自动防抖落库）
+     * @param patch 待合并的文件侧栏配置分片
+     * @returns void
+     *
+     * @example setFiles({ open: true })
+     *
+     */
+    function setFiles (patch: Partial<FilesConfig>): void {
+        Object.assign(store.files, patch)
+    }
+
+    /**
      * @description 调度一次防抖 flush（500ms 内的多次 mutation 合并）；flush 进行中到达的
      *              变更记为 pending，结束后重新调度
      * @returns void
@@ -314,5 +326,5 @@ export const useConfigStore = defineStore('config', () => {
         return `"${font}", monospace`
     }
 
-    return { store, load, reloadFromDisk, getCSSFontFamily, defaultProfile, setDefaultProfile, noteRecentConnection, setMonitor }
+    return { store, load, reloadFromDisk, getCSSFontFamily, defaultProfile, setDefaultProfile, noteRecentConnection, setMonitor, setFiles }
 })

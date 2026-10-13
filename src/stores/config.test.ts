@@ -222,7 +222,7 @@ describe('computeOps (entity-level diff flush)', () => {
         const config = defaultConfig()
         const ops = computeOps(config, emptyBaseline())
         const sections = ops.filter(op => op.kind === 'settingsSection').map(op => op.kind === 'settingsSection' ? op.key : '')
-        expect(sections).toEqual(['terminal', 'appearance', 'advanced', 'recents', 'monitor', 'workflowCtl'])
+        expect(sections).toEqual(['terminal', 'appearance', 'advanced', 'recents', 'monitor', 'files', 'workflowCtl'])
         expect(ops.filter(op => op.kind === 'hotkey')).toHaveLength(Object.keys(defaultHotkeys()).length)
     })
 })

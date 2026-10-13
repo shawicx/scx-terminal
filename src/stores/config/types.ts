@@ -234,6 +234,14 @@ export interface MonitorConfig {
     width: number
 }
 
+/** SSH 终端页文件侧栏（全局一份：展开态与栏宽；档案级差异不支持） */
+export interface FilesConfig {
+    /** 侧栏是否展开（收起时右侧仅留展开把手） */
+    open: boolean
+    /** 展开时的栏宽 px（260–480） */
+    width: number
+}
+
 /** hotkey id -> list of sequences, each sequence a list of keystrokes */
 export type HotkeysConfig = Record<string, string[][]>
 
@@ -251,6 +259,8 @@ export interface ConfigStore {
     advanced: AdvancedConfig
     recents: RecentsConfig
     monitor: MonitorConfig
+    /** SSH 终端页文件侧栏 */
+    files: FilesConfig
     /** 内置工作流控制状态 */
     workflowCtl: WorkflowCtlConfig
     hotkeys: HotkeysConfig
@@ -275,6 +285,7 @@ export interface ConfigSnapshot {
     advanced?: Partial<AdvancedConfig>
     recents?: RecentsConfig
     monitor?: Partial<MonitorConfig>
+    files?: Partial<FilesConfig>
     workflowCtl?: Partial<WorkflowCtlConfig>
     hotkeys?: HotkeysConfig
     profiles?: TerminalProfile[]

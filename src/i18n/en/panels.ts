@@ -275,4 +275,19 @@ export const panels = {
         cpuCores: '{n} cores',
         days: 'd',
     },
+
+    files: {
+        title: 'Files',
+        collapse: 'Collapse file panel',
+        goParent: 'Parent directory',
+        refresh: 'Refresh',
+        waiting: 'Waiting for connection…',
+        opening: 'Opening session…',
+        loading: 'Loading…',
+        empty: 'Empty directory',
+        error: 'Read failed',
+        retry: 'Retry',
+        enterHint: 'Double-click to enter {name}',
+        actionFiles: 'Files',
+    },
 }

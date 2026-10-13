@@ -54,6 +54,7 @@ export function defaultConfig (): ConfigStore {
         },
         recents: {} as RecentsConfig,
         monitor: { open: false, width: 320 },
+        files: { open: false, width: 300 },
         profiles: [],
         localGroups: [],
         sshGroups: [],

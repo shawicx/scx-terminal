@@ -275,4 +275,19 @@ export const panels = {
         cpuCores: '{n} 核',
         days: '天',
     },
+
+    files: {
+        title: '文件',
+        collapse: '收起文件栏',
+        goParent: '上一级',
+        refresh: '刷新',
+        waiting: '等待连接…',
+        opening: '正在打开会话…',
+        loading: '加载中…',
+        empty: '空目录',
+        error: '读取失败',
+        retry: '重试',
+        enterHint: '双击进入 {name}',
+        actionFiles: '文件',
+    },
 }

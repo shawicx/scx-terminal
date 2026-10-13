@@ -224,6 +224,7 @@ defineExpose({
     sendText,
     paneKey: () => paneKey,
     tapOutput,
+    getSshId: () => sshSessionId.value,
     openSftpTab: () => {
         if (props.profile.type === 'ssh') {
             tabsStore.openSftpTab(props.profile.id)
