@@ -1,6 +1,6 @@
 /**
- * @description 标签条拖拽交互：标签互拖（继承归属并插前）、拖入分组 chip（入组末尾）、
- *              空白落点（移出分组）与悬停高亮状态（原 TabStrip.vue 的拖拽段）。
+ * @description 标签条拖拽交互：标签互拖（继承归属并按指针方位插前/插后）、拖入分组 chip
+ *              （入组末尾）、空白落点（移出分组）与悬停高亮状态（原 TabStrip.vue 的拖拽段）。
  */
 import { ref, type Ref } from 'vue'
 import type { Tab } from '@/stores/tabs'
@@ -22,7 +22,7 @@ export interface TabDndDeps {
 /**
  * @description 标签拖拽交互状态与事件处理器集合
  * @param deps store/区域元素/落点回调
- * @returns 拖拽状态 refs 与七个模板事件处理器
+ * @returns 拖拽状态 refs 与八个模板事件处理器
  *
  * @example const dnd = useTabDnd({ store, regionEl, onDropComplete: () => scroll() })
  *
@@ -33,8 +33,22 @@ export function useTabDnd (deps: TabDndDeps) {
     const dragTabId = ref<string | null>(null)
     /** 拖拽悬停高亮的标签 id */
     const tabDragOverId = ref<string | null>(null)
+    /** 悬停标签上的插入方位（插前/插后，随指针相对标签中点实时更新） */
+    const tabDragOverPlacement = ref<'before' | 'after'>('before')
     /** 拖拽悬停高亮的分组 chip 组 id */
     const chipDragOverId = ref<string | null>(null)
+
+    /**
+     * @description 依指针横向位置判定插入方位：过标签中点取插后，否则插前
+     * @param event 拖拽悬停事件
+     * @param el 悬停目标标签元素
+     * @returns 'before' | 'after' 插入方位
+     *
+     */
+    function resolvePlacement (event: DragEvent, el: HTMLElement): 'before' | 'after' {
+        const rect = el.getBoundingClientRect()
+        return event.clientX > rect.left + rect.width / 2 ? 'after' : 'before'
+    }
 
     /**
      * @description 标签拖拽开始：记录被拖标签 id，声明 move 语义
@@ -49,7 +63,7 @@ export function useTabDnd (deps: TabDndDeps) {
     }
 
     /**
-     * @description 标签拖拽悬停在另一标签上：放行落点并记录高亮
+     * @description 标签拖拽悬停在另一标签上：放行落点，按指针相对中点方位记录高亮与插前/插后
      * @param tabId 悬停目标标签 id
      * @param event 拖拽事件
      * @returns void
@@ -62,10 +76,12 @@ export function useTabDnd (deps: TabDndDeps) {
         event.preventDefault()
         event.dataTransfer!.dropEffect = 'move'
         tabDragOverId.value = tabId
+        tabDragOverPlacement.value = resolvePlacement(event, event.currentTarget as HTMLElement)
     }
 
     /**
-     * @description 标签拖拽释放在另一标签上：继承其归属并插到其前（resolveDrop 换算）
+     * @description 标签拖拽释放在另一标签上：继承其归属并按悬停方位插到其前/其后
+     *              （resolveDrop 换算）；落到自身视为取消（原实现会把它挪到组尾）
      * @param tabId 落点目标标签 id
      * @param event 拖拽事件
      * @returns void
@@ -73,8 +89,12 @@ export function useTabDnd (deps: TabDndDeps) {
      */
     function onTabDrop (tabId: string, event: DragEvent): void {
         event.preventDefault()
-        if (dragTabId.value) {
-            const drop = resolveDrop(store.tabs, { kind: 'tab', tabId })
+        if (dragTabId.value && dragTabId.value !== tabId) {
+            const drop = resolveDrop(
+                store.tabs,
+                { kind: 'tab', tabId, placement: tabDragOverPlacement.value },
+                dragTabId.value,
+            )
             store.moveTabToGroup(dragTabId.value, drop.groupId, drop.beforeTabId)
         }
         resetDrag()
@@ -137,6 +157,7 @@ export function useTabDnd (deps: TabDndDeps) {
     function resetDrag (): void {
         dragTabId.value = null
         tabDragOverId.value = null
+        tabDragOverPlacement.value = 'before'
         chipDragOverId.value = null
         onDropComplete()
     }
@@ -144,6 +165,7 @@ export function useTabDnd (deps: TabDndDeps) {
     return {
         dragTabId,
         tabDragOverId,
+        tabDragOverPlacement,
         chipDragOverId,
         onTabDragStart,
         onTabDragOver,

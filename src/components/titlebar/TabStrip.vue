@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * @description 标签条：分组头 chip（折叠/拖拽入组/右键菜单）+ 标签列表（右键菜单/行内
- *              重命名/颜色标记/拖拽归组排序）+ 切换器/「+」入口。top 模式内嵌 TitleBar
+ *              重命名/颜色标记/拖拽归组与插前插后重排）+ 切换器/「+」入口。top 模式内嵌 TitleBar
  *              （display:contents 不引入额外盒子），bottom 模式独立成条（圆角/描边/
  *              激活下探方向全部翻转），由 App.vue 挂在内容区下方。
  */
@@ -157,7 +157,7 @@ onBeforeUnmount(() => {
 })
 
 const {
-    dragTabId, tabDragOverId, chipDragOverId, resetDrag,
+    dragTabId, tabDragOverId, tabDragOverPlacement, chipDragOverId, resetDrag,
     onTabDragStart, onTabDragOver, onTabDrop, onChipDragOver, onChipDrop, onRegionDrop,
 } = useTabDnd({ store, regionEl: tabsRegionEl, onDropComplete: () => void nextTick(scrollActiveTabIntoView) })
 
@@ -429,7 +429,8 @@ function onAuxClick (id: string, event: MouseEvent) {
                         :data-tab-id="item.tab.id"
                         :class="{
                             active: item.tab.id === store.activeId,
-                            'drag-over': tabDragOverId === item.tab.id && dragTabId !== null && dragTabId !== item.tab.id,
+                            'drop-before': tabDragOverId === item.tab.id && tabDragOverPlacement === 'before' && dragTabId !== null && dragTabId !== item.tab.id,
+                            'drop-after': tabDragOverId === item.tab.id && tabDragOverPlacement === 'after' && dragTabId !== null && dragTabId !== item.tab.id,
                             'color-marked': !!item.tab.color,
                         }"
                         :style="item.tab.color ? { '--tab-mark': item.tab.color } : undefined"

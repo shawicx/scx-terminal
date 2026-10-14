@@ -9,8 +9,11 @@ import type { TabGroup } from '@/stores/config'
 /** 展示序列元素：分组头 chip 或标签 */
 export type DisplayItem = { kind: 'chip', group: TabGroup } | { kind: 'tab', tab: Tab }
 
-/** 拖拽落点：chip（入组）/ 标签（插到其前、继承归属）/ 空白区（移出组到末尾） */
-export type DropTarget = { kind: 'chip', groupId: string } | { kind: 'tab', tabId: string } | { kind: 'blank' }
+/** 拖拽落点：chip（入组）/ 标签（按 placement 插到其前或其后、继承归属；缺省插前）/ 空白区（移出组到末尾） */
+export type DropTarget =
+    | { kind: 'chip', groupId: string }
+    | { kind: 'tab', tabId: string, placement?: 'before' | 'after' }
+    | { kind: 'blank' }
 
 /**
  * @description 取标签所属分组（悬空 groupId 容错为未分组）
@@ -141,19 +144,38 @@ export function activeAfterCollapse (tabs: Tab[], groups: TabGroup[], activeId: 
 }
 
 /**
- * @description 翻译拖拽落点为 moveTabToGroup 参数：chip → 该组末尾；标签 → 其归属与位置；
- *              空白区 → 未分组、数组末尾
+ * @description 翻译拖拽落点为 moveTabToGroup 参数：chip → 该组末尾；标签 → 继承其归属，
+ *              placement = before 插到其前、after 插到其后（插后换算为「跳过被拖标签的
+ *              下一个同组标签之前」，其后无同组标签时落该组末尾）；空白区 → 未分组、
+ *              数组末尾
  * @param tabs 标签数组（查目标标签归属用）
  * @param target 落点描述
+ * @param draggedTabId 被拖标签 id（插后换算时跳过自身，避免锚点在移动中失效）
  * @returns 恰好是一对 moveTabToGroup(tabId, groupId, beforeTabId) 实参
+ *
+ * @example resolveDrop(tabs, { kind: 'tab', tabId: 't2', placement: 'after' }, 't1')
+ *
  */
-export function resolveDrop (tabs: Tab[], target: DropTarget): { groupId: string | null, beforeTabId: string | null } {
+export function resolveDrop (
+    tabs: Tab[],
+    target: DropTarget,
+    draggedTabId?: string,
+): { groupId: string | null, beforeTabId: string | null } {
     if (target.kind === 'chip') {
         return { groupId: target.groupId, beforeTabId: null }
     }
     if (target.kind === 'tab') {
-        const targetTab = tabs.find(tab => tab.id === target.tabId)
-        return { groupId: targetTab?.groupId ?? null, beforeTabId: targetTab?.id ?? null }
+        const anchor = tabs.find(tab => tab.id === target.tabId)
+        if (!anchor) {
+            return { groupId: null, beforeTabId: null }
+        }
+        if (target.placement !== 'after') {
+            return { groupId: anchor.groupId ?? null, beforeTabId: anchor.id }
+        }
+        const next = tabs
+            .slice(tabs.indexOf(anchor) + 1)
+            .find(tab => tab.groupId === anchor.groupId && tab.id !== draggedTabId)
+        return { groupId: anchor.groupId ?? null, beforeTabId: next?.id ?? null }
     }
     return { groupId: null, beforeTabId: null }
 }

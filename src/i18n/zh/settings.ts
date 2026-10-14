@@ -314,6 +314,8 @@ export const settings = {
         suggestionsClearHistory: '清空历史命令',
         suggestionsHistoryLabel: '历史记录',
         clear: '清空',
+        clearing: '清空中…',
+        clearHistoryDone: '已清空',
         sectionFontDisplay: '字体与显示',
         sectionCursor: '光标',
         sectionInteraction: '交互',

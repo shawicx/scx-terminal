@@ -129,8 +129,26 @@
     background: color-mix(in oklch, var(--tab-mark) 18%, var(--color-accent));
 }
 
-.tab-header.drag-over {
-    box-shadow: inset 2px 0 0 var(--color-primary);
+/* 拖拽插入位置指示线：悬停标签左缘（插前）/右缘（插后）的竖线，绝对定位不占布局宽；
+   -2px 偏移正好落进标签间 2px 间隙 */
+.tab-header.drop-before::before,
+.tab-header.drop-after::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--color-primary);
+    pointer-events: none;
+}
+
+.tab-header.drop-before::before {
+    left: -2px;
+}
+
+.tab-header.drop-after::after {
+    right: -2px;
 }
 
 /* bottom 模式：圆角/去边方向/激活上探全部翻转 */
@@ -315,7 +333,7 @@
     font-variant-numeric: tabular-nums;
 }
 
-/* 成员标签的组色归属线：绝对定位不占布局宽（定宽硬约束），与 drag-over 的 inset 阴影互不冲突 */
+/* 成员标签的组色归属线：绝对定位不占布局宽（定宽硬约束），与拖拽插入指示线同样躲开 flex 布局 */
 .tab-group-bar {
     position: absolute;
     left: 0;

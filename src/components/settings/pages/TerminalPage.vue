@@ -68,15 +68,29 @@ const suggestionsTriggerOptions = computed(() => [
     { value: 'manual', label: t('settings.suggestionsTriggerManual') },
 ])
 
+const clearState = ref<'idle' | 'pending' | 'done'>('idle')
+let clearDoneTimer: ReturnType<typeof setTimeout> | undefined
+
 /**
- * @description 清空全部命令历史并刷新内存索引（设置页入口）
+ * @description 清空全部命令历史并刷新内存索引（设置页入口）；按钮给出
+ *              「清空中 → 已清空」反馈，完成后 1.5s 恢复
  * @returns Promise<void>
  *
  * @example await onClearHistory()
  *
  */
 async function onClearHistory (): Promise<void> {
-    await clearHistory()
+    if (clearState.value === 'pending') return
+    clearTimeout(clearDoneTimer)
+    clearState.value = 'pending'
+    try {
+        await clearHistory()
+        clearState.value = 'done'
+        clearDoneTimer = setTimeout(() => { clearState.value = 'idle' }, 1500)
+    } catch (error) {
+        console.warn('failed to clear history', error)
+        clearState.value = 'idle'
+    }
 }
 
 /**
@@ -254,7 +268,9 @@ const outputNewlinesModel = newlineModel('outputNewlines')
             </div>
             <div class="settings-card-row">
                 <Label>{{ t('settings.suggestionsHistoryLabel') }}</Label>
-                <Button variant="outline" size="sm" @click="onClearHistory">{{ t('settings.clear') }}</Button>
+                <Button variant="outline" size="sm" :disabled="clearState === 'pending'" @click="onClearHistory">
+                    {{ clearState === 'done' ? t('settings.clearHistoryDone') : clearState === 'pending' ? t('settings.clearing') : t('settings.clear') }}
+                </Button>
             </div>
         </div>
     </div>

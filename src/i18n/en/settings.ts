@@ -314,6 +314,8 @@ export const settings = {
         suggestionsClearHistory: 'Clear command history',
         suggestionsHistoryLabel: 'History',
         clear: 'Clear',
+        clearing: 'Clearing…',
+        clearHistoryDone: 'Cleared',
         sectionFontDisplay: 'Font & display',
         sectionCursor: 'Cursor',
         sectionInteraction: 'Interaction',

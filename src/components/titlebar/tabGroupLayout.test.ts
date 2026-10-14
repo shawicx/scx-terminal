@@ -90,8 +90,24 @@ describe('resolveDrop', () => {
     it('chip target appends to that group', () => {
         expect(resolveDrop([tab('1')], { kind: 'chip', groupId: 'a' })).toEqual({ groupId: 'a', beforeTabId: null })
     })
-    it('tab target inherits its group and inserts before it', () => {
+    it('tab target inherits its group and inserts before it by default', () => {
         expect(resolveDrop([tab('1'), tab('2', 'a')], { kind: 'tab', tabId: '2' })).toEqual({ groupId: 'a', beforeTabId: '2' })
+    })
+    it('after placement inserts before the next member of the same group', () => {
+        const tabs = [tab('1'), tab('g1', 'a'), tab('g2', 'a'), tab('2')]
+        expect(resolveDrop(tabs, { kind: 'tab', tabId: 'g1', placement: 'after' })).toEqual({ groupId: 'a', beforeTabId: 'g2' })
+    })
+    it('after placement falls back to the group end when no later member exists', () => {
+        const tabs = [tab('g1', 'a'), tab('x', 'b'), tab('g2', 'a')]
+        expect(resolveDrop(tabs, { kind: 'tab', tabId: 'g2', placement: 'after' })).toEqual({ groupId: 'a', beforeTabId: null })
+    })
+    it('after placement skips the dragged tab when it is the next member', () => {
+        const tabs = [tab('g1', 'a'), tab('drag', 'a'), tab('g2', 'a')]
+        expect(resolveDrop(tabs, { kind: 'tab', tabId: 'g1', placement: 'after' }, 'drag')).toEqual({ groupId: 'a', beforeTabId: 'g2' })
+    })
+    it('after placement on an ungrouped anchor targets the next ungrouped tab', () => {
+        const tabs = [tab('1'), tab('g1', 'a'), tab('2'), tab('3')]
+        expect(resolveDrop(tabs, { kind: 'tab', tabId: '2', placement: 'after' })).toEqual({ groupId: null, beforeTabId: '3' })
     })
     it('blank target ungroups at the end', () => {
         expect(resolveDrop([tab('1', 'a')], { kind: 'blank' })).toEqual({ groupId: null, beforeTabId: null })
