@@ -194,6 +194,9 @@ export const panels = {
     terminal: {
         suggestionHint: '↑↓ 选择 · Tab 补全 · Enter 执行 · Esc 关闭',
         retry: '重试',
+        sshDisconnected: 'SSH 连接已断开（长时间未操作或网络中断）',
+        reconnect: '重新连接',
+        reconnecting: '重连中…',
     },
 
     tab: {

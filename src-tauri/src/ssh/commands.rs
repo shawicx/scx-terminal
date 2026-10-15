@@ -294,7 +294,7 @@ pub async fn ssh_connect(
                 }
             }
             watcher_session.exited.store(true, Ordering::Release);
-            let _ = app.emit(&format!("ssh:{id_for_event}:exit"), serde_json::Value::Null);
+            let _ = app.emit(&format!("ssh:{id_for_event}:exit"), serde_json::json!("lost"));
             sessions.lock().unwrap().remove(&id_for_event);
             watcher_session.disconnect_jumps().await;
             app.state::<ForwardManager>()
@@ -303,12 +303,14 @@ pub async fn ssh_connect(
         return Ok(id);
     }
 
-    // 输出泵：channel 消息 → 背压队列 → 前端；EOF/Close 后发 exit 事件并自清理
+    // 输出泵：channel 消息 → 背压队列 → 前端；EOF/Close 后发 exit 事件并自清理。
+    // exit 载荷区分原因：closed = 远端 shell 正常退出，lost = 通道消失（连接丢失）
     {
         let app = app.clone();
         let id_for_event = id.clone();
         let sessions = manager.sessions.clone();
         tauri::async_runtime::spawn(async move {
+            let mut exit_reason = "closed";
             loop {
                 let message = match read_half.as_mut() {
                     Some(half) => half.wait().await,
@@ -318,14 +320,18 @@ pub async fn ssh_connect(
                     Some(ChannelMsg::Data { data }) => session.queue.push(data.to_vec()),
                     Some(ChannelMsg::ExtendedData { data, .. }) => session.queue.push(data.to_vec()),
                     Some(ChannelMsg::ExitStatus { .. }) => continue,
-                    Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
+                    Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) => break,
+                    None => {
+                        exit_reason = "lost";
+                        break;
+                    }
                     Some(_) => {}
                 }
             }
             // EOF：最后一段残缺序列在这里放行（存活期间绝不中途冲刷，见 pty.rs flush_partial）
             session.queue.flush_partial();
             session.exited.store(true, Ordering::Release);
-            let _ = app.emit(&format!("ssh:{id_for_event}:exit"), serde_json::Value::Null);
+            let _ = app.emit(&format!("ssh:{id_for_event}:exit"), serde_json::json!(exit_reason));
             sessions.lock().unwrap().remove(&id_for_event);
             // 会话断开：级联停止该连接全部转发（-R 路由注销、监听/数据泵 abort、端口释放），
             // 并级联断开跳板链（主连接已 EOF，跳板需显式断开）

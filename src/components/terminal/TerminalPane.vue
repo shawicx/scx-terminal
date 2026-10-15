@@ -54,6 +54,9 @@ const configStore = useConfigStore()
 const themeStore = useThemeStore()
 const paneRoot = ref<HTMLElement>()
 const mountError = ref('')
+// ---- SSH 断线重连：连接丢失（exit 载荷 lost）时窗格与缓冲保留，覆盖层提供手动重连 ----
+const sshDisconnected = ref(false)
+const sshReconnecting = ref(false)
 let session: BaseSession | null = null
 let frontend: XTermWebGLFrontend | null = null
 let disposed = false
@@ -349,6 +352,18 @@ async function start (): Promise<void> {
                 registerPaneSession(props.profile.id, session.sshSessionId)
                 void startAutoForwardRules(session.sshSessionId, props.profile)
             }
+            // 连接丢失：保留窗格与缓冲显示重连覆盖层；注销注册表连接使
+            // SFTP 标签转后台连接（与 destroyed$ 分支同语义）
+            if (session instanceof SshSession) {
+                session.disconnected$.subscribe(() => {
+                    if (registeredSshId) {
+                        unregisterPaneSession(props.profile.id, registeredSshId)
+                        registeredSshId = null
+                    }
+                    forwardOpen.value = false
+                    sshDisconnected.value = true
+                })
+            }
         } else {
             await session.start({
                 command: props.profile.command,
@@ -399,6 +414,38 @@ async function retryStart (): Promise<void> {
     await start()
 }
 
+/**
+ * @description SSH 断线后手动重连（覆盖层按钮）：以原连接参数新建连接并保留终端
+ *              滚动缓冲；成功后重挂连接注册表与档案 autoStart 转发，并按 xterm
+ *              实际尺寸补一次 resize；失败保留覆盖层可再次尝试
+ * @returns Promise<void>
+ *
+ * @example 点击窗格断线覆盖层中的「重新连接」按钮
+ *
+ */
+async function reconnectSsh (): Promise<void> {
+    if (props.profile.type !== 'ssh' || !(session instanceof SshSession)) {
+        return
+    }
+    sshReconnecting.value = true
+    try {
+        const ok = await session.reconnect()
+        if (ok && session.sshSessionId) {
+            sshDisconnected.value = false
+            registeredSshId = session.sshSessionId
+            registerPaneSession(props.profile.id, registeredSshId)
+            void startAutoForwardRules(registeredSshId, props.profile)
+            if (frontend) {
+                const { columns, rows } = frontend.getSize()
+                session.resize(columns, rows)
+                frontend.focus()
+            }
+        }
+    } finally {
+        sshReconnecting.value = false
+    }
+}
+
 onMounted(() => {
     void start()
 })
@@ -443,6 +490,12 @@ onBeforeUnmount(() => {
             :profile="props.profile"
             @close="forwardOpen = false"
         />
+        <div v-if="sshDisconnected" class="ssh-disconnected-overlay">
+            <span class="ssh-disconnected-text">{{ t('terminal.sshDisconnected') }}</span>
+            <Button variant="outline" size="sm" :disabled="sshReconnecting" @click="reconnectSsh">
+                {{ sshReconnecting ? t('terminal.reconnecting') : t('terminal.reconnect') }}
+            </Button>
+        </div>
         <div v-if="mountError" class="mount-error">
             <span class="mount-error-text">{{ mountError }}</span>
             <Button variant="outline" size="sm" @click="retryStart">{{ t('terminal.retry') }}</Button>

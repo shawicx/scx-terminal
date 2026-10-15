@@ -50,6 +50,24 @@
     word-break: break-all;
 }
 
+/* SSH 断线覆盖层：半透明背景保留终端滚动缓冲可见，居中提示 + 重连按钮 */
+.ssh-disconnected-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: var(--z-pane-overlay);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: color-mix(in oklch, var(--color-background) 82%, transparent);
+}
+
+.ssh-disconnected-text {
+    font-size: 13px;
+    color: var(--color-muted-foreground);
+}
+
 .search-bar {
     position: absolute;
     top: 6px;

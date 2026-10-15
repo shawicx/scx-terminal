@@ -194,6 +194,9 @@ export const panels = {
     terminal: {
         suggestionHint: '↑↓ Select · Tab Complete · Enter Run · Esc Dismiss',
         retry: 'Retry',
+        sshDisconnected: 'SSH connection lost (idle timeout or network interruption)',
+        reconnect: 'Reconnect',
+        reconnecting: 'Reconnecting…',
     },
 
     tab: {
