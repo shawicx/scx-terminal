@@ -119,6 +119,37 @@ describe('tabs store', () => {
         expect(t1.id).not.toBe(t3.id)
     })
 
+    it('closeSideTabs closes tabs by display order and keeps the target', () => {
+        const config = useConfigStore()
+        const store = useTabsStore()
+        // 展示序：组成员（数组序）在前、未分组在后（见 displaySequence）→ ga, gb, loose
+        config.store.tabGroups.push({ id: 'g1', name: 'work', persistTabs: false })
+        const ga = store.openTerminalTab(undefined, null, 'g1')
+        const gb = store.openTerminalTab(undefined, null, 'g1')
+        const loose = store.openTerminalTab()
+        store.tabs = [ga, loose, gb] // 数组序打乱：组内相对序仍为 ga, gb
+
+        store.closeSideTabs(gb.id, 'left') // 展示序左侧 = 同组的 ga
+        expect(store.tabs.map(t => t.id)).toEqual([loose.id, gb.id])
+
+        // 剩余展示序 = gb（组内在前）, loose（未分组在后）：loose 右侧为空 = 无操作
+        store.closeSideTabs(loose.id, 'right')
+        expect(store.tabs.map(t => t.id)).toEqual([loose.id, gb.id])
+    })
+
+    it('closeSideTabs activates the target when the active tab is closed', () => {
+        const store = useTabsStore()
+        const t1 = store.openTerminalTab()
+        const t2 = store.openTerminalTab()
+        const t3 = store.openTerminalTab()
+        store.markAlert(t1.id)
+        store.activate(t3.id)
+        store.closeSideTabs(t2.id, 'right') // 关掉右侧的活动标签 t3
+        expect(store.tabs.map(t => t.id)).toEqual([t1.id, t2.id])
+        expect(store.activeId).toBe(t2.id)
+        expect(store.alerts[t1.id]).toBe(true) // 左侧保留标签的未读标记不受影响
+    })
+
     it('marks and clears alerts without touching tabs', () => {
         const store = useTabsStore()
         const t1 = store.openTerminalTab()

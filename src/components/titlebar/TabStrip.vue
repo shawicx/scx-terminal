@@ -6,11 +6,13 @@
  *              激活下探方向全部翻转），由 App.vue 挂在内容区下方。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nanoid } from 'nanoid'
 import { ChevronDown, List, Plus, X } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useTabsStore, type Tab } from '@/stores/tabs'
 import { useConfigStore, type TabGroup } from '@/stores/config'
-import { terminalTabApi } from '@/services/terminalTabsApi'
+import { terminalTabApi, getTerminalTabCwd } from '@/services/terminalTabsApi'
+import { writeClipboardText } from '@/lib/frontendContext'
 import ContextMenu, { type ContextMenuItemSpec } from '@/components/ui/ContextMenu.vue'
 import {
     getTabStripWheelDelta,
@@ -185,6 +187,24 @@ function displayTitle (tab: Tab): string {
 }
 
 /**
+ * @description 统计目标标签在展示序（与 closeSideTabs 同口径，含折叠组成员）两侧的
+ *              标签数量，作为「关闭左侧/右侧」菜单项的可用性依据
+ * @param tab 目标标签
+ * @returns { left: number, right: number } 左右侧标签数
+ *
+ */
+function sideTabCounts (tab: Tab): { left: number, right: number } {
+    const order = displaySequence(store.tabs, config.store.tabGroups)
+        .filter((item): item is { kind: 'tab', tab: Tab } => item.kind === 'tab')
+        .map(item => item.tab.id)
+    const index = order.indexOf(tab.id)
+    return {
+        left: index <= 0 ? 0 : index,
+        right: index === -1 ? 0 : order.length - 1 - index,
+    }
+}
+
+/**
  * @description 构造标签右键菜单项：基础操作 + 分组段（各分组平铺 + 已归属时「移出分组」）
  *              + 颜色段
  * @param tab 目标标签（判断是否已归属分组）
@@ -197,6 +217,7 @@ function tabMenuItems (tab: Tab): ContextMenuItemSpec[] {
         label: group.name,
         swatch: group.color,
     }))
+    const sides = sideTabCounts(tab)
     return [
         { key: 'rename', label: t('tab.rename') },
         { key: 'close', label: t('tab.close') },
@@ -206,6 +227,13 @@ function tabMenuItems (tab: Tab): ContextMenuItemSpec[] {
             disabled: store.tabs.length <= 1,
             separatorBefore: true,
         },
+        { key: 'close-right', label: t('tab.closeRight'), disabled: sides.right === 0 },
+        { key: 'close-left', label: t('tab.closeLeft'), disabled: sides.left === 0 },
+        // 复制路径/另存为配置依赖会话与档案，仅终端标签提供
+        ...(tab.type === 'terminal' ? [
+            { key: 'save-as-profile', label: t('tab.saveAsProfile'), separatorBefore: true },
+            { key: 'copy-path', label: t('tab.copyCurrentPath'), separatorBefore: true },
+        ] : []),
         ...groupItems.map((item, index) => index === 0 ? { ...item, separatorBefore: true } : item),
         ...(groupOf(config.store.tabGroups, tab) ? [{ key: 'ungroup', label: t('tab.ungroup'), separatorBefore: groupItems.length === 0 }] : []),
         ...TAB_COLORS.map(item => ({
@@ -242,6 +270,64 @@ function onChipMenuSelect (group: TabGroup, key: string): void {
 }
 
 /**
+ * @description 取路径末段做新档案名称标注（兼容 POSIX 与 Windows 分隔符；根路径/空回退 undefined）
+ * @param path 绝对路径
+ * @returns string | undefined 末段目录名
+ *
+ */
+function pathBasename (path: string): string | undefined {
+    return path.split(/[\\/]/).filter(Boolean).pop()
+}
+
+/**
+ * @description 复制终端标签活动窗格的当前工作目录到剪贴板（后台标签经注册表直达；
+ *              会话未上报 cwd 时静默不写，同命令面板 copy-current-path 语义）
+ * @param tab 目标标签
+ * @returns Promise<void>
+ *
+ * @example void copyTabPath(tab)
+ *
+ */
+async function copyTabPath (tab: Tab): Promise<void> {
+    const cwd = await getTerminalTabCwd(tab.id)
+    if (cwd) {
+        void writeClipboardText(cwd)
+    }
+}
+
+/**
+ * @description 把终端标签另存为配置档案：克隆来源档案（深拷贝防 env/args/转发规则与
+ *              原档案共享引用），本地档案固化当前工作目录并以末段目录名标注新档案名，
+ *              远端档案仅复制连接配置（名称加「副本」）；入列后由 config 深度 watch 自动持久化
+ * @param tab 目标标签
+ * @returns Promise<void>
+ *
+ * @example void saveTabAsProfile(tab)
+ *
+ */
+async function saveTabAsProfile (tab: Tab): Promise<void> {
+    const source = config.store.profiles.find(p => p.id === tab.profileId)
+        ?? config.defaultProfile()
+    if (!source) {
+        return
+    }
+    // 深拷贝经 JSON 克隆（structuredClone 对响应式代理抛 DataCloneError；档案为纯数据），
+    // 防 env/args/转发规则与原档案共享引用
+    const copy = JSON.parse(JSON.stringify(source)) as typeof source
+    copy.id = `${copy.type}-${nanoid(8)}`
+    copy.isDefault = false
+    if (copy.type === 'local') {
+        const cwd = await getTerminalTabCwd(tab.id)
+        copy.cwd = cwd ?? copy.cwd
+        copy.builtin = false
+        copy.name = `${source.name} · ${cwd ? pathBasename(cwd) ?? t('tab.profileCopySuffix') : t('tab.profileCopySuffix')}`
+    } else {
+        copy.name = `${source.name} · ${t('tab.profileCopySuffix')}`
+    }
+    config.store.profiles.push(copy)
+}
+
+/**
  * @description 处理标签右键菜单选择
  * @param tab 目标标签
  * @param key 菜单项 key
@@ -255,6 +341,14 @@ function onTabMenuSelect (tab: Tab, key: string): void {
         store.closeTab(tab.id)
     } else if (key === 'close-others') {
         store.closeOtherTabs(tab.id)
+    } else if (key === 'close-right') {
+        store.closeSideTabs(tab.id, 'right')
+    } else if (key === 'close-left') {
+        store.closeSideTabs(tab.id, 'left')
+    } else if (key === 'save-as-profile') {
+        void saveTabAsProfile(tab)
+    } else if (key === 'copy-path') {
+        void copyTabPath(tab)
     } else if (key === 'ungroup') {
         store.assignTabToGroup(tab.id, null)
     } else if (key.startsWith('group:')) {

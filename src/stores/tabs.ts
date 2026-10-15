@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { nanoid } from 'nanoid'
 import { useConfigStore } from '@/stores/config'
-import { visibleNeighborId } from '@/components/titlebar/tabGroupLayout'
+import { displaySequence, visibleNeighborId } from '@/components/titlebar/tabGroupLayout'
 import { normalizeTabSession } from '@/services/tabSession'
 
 export type TabType = 'terminal' | 'settings' | 'sftp' | 'forwarding' | 'start'
@@ -411,6 +411,38 @@ export const useTabsStore = defineStore('tabs', {
             this.alerts = {}
             this.recentIds = [id]
             this.activate(id)
+        },
+        /**
+         * @description 按展示序关闭目标标签左侧/右侧的全部标签（目标保留；折叠组成员
+         *              按逻辑展示位一并计入，与 closeOtherTabs 同口径）；活动标签被关时
+         *              激活目标标签
+         * @param id 目标标签 id
+         * @param side 关闭方向：'left' 左侧，'right' 右侧
+         *
+         * @example closeSideTabs('tab-1', 'right')
+         *
+         */
+        closeSideTabs (id: string, side: 'left' | 'right') {
+            const order = displaySequence(this.tabs, useConfigStore().store.tabGroups)
+                .filter((item): item is { kind: 'tab', tab: Tab } => item.kind === 'tab')
+                .map(item => item.tab.id)
+            const index = order.indexOf(id)
+            if (index === -1) {
+                return
+            }
+            const closeIds = new Set(side === 'left' ? order.slice(0, index) : order.slice(index + 1))
+            if (closeIds.size === 0) {
+                return
+            }
+            const activeClosed = this.activeId ? closeIds.has(this.activeId) : false
+            this.tabs = this.tabs.filter(tab => !closeIds.has(tab.id))
+            for (const closeId of closeIds) {
+                delete this.alerts[closeId]
+            }
+            this.recentIds = this.recentIds.filter(recentId => this.tabs.some(tab => tab.id === recentId))
+            if (activeClosed) {
+                this.activate(id)
+            }
         },
     },
 })

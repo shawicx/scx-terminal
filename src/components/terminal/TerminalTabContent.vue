@@ -22,7 +22,7 @@ import {
 } from '@/components/split/splitTree'
 import { useTabsStore } from '@/stores/tabs'
 import { fallbackProfile, useConfigStore, type TerminalProfile } from '@/stores/config'
-import { terminalTabApi } from '@/services/terminalTabsApi'
+import { terminalTabApi, registerTerminalTabApi, unregisterTerminalTabApi } from '@/services/terminalTabsApi'
 import { sendBellNotification } from '@/services/notifications'
 import { bindDetailMonitor, unbindDetailMonitor } from '@/services/monitor'
 
@@ -164,6 +164,9 @@ const tabApi = {
     },
 }
 
+// 按标签登记 API：后台标签的右键操作（复制当前路径/另存为配置）不经激活直达本标签
+registerTerminalTabApi(props.tabId, tabApi)
+
 watch(() => props.tabActive, active => {
     if (active) {
         terminalTabApi.current = tabApi
@@ -189,6 +192,7 @@ onBeforeUnmount(() => {
     unbindDetailMonitor(profile.value.id)
     stopFilesPolling()
     resetFilesBinding()
+    unregisterTerminalTabApi(props.tabId)
     if (terminalTabApi.current === tabApi) {
         terminalTabApi.current = null
     }

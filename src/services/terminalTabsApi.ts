@@ -41,6 +41,46 @@ export const terminalTabApi = {
     current: null as TerminalTabApi | null,
 }
 
+/** 终端标签 API 注册表（tabId → api）：后台标签不经激活直达自身窗格（右键菜单的复制路径/另存为配置用） */
+const tabApiRegistry = new Map<string, TerminalTabApi>()
+
+/**
+ * @description 登记终端标签 API（TerminalTabContent 挂载时调用）
+ * @param tabId 标签 id
+ * @param api 标签的终端操作句柄
+ * @returns void
+ *
+ * @example registerTerminalTabApi('tab-1', tabApi)
+ *
+ */
+export function registerTerminalTabApi (tabId: string, api: TerminalTabApi): void {
+    tabApiRegistry.set(tabId, api)
+}
+
+/**
+ * @description 注销终端标签 API（TerminalTabContent 卸载时调用）
+ * @param tabId 标签 id
+ * @returns void
+ *
+ * @example unregisterTerminalTabApi('tab-1')
+ *
+ */
+export function unregisterTerminalTabApi (tabId: string): void {
+    tabApiRegistry.delete(tabId)
+}
+
+/**
+ * @description 取指定终端标签活动窗格的当前工作目录（后台标签也可查；未登记或未上报时为 null）
+ * @param tabId 标签 id
+ * @returns Promise<string | null> 工作目录
+ *
+ * @example await getTerminalTabCwd('tab-1')
+ *
+ */
+export async function getTerminalTabCwd (tabId: string): Promise<string | null> {
+    return await tabApiRegistry.get(tabId)?.getActivePaneCwd() ?? null
+}
+
 export function openNewTerminalTab (): void {
     useTabsStore().openTerminalTab()
 }
