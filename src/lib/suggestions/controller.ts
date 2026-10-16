@@ -47,24 +47,6 @@ export interface SuggestionsControllerHost {
 }
 
 /**
- * @description 接受建议的写入序列：保留公共前缀，退格删掉差异部分后追加建议剩余文本
- * @param current 当前输入行（或词）文本
- * @param replacement 目标文本
- * @returns string 可直接 feedFromTerminal 的序列（\x7f 退格）
- *
- * @example computeAcceptSequence('git', 'git status') // ' status'
- *
- */
-export function computeAcceptSequence (current: string, replacement: string): string {
-    let common = 0
-    const max = Math.min(current.length, replacement.length)
-    while (common < max && current[common] === replacement[common]) {
-        common++
-    }
-    return '\x7f'.repeat(current.length - common) + replacement.slice(common)
-}
-
-/**
  * @description 建议菜单控制器（每窗格一个；TerminalPane 在 onMounted 创建）
  */
 export class SuggestionsController {
@@ -220,12 +202,9 @@ export class SuggestionsController {
         if (suggestion.kind === 'workflow') {
             // 工作流不接受为文本：清空当前输入行后打开工作流选择器（有参直接进填参态）
             if (typed) {
-                let clear = ''
-                if (typed.cursorOffset < typed.text.length) {
-                    clear += '\x05'
-                }
-                clear += '\x7f'.repeat(typed.text.length)
-                this.host.sendInput(clear)
+                // 逐退格清空（不用 \x05/Ctrl+U：End 会触发 zsh-autosuggestions 接受幽灵补全，
+                // Ctrl+U 污染 kill ring）
+                this.host.sendInput('\x7f'.repeat(typed.text.length))
             }
             this.host.openWorkflowForm(suggestion.workflowId!)
             this.close(false)
@@ -235,24 +214,20 @@ export class SuggestionsController {
             // 清空当前输入行（逐退格，不用 Ctrl+U 避免 kill ring 污染），再进填参表单；
             // 表单确认后经 sendText 整行发送 = 「整行替换后发送」
             if (typed) {
-                let clear = ''
-                if (typed.cursorOffset < typed.text.length) {
-                    clear += '\x05' // 光标移到行尾再清（与无参分支同基准）
-                }
-                clear += '\x7f'.repeat(typed.text.length)
-                this.host.sendInput(clear)
+                this.host.sendInput('\x7f'.repeat(typed.text.length))
             }
             this.host.openQuickCommandForm(suggestion.quickCommandId!)
             this.close(false)
             return
         }
         if (typed) {
-            // 历史/快捷命令的 label = 整行命令；路径的 label = 替换后的完整输入行（引擎已拼好）
-            let sequence = ''
-            if (typed.cursorOffset < typed.text.length) {
-                sequence += '\x05' // 移到行尾再替换（建议以行尾为基准）
-            }
-            sequence += computeAcceptSequence(typed.text, suggestion.label)
+            // 历史/快捷命令的 label = 整行命令；路径的 label = 替换后的完整输入行（引擎已拼好）。
+            // 接受序列不依赖「公共前缀 + 追加」捷径：PTY 回显（尤其删除擦除）异步落盘期间
+            // shell 实际行可能短于 buffer 行，0 退格 + 追加会拼出错行；按缓冲行长退格到行首
+            // （多余退格在行首无效）后完整重打，任何回显滞后下都正确。
+            // 禁用 \x05（End）：zsh-autosuggestions 会把 End/→ 当作「接受幽灵补全」，把灰字
+            // 合入真实行令退格数全错；正常输入 shell 光标本就在已输入末尾，退格直接删
+            let sequence = '\x7f'.repeat(typed.text.length) + suggestion.label
             if (execute) {
                 sequence += '\r'
             }

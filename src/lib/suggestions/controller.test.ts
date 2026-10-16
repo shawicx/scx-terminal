@@ -1,29 +1,10 @@
 /**
- * @description 建议控制器单测：接受序列计算（公共前缀 + 退格）、菜单键盘语义、
+ * @description 建议控制器单测：接受序列（保守重打，回显滞后安全）、菜单键盘语义、
  *              Esc 抑制自动弹出、评估触发条件
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { computeAcceptSequence, type SuggestionsControllerHost } from './controller'
+import { type SuggestionsControllerHost } from './controller'
 import type { LogicalLine } from './promptTracker'
-
-describe('computeAcceptSequence', () => {
-    it('keeps the common prefix and only backspaces the difference', () => {
-        // 'git che' 整体是 'git checkout dev' 的前缀 → 0 退格，只追加剩余
-        expect(computeAcceptSequence('git che', 'git checkout dev')).toBe('ckout dev')
-    })
-
-    it('returns exactly the replacement when there is no overlap', () => {
-        expect(computeAcceptSequence('abc', 'xyz')).toBe('\x7f\x7f\x7fxyz')
-    })
-
-    it('appends nothing extra when the current text is a prefix of the replacement', () => {
-        expect(computeAcceptSequence('git', 'git status')).toBe(' status')
-    })
-
-    it('backspaces the diverging tail', () => {
-        expect(computeAcceptSequence('git chx', 'git checkout')).toBe('\x7feckout')
-    })
-})
 
 function makeHost (overrides: Partial<SuggestionsControllerHost> = {}): SuggestionsControllerHost & { sent: string[] } & { setLine (next: LogicalLine): void } {
     const sent: string[] = []
@@ -112,7 +93,7 @@ describe('SuggestionsController', () => {
         vi.doUnmock('@/services/history')
     })
 
-    it('Enter accepts with execute: appends the diverging tail and \\r (no backspaces when fully prefixed)', async () => {
+    it('Enter accepts with execute: backspaces the whole line and retypes it (echo-lag safe)', async () => {
         vi.doMock('@/services/history', () => ({
             ensureHistoryLoaded: async () => {},
             getHistorySnapshot: () => [{ source: 'local:p1', command: 'git checkout dev', runAt: 1, hitCount: 1 }],
@@ -127,8 +108,10 @@ describe('SuggestionsController', () => {
         controller.destroy()
         vi.doUnmock('@/services/history')
         expect(consumed).toBe(true)
-        // typedLine 'git che' 是建议的完整前缀且光标在行尾 → 直接追加 'ckout dev\r'
-        expect(host.sent).toEqual(['ckout dev\r'])
+        // 逐退格清空 'git che'（7 字符，无 \x05——End 会触发 zsh-autosuggestions
+        // 接受幽灵补全）+ 完整重打建议行并回车——不走「公共前缀 + 追加」捷径，
+        // PTY 回显滞后（shell 实际行短于 buffer 行）时多余的退格在行首无效
+        expect(host.sent).toEqual(['\x7f\x7f\x7f\x7f\x7f\x7f\x7fgit checkout dev\r'])
     })
 
     it('Esc closes and suppresses auto-popup until the typed line changes', async () => {

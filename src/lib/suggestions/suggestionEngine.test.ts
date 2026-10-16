@@ -92,7 +92,7 @@ describe('computeSuggestions — paths', () => {
             ]
         }
         const result = await computeSuggestions(
-            { ...baseCtx, typedLine: 'cat Doc/', cursorOffset: 7 },
+            { ...baseCtx, typedLine: 'cat Doc/', cursorOffset: 8 },
             { listDir },
         )
         // 词 = 'Doc/'，cwd 拼接 → 列 /Users/x/Doc；引擎保持 listDir 传入序；
@@ -131,7 +131,7 @@ describe('computeSuggestions — paths', () => {
 
     it('skips relative words when cwd is unknown', async () => {
         const listDir = async () => { throw new Error('should not be called') }
-        const result = await computeSuggestions({ ...baseCtx, typedLine: 'cat Doc/', cursorOffset: 7, cwd: null }, { listDir })
+        const result = await computeSuggestions({ ...baseCtx, typedLine: 'cat Doc/', cursorOffset: 8, cwd: null }, { listDir })
         expect(result).toEqual([])
     })
 })

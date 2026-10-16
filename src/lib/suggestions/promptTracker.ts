@@ -23,7 +23,9 @@ export interface LogicalLine {
 }
 
 /**
- * @description 从光标沿 soft-wrap 链向上拼接完整逻辑行；中间段不 trimRight（保满宽防偏移漂移），末段 trimRight
+ * @description 从光标沿 soft-wrap 链向上拼接完整逻辑行；中间段不 trimRight（保满宽防偏移漂移），
+ *              末段 trimRight；并截断到光标——光标右侧的文本是 zsh-autosuggestions 等
+ *              幽灵补全的灰字装饰（不进 shell 输入缓冲），不是真实输入
  * @param access buffer 行读取接口
  * @returns LogicalLine 逻辑行文本与光标偏移；光标行不可读时 null
  *
@@ -51,7 +53,8 @@ export function readLogicalLine (access: BufferLineAccess): LogicalLine | null {
     const beforeCursor = access.getLineTextRange(access.cursorY, access.cursorX)
     const cursorOffset = text.length - tail.length
         + (beforeCursor !== null ? beforeCursor.length : access.cursorX)
-    return { text, cursorOffset }
+    // 光标右侧视为幽灵补全：截断到光标，建议求值/历史采集/接受序列均以真实输入为准
+    return { text: text.slice(0, cursorOffset), cursorOffset }
 }
 
 /**

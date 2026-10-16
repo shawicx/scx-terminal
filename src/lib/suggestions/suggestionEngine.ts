@@ -177,11 +177,10 @@ async function pathSuggestions (context: SuggestionContext, listDir: (dir: strin
     if (!cursorWord) {
         return []
     }
-    // 光标右侧紧邻的非空白字符并入当前词（如 'cat Doc/' 光标在 / 前时词为 'Doc/'）
-    const trailingMatch = /^\S*/.exec(context.typedLine.slice(cursorWord.end))
-    const trailing = trailingMatch ? trailingMatch[0] : ''
-    const wordText = cursorWord.text + trailing
-    const wordEnd = cursorWord.end + trailing.length
+    // 逻辑行已截断到光标（右侧为 zsh-autosuggestions 幽灵补全，非真实输入）：
+    // 当前词即光标左侧的完整词
+    const wordText = cursorWord.text
+    const wordEnd = cursorWord.end
     if (!wordText.includes('/') && !wordText.startsWith('~')) {
         return []
     }

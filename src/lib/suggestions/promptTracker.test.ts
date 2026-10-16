@@ -31,8 +31,15 @@ function makeAccess (
 
 describe('readLogicalLine', () => {
     it('reads the cursor line directly when not wrapped', () => {
-        const line = readLogicalLine(makeAccess(['user@mac ~ % git che', ''], [false, false], 18, 0))
-        expect(line).toEqual({ text: 'user@mac ~ % git che', cursorOffset: 18 })
+        const line = readLogicalLine(makeAccess(['user@mac ~ % git che', ''], [false, false], 20, 0))
+        expect(line).toEqual({ text: 'user@mac ~ % git che', cursorOffset: 20 })
+    })
+
+    it('truncates ghost completion text right of the cursor (zsh-autosuggestions)', () => {
+        // 已输入 'git che'（光标列 20），右侧 'ckout dev' 是幽灵补全灰字：
+        // 逻辑行必须截断到光标，否则建议/历史会把幽灵文本当真实输入
+        const line = readLogicalLine(makeAccess(['user@mac ~ % git checkout dev', ''], [false, false], 20, 0))
+        expect(line).toEqual({ text: 'user@mac ~ % git che', cursorOffset: 20 })
     })
 
     it('joins soft-wrapped segments above the cursor (middle segments keep full width)', () => {
@@ -55,7 +62,8 @@ describe('readLogicalLine', () => {
             return chars
         }
         const line = readLogicalLine(makeAccess(['echo 中文 more', ''], [false, false], 11, 0, { 0: range }))
-        expect(line).toEqual({ text: 'echo 中文 more', cursorOffset: 9 })
+        // 行截断到光标：光标前 9 个字符（列 11）为止
+        expect(line).toEqual({ text: 'echo 中文 m', cursorOffset: 9 })
     })
 
     it('returns null when the cursor line is unavailable', () => {
