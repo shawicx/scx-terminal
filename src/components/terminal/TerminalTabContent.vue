@@ -56,12 +56,24 @@ function applyActiveTitle () {
     }
 }
 
+// 固定档案名为标签默认名：SSH/Mosh 恒固定（既有语义）；非默认本地档案随
+// appearance.tabTitleSource（'profile' 固定档案名 = 默认，'shell' 采用 shell 上报的
+// 动态标题）；默认本地档案恒采用动态标题
+const pinsProfileName = computed(() => {
+    if (profile.value.type === 'ssh' || profile.value.type === 'mosh') {
+        return true
+    }
+    return profile.value.type === 'local'
+        && !profile.value.isDefault
+        && config.store.appearance.tabTitleSource === 'profile'
+})
+
 function setPaneTitle (leafId: string, title: string) {
     if (!title) {
         return
     }
-    // SSH/Mosh 标签默认显示档案名：不采用远端 shell 上报的动态标题（本地窗格维持原行为，手动重命名不受影响）
-    if (profile.value.type === 'ssh' || profile.value.type === 'mosh') {
+    // 固定档案名的标签不采用 shell 上报的动态标题（手动重命名优先显示，不受影响）
+    if (pinsProfileName.value) {
         return
     }
     paneTitles.set(leafId, title)
@@ -69,6 +81,15 @@ function setPaneTitle (leafId: string, title: string) {
         tabs.setTitle(props.tabId, title)
     }
 }
+
+// 命名来源切回「档案名称」时，已开标签立即归位档案名：清掉记录过的 shell 标题（防
+// 窗格切换时 applyActiveTitle 回放旧值）；manualTitle 存在时显示优先级仍更高
+watch(pinsProfileName, pinned => {
+    if (pinned) {
+        paneTitles.clear()
+        tabs.setTitle(props.tabId, profile.value.name)
+    }
+})
 
 /**
  * @description 分屏：新窗格继承源窗格会话的当前工作目录（档案显式 cwd 仍优先，见 TerminalPane）

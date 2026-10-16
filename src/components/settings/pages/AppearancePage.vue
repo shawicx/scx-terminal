@@ -1,6 +1,6 @@
 <!--
-  @description 设置·外观页：语言 / 标签栏位置 / 终端背景图（选择·清除·不透明度·
-              填充方式）/ 响铃通知。
+  @description 设置·外观页：语言 / 标签栏位置 / 非默认本地终端标签名 / 终端背景图
+              （选择·清除·不透明度·填充方式）/ 响铃通知。
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
@@ -27,6 +27,12 @@ const languageOptions = computed(() => [
 const tabBarPositionOptions = computed(() => [
     { value: 'top', label: t('settings.tabBarTop') },
     { value: 'bottom', label: t('settings.tabBarBottom') },
+])
+
+/** 非默认本地终端标签默认名来源：档案名称（默认）/ shell 上报的动态标题 */
+const tabTitleSourceOptions = computed(() => [
+    { value: 'profile', label: t('settings.tabTitleSourceProfile') },
+    { value: 'shell', label: t('settings.tabTitleSourceShell') },
 ])
 
 const backgroundFitOptions = computed(() => [
@@ -85,6 +91,10 @@ async function clearBackgroundImage (): Promise<void> {
             <div class="settings-card-row">
                 <Label>{{ t('settings.tabBarPosition') }}</Label>
                 <Select v-model="store.appearance.tabBarPosition" :options="tabBarPositionOptions" class="w-44" />
+            </div>
+            <div class="settings-card-row">
+                <Label>{{ t('settings.tabTitleSource') }}</Label>
+                <Select v-model="store.appearance.tabTitleSource" :options="tabTitleSourceOptions" class="w-44" />
             </div>
         </div>
     </div>

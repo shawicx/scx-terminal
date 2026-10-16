@@ -42,6 +42,7 @@ export function defaultConfig (): ConfigStore {
         appearance: {
             colorScheme: 'auto',
             tabBarPosition: 'top',
+            tabTitleSource: 'profile',
             theme: 'auto',
             language: 'auto',
             backgroundImage: null,

@@ -215,6 +215,8 @@ export interface AppearanceConfig {
     /** 'auto' 跟随系统；'dark'/'light' 为旧值（映射默认深/浅配色）；其余为内置配色名 */
     colorScheme: string
     tabBarPosition: 'top' | 'bottom'
+    /** 非默认本地终端标签的默认命名来源：'profile' = 档案名称（基本信息名称），'shell' = shell 上报的动态标题 */
+    tabTitleSource: 'profile' | 'shell'
     theme: 'default-dark' | 'default-light' | 'auto'
     language: 'auto' | 'zh-CN' | 'en'
     /** 终端背景图片（app-data/backgrounds/ 内文件名）；null = 未设置 */
