@@ -190,4 +190,72 @@ describe('SuggestionsController', () => {
         vi.doUnmock('@/services/history')
         expect(recorded).toEqual([['local:p1', 'echo pasted']])
     })
+
+    it('records the accepted suggestion as the executed command on Enter-accept', async () => {
+        const recorded: [string, string][] = []
+        vi.doMock('@/services/history', () => ({
+            ensureHistoryLoaded: async () => {},
+            getHistorySnapshot: () => [{ source: 'local:p1', command: 'git checkout dev', runAt: 1, hitCount: 1 }],
+            recordHistory: (source: string, command: string) => recorded.push([source, command]),
+        }))
+        const { SuggestionsController: Controller } = await import('./controller')
+        const host = makeHost()
+        const controller = new Controller(host)
+        controller.notifyOutput()
+        await vi.advanceTimersByTimeAsync(500)
+        controller.handleKeydown({ key: 'Enter' } as KeyboardEvent)
+        await vi.advanceTimersByTimeAsync(500)
+        controller.destroy()
+        vi.doUnmock('@/services/history')
+        // 程序化 \r 的回显未及写入 buffer（\r 时刻采集会读到旧行）：直录以建议 label 为准
+        expect(recorded).toEqual([['local:p1', 'git checkout dev']])
+    })
+
+    it('re-evaluates with the latest line when input changes during an in-flight evaluation', async () => {
+        vi.doMock('@/services/history', () => ({
+            ensureHistoryLoaded: async () => {},
+            getHistorySnapshot: () => [],
+            recordHistory: () => {},
+        }))
+        const { SuggestionsController: Controller } = await import('./controller')
+
+        // 慢速 listDir：每个目录一个手动 resolve 的 deferred，模拟 listDir/cwd IPC 延迟窗口
+        const pending = new Map<string, (entries: { name: string, isDir: boolean }[]) => void>()
+        const states: string[][] = []
+        const host = makeHost({
+            listDir: dir => new Promise(resolve => { pending.set(dir, resolve) }),
+            onState: state => states.push(state.items.map(item => item.label)),
+        })
+        const controller = new Controller(host)
+
+        // 先走一轮静默让 PromptTracker 学得提示符长度（与其它用例同基准）
+        controller.notifyOutput()
+        await vi.advanceTimersByTimeAsync(500)
+        states.length = 0
+
+        // 第一次求值：行 = cd ~/Documents/code/scx-nexvia/（列其子目录），卡在 listDir
+        const lineA = 'user@mac ~ % cd ~/Documents/code/scx-nexvia/'
+        host.setLine({ text: lineA, cursorOffset: lineA.length })
+        controller.triggerManually()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(pending.get('~/Documents/code/scx-nexvia/')).toBeTypeOf('function')
+
+        // IPC 在途期间行被改短（删除 scx-nexvia/）：再次触发求值（应合并为尾随重评）
+        const lineB = 'user@mac ~ % cd ~/Documents/code/'
+        host.setLine({ text: lineB, cursorOffset: lineB.length })
+        controller.triggerManually()
+
+        // 旧求值完成：短暂落盘按旧行拼的建议；随后尾随重评按新行列出 code/ 子目录
+        pending.get('~/Documents/code/scx-nexvia/')!([{ name: 'android', isDir: true }, { name: 'docs', isDir: true }])
+        await vi.advanceTimersByTimeAsync(0)
+        expect(pending.get('~/Documents/code/')).toBeTypeOf('function')
+        pending.get('~/Documents/code/')!([{ name: 'scx-music', isDir: true }, { name: 'scx-nexvia', isDir: true }])
+        await vi.advanceTimersByTimeAsync(0)
+        controller.destroy()
+        vi.doUnmock('@/services/history')
+
+        // 最终建议必须基于最新输入行：列出 code/ 的子目录，而非旧行 scx-nexvia/ 内部的条目
+        expect(states.at(-1)).toEqual(['cd ~/Documents/code/scx-music/', 'cd ~/Documents/code/scx-nexvia/'])
+        expect(states.at(-1)?.some(label => label.includes('android') || label.includes('docs'))).toBe(false)
+    })
 })

@@ -174,6 +174,40 @@ describe('PromptTracker', () => {
         tracker.destroy()
     })
 
+    it('accepts large jumps for cwd-style prompts ending with the same tail symbol', () => {
+        // home 提示符 '~ ❯ '（4）→ 深目录提示符 '/Users/x/p ❯ '（13）：跳变 9 > 上限 5，
+        // 但同以 ❯ 收尾（cwd 型提示符长度随目录变、符号不变）→ 应学习而非拒绝
+        const { host, state } = makeHost({ line: '~ ❯ ', cursorX: 4, above: [] })
+        const tracker = new PromptTracker(host, undefined, { maxPromptJump: 5 })
+        tracker.notifyOutput()
+        vi.advanceTimersByTime(250)
+        expect(tracker.promptLength).toBe(4)
+        state.line = '/Users/x/p ❯ '
+        state.cursorX = 13
+        tracker.notifyInput(new Uint8Array([0x0d]))
+        vi.advanceTimersByTime(250)
+        expect(tracker.promptLength).toBe(13)
+        // 剥提示符后输入行从命令头开始（promptLen 卡旧值时会错剥出 'cuments ❯ …' 一类残段）
+        state.line = '/Users/x/p ❯ cd ~/Doc'
+        state.cursorX = 22
+        expect(tracker.getTypedLine()?.text).toBe('cd ~/Doc')
+        tracker.destroy()
+    })
+
+    it('rejects large jumps whose tail symbol differs from the learned prompt', () => {
+        // 已学得 '~ ❯ '；异步输出污染行长度大变且以普通字符收尾 → 仍拒绝
+        const { host, state } = makeHost({ line: '~ ❯ ', cursorX: 4, above: [] })
+        const tracker = new PromptTracker(host, undefined, { maxPromptJump: 5 })
+        tracker.notifyOutput()
+        vi.advanceTimersByTime(250)
+        state.line = 'some async output text'
+        state.cursorX = 22
+        tracker.notifyInput(new Uint8Array([0x0d]))
+        vi.advanceTimersByTime(250)
+        expect(tracker.promptLength).toBe(4) // 保持旧值
+        tracker.destroy()
+    })
+
     it('cancels prompt learning when the user types before silence', () => {
         const { host, state } = makeHost({ line: 'user@mac ~ % gi', cursorX: 15, above: [] })
         const tracker = new PromptTracker(host)

@@ -85,7 +85,7 @@ const {
 
 // ---- 输入建议 ----
 const {
-    suggestionState, suggestionAnchor, refreshAnchor, onSuggestionSelect,
+    suggestionState, suggestionAnchor, refreshAnchor, onSuggestionSelect, onSuggestionHover,
     setup: setupSuggestions, teardown: teardownSuggestions,
     notifyInput, notifyOutput, notifyDirectRecord, close: closeSuggestions, triggerManually,
 } = usePaneSuggestions({
@@ -541,6 +541,7 @@ onBeforeUnmount(() => {
             :host-height="suggestionAnchor.hostHeight"
             :max-width="suggestionAnchor.maxWidth"
             @select="onSuggestionSelect"
+            @hover="onSuggestionHover"
         />
     </div>
 </template>

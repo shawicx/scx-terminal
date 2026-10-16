@@ -12,7 +12,8 @@ const MAX_HISTORY_SAME_SOURCE = 8
 const MAX_HISTORY_GLOBAL = 4
 const MAX_QUICK_COMMANDS = 4
 const MAX_WORKFLOWS = 3
-const MAX_PATHS = 8
+/** 路径条目上限：取满总上限额度（大目录靠菜单内滚动翻看，配 scrollIntoView 跟随） */
+const MAX_PATHS = 16
 const MAX_TOTAL = 16
 
 export interface HistoryIndexItem {

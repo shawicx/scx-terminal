@@ -119,6 +119,18 @@ export function currentWordAt (line: string, offset: number): { text: string, st
     return { text: match[1], start: offset - match[1].length, end: offset }
 }
 
+/**
+ * @description 提示符收尾符号（去尾空白后的最后一个字符）：cwd 型提示符的稳定特征
+ * @param prompt 提示符文本
+ * @returns string 收尾字符；空白提示符返回空串
+ *
+ * @example promptTailSymbol('~/Documents ❯ ') // '❯'
+ *
+ */
+function promptTailSymbol (prompt: string): string {
+    return prompt.trimEnd().slice(-1)
+}
+
 /** 输出静默窗口（ms）：提示符学习与建议评估都在静默后进行 */
 const DEFAULT_SILENCE_MS = 250
 /** promptLen 学习跳变上限：超出视为异步输出污染，丢弃本次学习 */
@@ -141,6 +153,8 @@ export class PromptTracker {
     private readonly maxPromptJump: number
     private promptLen = 0
     private awaitingPromptLearn = true // 启动后首个静默学习首个提示符
+    /** 上次学得提示符的收尾字符（❯/$/% 等）：cwd 型提示符跨目录大变长时的同款判据 */
+    private lastLearnedPromptTail = ''
     private pendingRecord: string | null = null
     private destroyed = false
 
@@ -254,11 +268,33 @@ export class PromptTracker {
         if (this.awaitingPromptLearn) {
             this.awaitingPromptLearn = false
             const prefix = this.host.readCursorPrefix()
-            if (prefix !== null && Math.abs(prefix.length - this.promptLen) <= this.maxPromptJump) {
+            if (prefix !== null && this.isTrustworthyPrompt(prefix)) {
                 this.promptLen = prefix.length
+                this.lastLearnedPromptTail = promptTailSymbol(prefix)
             }
         }
         this.onSilence?.()
+    }
+
+    /**
+     * @description 判定光标前缀可否学习为提示符长度：跳变在上限内直接可信；超出上限时
+     *              要求与上次学得的提示符以相同字符收尾——cwd 型提示符跨目录长度大变，
+     *              但 ❯/$/% 等结尾符号不变 → 合法；异步输出污染的行文本几乎不可能恰好
+     *              以同款符号收尾，仍被拒绝（与原跳变护栏同等防污染强度）
+     * @param prefix 光标行 [0, cursorX) 文本
+     * @returns boolean 可否学习
+     *
+     * @example isTrustworthyPrompt('/Users/x/project ❯ ') // 与上次同以 ❯ 收尾 → true
+     *
+     */
+    private isTrustworthyPrompt (prefix: string): boolean {
+        if (Math.abs(prefix.length - this.promptLen) <= this.maxPromptJump) {
+            return true
+        }
+        if (!this.lastLearnedPromptTail) {
+            return false
+        }
+        return promptTailSymbol(prefix) === this.lastLearnedPromptTail
     }
 
     /** 回车时刻采集命令：光标行 + 向上合并以 \ 结尾的续行，剥提示符后单行化 */

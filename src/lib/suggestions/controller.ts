@@ -75,6 +75,9 @@ export class SuggestionsController {
     private suppressed = false
     private destroyed = false
     private evaluating = false
+    /** 求值在途时又来新请求：合并为一次尾随重评（在途求值读取的是它启动时的输入行，
+     *  期间行被改（续打/删除）后旧结果不得作为最终建议落盘） */
+    private evaluateQueued = false
     private popupTimer: ReturnType<typeof setTimeout> | undefined
 
     constructor (host: SuggestionsControllerHost) {
@@ -185,6 +188,20 @@ export class SuggestionsController {
         }
     }
 
+    /**
+     * @description 鼠标悬停菜单条目的跟随选中（只改选中态，不触发接受）
+     * @param index 目标建议项下标（越界或与当前相同则忽略）
+     * @returns void
+     *
+     * @example setSelectedIndex(2)
+     *
+     */
+    setSelectedIndex (index: number): void {
+        if (index >= 0 && index < this.state.items.length && index !== this.state.selectedIndex) {
+            this.setState({ ...this.state, selectedIndex: index })
+        }
+    }
+
     private moveSelection (delta: number): void {
         if (!this.state.items.length) {
             return
@@ -240,6 +257,11 @@ export class SuggestionsController {
                 sequence += '\r'
             }
             this.host.sendInput(sequence)
+            if (execute) {
+                // 程序化 \r 的回显未及写入 buffer，tracker 在 \r 时刻采集会读到旧行：
+                // 以已知的最终命令直录覆盖（同时补挂提示符重学习）
+                this.promptTracker.recordDirect(suggestion.label)
+            }
         }
         this.close(false)
     }
@@ -294,7 +316,11 @@ export class SuggestionsController {
     }
 
     private async evaluate (): Promise<void> {
-        if (this.destroyed || this.evaluating) {
+        if (this.destroyed) {
+            return
+        }
+        if (this.evaluating) {
+            this.evaluateQueued = true
             return
         }
         this.evaluating = true
@@ -330,6 +356,10 @@ export class SuggestionsController {
             this.setState({ open: items.length > 0, items, selectedIndex: 0 })
         } finally {
             this.evaluating = false
+            if (this.evaluateQueued && !this.destroyed) {
+                this.evaluateQueued = false
+                void this.evaluate()
+            }
         }
     }
 

@@ -85,6 +85,11 @@ export function usePaneSuggestions (deps: PaneSuggestionsDeps) {
         controller?.acceptAt(index, false)
     }
 
+    /** 菜单条目悬停回调：跟随选中（点击仍走 onSuggestionSelect） */
+    function onSuggestionHover (index: number): void {
+        controller?.setSelectedIndex(index)
+    }
+
     /** 创建控制器并挂宿主键盘拦截（start 末尾调用） */
     function setup (): void {
         hostEl = deps.resolveHost()
@@ -119,7 +124,13 @@ export function usePaneSuggestions (deps: PaneSuggestionsDeps) {
             workflows: () => visibleWorkflows(deps.config())
                 .filter(workflow => workflow.steps.length > 0 && workflow.name)
                 .map(workflow => ({ id: workflow.id, name: workflow.name })),
-            sendInput: text => deps.session()?.feedFromTerminal(encodeUTF8(text)),
+            sendInput: text => {
+                const bytes = encodeUTF8(text)
+                // 程序化馈送同样过 tracker：建议接受的退格/换行与手打同语义
+                //（看不到 \r 就不会重新学提示符长度——cwd 型提示符跨目录后会错剥输入行）
+                controller?.notifyInput(bytes)
+                deps.session()?.feedFromTerminal(bytes)
+            },
             openQuickCommandForm: quickCommandId => openQuickCommandPalette(quickCommandId),
             openWorkflowForm: workflowId => openWorkflowPalette(workflowId),
             onState: state => {
@@ -143,7 +154,7 @@ export function usePaneSuggestions (deps: PaneSuggestionsDeps) {
     }
 
     return {
-        suggestionState, suggestionAnchor, refreshAnchor, onSuggestionSelect,
+        suggestionState, suggestionAnchor, refreshAnchor, onSuggestionSelect, onSuggestionHover,
         setup, teardown,
         notifyInput: (data: Uint8Array) => controller?.notifyInput(data),
         notifyOutput: () => controller?.notifyOutput(),
