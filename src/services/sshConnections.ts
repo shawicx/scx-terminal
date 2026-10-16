@@ -11,7 +11,7 @@ import { useConfigStore } from '@/stores/config'
 import { SshProxy, type HostKeyChallenge, type KbdChallenge, type KbdAnswer } from '@/services/ssh'
 import { setProfilePassword } from '@/services/secrets'
 import { SshConnectionRegistry } from '@/lib/sshConnectionRegistry'
-import { jumpChainErrorText, resolveJumpChain } from '@/lib/jumpChain'
+import { jumpChainErrorText, resolveJumpChain, type JumpHop } from '@/lib/jumpChain'
 import type { SshProfile } from '@/stores/config'
 
 export type ProfileConnectionStatus = 'idle' | 'connecting' | 'connected' | 'failed'
@@ -20,6 +20,9 @@ export type ProfileConnectionStatus = 'idle' | 'connecting' | 'connected' | 'fai
 export const connectionStates = reactive<Record<string, ProfileConnectionStatus>>({})
 /** 连接来源（pane = 复用终端窗格连接；background = 后台 headless 连接） */
 export const connectionSources = reactive<Record<string, 'pane' | 'background' | null>>({})
+/** 档案级实际跳板链镜像（key = profileId）：建连瞬间真实使用的跳板端点（连接顺序）；
+ *  空数组 = 直连、null = 无在连记录。记录后不随档案设置变更，反映的是连接时的事实 */
+export const connectionJumpChains = reactive<Record<string, string[] | null>>({})
 /** 最近一次连接错误文本（失败 banner 展示） */
 export const connectionErrors = reactive<Record<string, string>>({})
 /** 连接集合变化计数器（组件 watch 它后重算 isAlive 等派生态） */
@@ -133,6 +136,7 @@ async function connectHeadless (profileId: string): Promise<string> {
         proxy.unsubscribeAll()
         connectionStates[profileId] = 'failed'
         connectionErrors[profileId] = String(error instanceof Error ? error.message : error)
+        connectionJumpChains[profileId] = null
         registryVersion.value += 1
         throw error
     }
@@ -148,6 +152,7 @@ async function connectHeadless (profileId: string): Promise<string> {
     }
     headlessProxies.set(proxy.getID(), proxy)
     connectionStates[profileId] = 'connected'
+    noteJumpChain(profileId, jumpHops)
     registryVersion.value += 1
     return proxy.getID()
 }
@@ -159,6 +164,20 @@ function disconnectHeadless (sshId: string): void {
         void proxy.kill()
         proxy.unsubscribeAll()
     }
+}
+
+/**
+ * @description 记录档案当前连接实际使用的跳板链（建连成功后调用；直连传空）
+ * @param profileId 档案 id
+ * @param hops 建连时经 resolveJumpChain 解析出的跳板链
+ * @returns void
+ *
+ * @example noteJumpChain(profile.id, jumpHops)
+ *
+ */
+export function noteJumpChain (profileId: string, hops: JumpHop[] | undefined | null): void {
+    connectionJumpChains[profileId] = (hops ?? []).map(hop =>
+        hop.port === 22 ? `${hop.user}@${hop.host}` : `${hop.user}@${hop.host}:${hop.port}`)
 }
 
 registry = new SshConnectionRegistry({
@@ -185,6 +204,7 @@ function refreshMirror (): void {
         } else if (connectionStates[profile.id] !== 'failed') {
             connectionStates[profile.id] = 'idle'
             connectionSources[profile.id] = null
+            connectionJumpChains[profile.id] = null
         }
     }
     registryVersion.value += 1

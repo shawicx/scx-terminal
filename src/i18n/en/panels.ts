@@ -282,6 +282,8 @@ export const panels = {
         cores: 'Cores',
         cpuCores: '{n} cores',
         days: 'd',
+        viaJump: 'Jump',
+        directConn: 'Direct',
     },
 
     files: {

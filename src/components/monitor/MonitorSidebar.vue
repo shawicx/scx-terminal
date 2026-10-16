@@ -16,7 +16,7 @@ import { Activity, Gauge, HardDrive, PanelRightClose, Table2 } from 'lucide-vue-
 import { useMonitorStore, MONITOR_ERROR_UNSUPPORTED } from '@/stores/monitor'
 import { MONITOR_ERROR_RECONNECTING } from '@/lib/monitorOrchestrator'
 import { useConfigStore, type SshProfile } from '@/stores/config'
-import { connectionSources, connectionStates } from '@/services/sshConnections'
+import { connectionSources, connectionStates, connectionJumpChains } from '@/services/sshConnections'
 import MetricChart from '@/components/monitor/MetricChart.vue'
 import { gsap, moveHighlight, prefersReducedMotion, MOTION_EASE } from '@/lib/motion'
 
@@ -164,6 +164,13 @@ const connectionSource = computed(() => {
     }
     return connectionSources[props.profileId] === 'pane' ? t('start.reusePane') : t('start.backgroundConn')
 })
+
+/** 当前连接实际使用的跳板链（连接成功时记录，非档案设置推导）：null = 无在连记录、
+ *  空数组 = 直连、非空 = 按连接顺序的跳板端点 */
+const jumpChain = computed(() => connectionJumpChains[props.profileId] ?? null)
+
+/** 跳板链徽标悬停全文（跳板 a → b 形式） */
+const jumpChainText = computed(() => jumpChain.value?.join(' → ') ?? '')
 
 /* 拖拽调宽：左缘手柄向左拖增宽；拖动中仅更新本地 ref（不触发落库），松手持久化 */
 const SIDEBAR_MIN_WIDTH = 260
@@ -322,9 +329,18 @@ function diskTone (percent: number): string {
                             </button>
                         </div>
                         <div class="sidebar-endpoint">{{ endpoint }}</div>
-                        <div v-if="connectionSource || latest?.osInfo" class="sidebar-chips">
+                        <div v-if="connectionSource || latest?.osInfo || (connectionState === 'connected' && jumpChain)" class="sidebar-chips">
                             <span v-if="connectionSource" class="chip">{{ connectionSource }}</span>
                             <span v-if="latest?.osInfo" class="chip" :title="latest.osInfo">{{ latest.osInfo }}</span>
+                            <span
+                                v-if="connectionState === 'connected' && jumpChain?.length"
+                                class="chip"
+                                :title="`${t('monitor.viaJump')}：${jumpChainText}`"
+                            >{{ t('monitor.viaJump') }} {{ jumpChainText }}</span>
+                            <span
+                                v-else-if="connectionState === 'connected' && jumpChain"
+                                class="chip"
+                            >{{ t('monitor.directConn') }}</span>
                         </div>
                     </header>
 

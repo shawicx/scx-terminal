@@ -21,13 +21,13 @@ import CredentialDialog from '@/components/terminal/CredentialDialog.vue'
 import ForwardPanel from '@/components/terminal/ForwardPanel.vue'
 import SuggestionMenu from '@/components/terminal/SuggestionMenu.vue'
 import { startAutoForwardRules } from '@/services/forward'
-import { registerPaneSession, unregisterPaneSession } from '@/services/sshConnections'
+import { registerPaneSession, unregisterPaneSession, noteJumpChain } from '@/services/sshConnections'
 import { importShellHistoryForProfile } from '@/services/history'
 import { useTabsStore } from '@/stores/tabs'
 import { useConfigStore } from '@/stores/config'
 import { useThemeStore } from '@/stores/theme'
 import type { SshProfile, TerminalProfile } from '@/stores/config'
-import { jumpChainErrorText, resolveJumpChain } from '@/lib/jumpChain'
+import { jumpChainErrorText, resolveJumpChain, type JumpHop } from '@/lib/jumpChain'
 import { useSshChallenges } from './useSshChallenges'
 import { useTerminalSearch } from './useTerminalSearch'
 import { usePaneSuggestions } from './usePaneSuggestions'
@@ -64,6 +64,8 @@ let disposed = false
 const paneKey = `pane-${props.profile.id}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     /** 已登记进连接注册表的会话 id（destroyed$ 注销用） */
     let registeredSshId: string | null = null
+    /** 本次连接实际使用的跳板链（连接/重连成功后上报注册表镜像，重连复用同链） */
+    let resolvedJumpHops: JumpHop[] | undefined
 
 // ---- 端口转发面板（SSH 档案专属）：右键菜单/expose 开关，随窗格销毁清理 ----
 const forwardOpen = ref(false)
@@ -329,6 +331,7 @@ async function start (): Promise<void> {
             )
             const jump = resolveJumpChain(props.profile, profilesById)
             const jumpChainError = 'error' in jump ? jumpChainErrorText(jump.error, profilesById) : undefined
+            resolvedJumpHops = 'hops' in jump ? jump.hops : undefined
             await session.start({
                 host: props.profile.host,
                 port: props.profile.port,
@@ -336,7 +339,7 @@ async function start (): Promise<void> {
                 auth: props.profile.auth,
                 profileId: props.profile.id,
                 keyId: props.profile.keyId,
-                jumpHops: 'hops' in jump ? jump.hops : undefined,
+                jumpHops: resolvedJumpHops,
                 jumpChainError,
                 width: null,
                 height: null,
@@ -350,6 +353,7 @@ async function start (): Promise<void> {
             if (session instanceof SshSession && session.sshSessionId) {
                 registeredSshId = session.sshSessionId
                 registerPaneSession(props.profile.id, session.sshSessionId)
+                noteJumpChain(props.profile.id, resolvedJumpHops)
                 void startAutoForwardRules(session.sshSessionId, props.profile)
             }
             // 连接丢失：保留窗格与缓冲显示重连覆盖层；注销注册表连接使
@@ -434,6 +438,7 @@ async function reconnectSsh (): Promise<void> {
             sshDisconnected.value = false
             registeredSshId = session.sshSessionId
             registerPaneSession(props.profile.id, registeredSshId)
+            noteJumpChain(props.profile.id, resolvedJumpHops)
             void startAutoForwardRules(registeredSshId, props.profile)
             if (frontend) {
                 const { columns, rows } = frontend.getSize()

@@ -282,6 +282,8 @@ export const panels = {
         cores: '核心',
         cpuCores: '{n} 核',
         days: '天',
+        viaJump: '跳板',
+        directConn: '直连',
     },
 
     files: {
