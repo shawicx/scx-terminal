@@ -12,6 +12,7 @@ import StartPageContent from '@/components/start/StartPageContent.vue'
 import HostKeyDialog from '@/components/terminal/HostKeyDialog.vue'
 import CredentialDialog from '@/components/terminal/CredentialDialog.vue'
 import TransferPopover from '@/components/sftp/TransferPopover.vue'
+import MessageHost from '@/components/ui/MessageHost.vue'
 import CommandPalette from '@/components/palette/CommandPalette.vue'
 import QuickCommandPalette from '@/components/palette/QuickCommandPalette.vue'
 import WorkflowPalette from '@/components/palette/WorkflowPalette.vue'
@@ -171,6 +172,7 @@ watch(() => config.store.terminal.fontSize, size => {
         <WorkflowPalette />
         <TabSwitcher />
         <TransferPopover />
+        <MessageHost />
         <HostKeyDialog
             v-if="pendingHostKey"
             :challenge="pendingHostKey"

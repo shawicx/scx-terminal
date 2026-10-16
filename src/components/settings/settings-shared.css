@@ -81,6 +81,12 @@
     justify-content: flex-end;
 }
 
+/* 直接挂在卡片下的提示文本（不在 card-row 内）：对齐行内边距，避免贴卡片边框 */
+.settings-card > .hint {
+    padding: 8px 16px 12px;
+    margin: 0;
+}
+
 .settings-row-head {
     display: flex;
     align-items: center;
@@ -132,22 +138,29 @@
     gap: 8px;
 }
 
+/* 操作行按钮统一最小宽度：同排按钮（保存/取消/删除等）宽度对齐，不随文案长短参差 */
+.settings-card-row.actions > button,
+.profile-actions > button,
+.settings-section-actions > button,
+.settings-section-actions .import-trigger {
+    min-width: 96px;
+}
+
 .hint {
     color: var(--color-muted-foreground);
     font-size: 13px;
     margin-bottom: 16px;
 }
 
+/* 双列网格：组内按钮严格等宽（奇数末枚占半行留空位，不再独占整行） */
 .profile-new-group {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     margin-bottom: 6px;
 }
 
-/* 弹性换行 + 禁止文字折行：按钮多时不挤压成竖排文字（如工作流页 5 个操作） */
 .profile-new-group .profile-new-button {
-    flex: 1 1 auto;
     white-space: nowrap;
     margin-bottom: 0;
 }

@@ -12,6 +12,7 @@ import { useI18n } from 'vue-i18n'
 import { Copy, Download, EyeOff, Pencil, Plus, RotateCcw, Trash2, Upload } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import Label from '@/components/ui/Label.vue'
+import { message } from '@/components/ui/message'
 import { useConfigStore, reorderGroups, type Workflow, type WorkflowStep } from '@/stores/config'
 import { previewWorkflow, stepCommandTemplate, collectWorkflowParams, groupWorkflowSections } from '@/lib/workflows'
 import { previewQuickCommand } from '@/lib/quickCommands'
@@ -365,16 +366,7 @@ function confirmResetBuiltins (): void {
     })
 }
 
-// ---- YAML 导入导出 ----
-
-/** 页面内 notice：成功/警告（绿）/错误（红）；空串 = 无 */
-const ioNotice = ref('')
-const ioError = ref('')
-
-function resetIoMessages (): void {
-    ioNotice.value = ''
-    ioError.value = ''
-}
+// ---- YAML 导入导出（结果经全局 message 提示反馈） ----
 
 /**
  * @description 导出当前选中（已保存）的工作流为 YAML：保存对话框 → 写文件；
@@ -389,17 +381,18 @@ async function exportSelectedWorkflow (): Promise<void> {
     if (!workflow) {
         return
     }
-    resetIoMessages()
     try {
         const result = await exportWorkflowToFile(workflow, store.quickCommands, displayGroups.value)
         if (!result) {
             return
         }
-        ioNotice.value = result.droppedSteps > 0
-            ? t('settings.workflowExportDropped', { count: result.droppedSteps })
-            : t('settings.workflowExportDone')
+        if (result.droppedSteps > 0) {
+            message.warning(t('settings.workflowExportDropped', { count: result.droppedSteps }))
+        } else {
+            message.success(t('settings.workflowExportDone'))
+        }
     } catch (error) {
-        ioError.value = t('settings.workflowExportFailed', { message: String(error) })
+        message.error(t('settings.workflowExportFailed', { message: String(error) }))
     }
 }
 
@@ -414,17 +407,18 @@ async function exportAllWorkflows (): Promise<void> {
     if (!store.workflows.length) {
         return
     }
-    resetIoMessages()
     try {
         const result = await exportAllWorkflowsToFile(store.workflows, store.quickCommands, displayGroups.value)
         if (!result) {
             return
         }
-        ioNotice.value = result.droppedSteps > 0
-            ? t('settings.workflowExportDropped', { count: result.droppedSteps })
-            : t('settings.workflowExportDone')
+        if (result.droppedSteps > 0) {
+            message.warning(t('settings.workflowExportDropped', { count: result.droppedSteps }))
+        } else {
+            message.success(t('settings.workflowExportDone'))
+        }
     } catch (error) {
-        ioError.value = t('settings.workflowExportFailed', { message: String(error) })
+        message.error(t('settings.workflowExportFailed', { message: String(error) }))
     }
 }
 
@@ -440,15 +434,14 @@ async function exportBuiltins (): Promise<void> {
     if (!builtinCatalog(store).length) {
         return
     }
-    resetIoMessages()
     try {
         const result = await exportBuiltinsToFile(builtinCatalog(store), store.workflowCtl.removed, displayGroups.value)
         if (!result) {
             return
         }
-        ioNotice.value = t('settings.workflowExportDone')
+        message.success(t('settings.workflowExportDone'))
     } catch (error) {
-        ioError.value = t('settings.workflowExportFailed', { message: String(error) })
+        message.error(t('settings.workflowExportFailed', { message: String(error) }))
     }
 }
 
@@ -494,7 +487,6 @@ function upsertBuiltinPackDocs (docs: ImportedWorkflowDoc[]): void {
  *
  */
 async function importWorkflows (): Promise<void> {
-    resetIoMessages()
     let docs: ImportedWorkflowDoc[]
     try {
         const result = await importWorkflowsFromFile()
@@ -503,9 +495,9 @@ async function importWorkflows (): Promise<void> {
         }
         docs = result.docs
     } catch (error) {
-        ioError.value = error instanceof WorkflowYamlError
+        message.error(error instanceof WorkflowYamlError
             ? t(`settings.workflowImport${error.code}`)
-            : t('settings.workflowImportFailed', { message: String(error) })
+            : t('settings.workflowImportFailed', { message: String(error) }))
         return
     }
     const builtinDocs = docs.filter(doc => doc.scope === 'builtin')
@@ -529,10 +521,10 @@ async function importWorkflows (): Promise<void> {
             }),
             () => {
                 upsertBuiltinPackDocs(builtinDocs)
-                ioNotice.value = t('settings.workflowImportBuiltinDone', { count: builtinDocs.length })
+                message.success(t('settings.workflowImportBuiltinDone', { count: builtinDocs.length }))
                 if (userDocs.length) {
                     importUser()
-                    ioNotice.value = t('settings.workflowImportDone', { count: docs.length })
+                    message.success(t('settings.workflowImportDone', { count: docs.length }))
                 }
             })
         return
@@ -542,7 +534,7 @@ async function importWorkflows (): Promise<void> {
         .join('、')
     confirmAction(t('settings.workflowImportConfirmBody', { count: userDocs.length, names: summary }), () => {
         importUser()
-        ioNotice.value = t('settings.workflowImportDone', { count: userDocs.length })
+        message.success(t('settings.workflowImportDone', { count: userDocs.length }))
     })
 }
 </script>
@@ -590,8 +582,6 @@ async function importWorkflows (): Promise<void> {
                     <span>{{ t('settings.workflowBuiltinReset', { count: hiddenBuiltinCount }) }}</span>
                 </button>
             </div>
-            <p v-if="ioNotice" class="hint wf-io-notice">{{ ioNotice }}</p>
-            <p v-if="ioError" class="hint wf-validation-error">{{ ioError }}</p>
             <GroupAccordion
                 :sections="workflowAccordionSections"
                 :preferred-key="selectedWorkflowSectionKey"
@@ -747,7 +737,7 @@ async function importWorkflows (): Promise<void> {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 5px 8px;
+    padding: 6px 10px;
     border: 1px solid var(--color-border);
     border-radius: 6px;
 }
@@ -780,15 +770,5 @@ async function importWorkflows (): Promise<void> {
 
 .wf-params-hint {
     margin: -4px 0 8px;
-}
-
-.wf-validation-error {
-    margin: 0 0 4px;
-    color: var(--color-destructive);
-}
-
-.wf-io-notice {
-    margin: 0 0 4px;
-    color: var(--color-primary);
 }
 </style>

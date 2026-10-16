@@ -11,6 +11,7 @@ import Dialog from '@/components/ui/Dialog.vue'
 import Input from '@/components/ui/Input.vue'
 import Label from '@/components/ui/Label.vue'
 import Switch from '@/components/ui/Switch.vue'
+import { message } from '@/components/ui/message'
 import {
     getS3SyncConfig,
     setS3SyncConfig,
@@ -34,8 +35,6 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const syncBusy = ref(false)
-const syncError = ref('')
-const syncNotice = ref('')
 const syncForm = ref<S3SyncConfig>({
     endpoint: '',
     region: 'us-east-1',
@@ -82,7 +81,7 @@ async function refreshState (): Promise<void> {
         }
         syncStatus.value = await getS3SyncStatus()
     } catch (error) {
-        syncError.value = syncErrorMessage(error)
+        message.error(syncErrorMessage(error))
     }
 }
 
@@ -105,14 +104,12 @@ async function saveSyncConfig (): Promise<void> {
         return
     }
     syncBusy.value = true
-    syncError.value = ''
-    syncNotice.value = ''
     try {
         await setS3SyncConfig(syncForm.value)
-        syncNotice.value = t('settings.syncSaved')
+        message.success(t('settings.syncSaved'))
         await refreshState()
     } catch (error) {
-        syncError.value = syncErrorMessage(error)
+        message.error(syncErrorMessage(error))
     } finally {
         syncBusy.value = false
     }
@@ -128,13 +125,11 @@ async function runSyncTest (): Promise<void> {
         return
     }
     syncBusy.value = true
-    syncError.value = ''
-    syncNotice.value = ''
     try {
         await testS3SyncConnection(syncForm.value)
-        syncNotice.value = t('settings.syncTestOk')
+        message.success(t('settings.syncTestOk'))
     } catch (error) {
-        syncError.value = syncErrorMessage(error)
+        message.error(syncErrorMessage(error))
     } finally {
         syncBusy.value = false
     }
@@ -151,14 +146,12 @@ function clearSyncConfig (): void {
 
 async function doClearSyncConfig (): Promise<void> {
     syncBusy.value = true
-    syncError.value = ''
-    syncNotice.value = ''
     try {
         await clearS3SyncConfig()
-        syncNotice.value = t('settings.syncSaved')
+        message.success(t('settings.syncSaved'))
         await refreshState()
     } catch (error) {
-        syncError.value = syncErrorMessage(error)
+        message.error(syncErrorMessage(error))
     } finally {
         syncBusy.value = false
     }
@@ -167,10 +160,9 @@ async function doClearSyncConfig (): Promise<void> {
 /** 云端操作前置校验：未保存配置直接前端拦截 */
 function requireSyncConfigured (): boolean {
     if (!syncHasSecret.value) {
-        syncError.value = t('settings.syncErrNotConfigured')
+        message.error(t('settings.syncErrNotConfigured'))
         return false
     }
-    syncError.value = ''
     return true
 }
 
@@ -196,13 +188,12 @@ async function startSyncPull (): Promise<void> {
         return
     }
     syncBusy.value = true
-    syncError.value = ''
     try {
         const items = (await listRemoteSnapshots())
             .sort((a, b) => b.lastModified.localeCompare(a.lastModified))
         pullDialog.value = { items }
     } catch (error) {
-        syncError.value = syncErrorMessage(error)
+        message.error(syncErrorMessage(error))
     } finally {
         syncBusy.value = false
     }
@@ -362,8 +353,6 @@ function formatBytes (size: number): string {
                 </div>
             </div>
         </div>
-        <p v-if="syncNotice" class="hint">{{ syncNotice }}</p>
-        <p v-if="syncError" class="import-error">{{ syncError }}</p>
         <p class="hint">{{ t('settings.syncHint') }}</p>
     </div>
 

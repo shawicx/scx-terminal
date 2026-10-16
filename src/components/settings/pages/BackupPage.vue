@@ -10,6 +10,7 @@ import Button from '@/components/ui/Button.vue'
 import Dialog from '@/components/ui/Dialog.vue'
 import Input from '@/components/ui/Input.vue'
 import Label from '@/components/ui/Label.vue'
+import { message } from '@/components/ui/message'
 import BackupSyncSection from '@/components/settings/pages/BackupSyncSection.vue'
 import { exportConfigBackup, importConfigBackup } from '@/services/configBackup'
 import {
@@ -28,8 +29,6 @@ const syncSection = ref<InstanceType<typeof BackupSyncSection> | null>(null)
 // ---- 配置备份（本地导出/导入）----
 
 const backupBusy = ref(false)
-const backupError = ref('')
-const backupNotice = ref('')
 const passphraseDialog = ref<null | {
     mode: 'export' | 'import'
     kind: 'local' | 's3'
@@ -67,8 +66,6 @@ async function startBackupExport (): Promise<void> {
     if (typeof path !== 'string') {
         return
     }
-    backupError.value = ''
-    backupNotice.value = ''
     passphraseDialog.value = { mode: 'export', kind: 'local', path, passphrase: '', confirm: '' }
 }
 
@@ -86,8 +83,6 @@ async function startBackupImport (): Promise<void> {
     if (typeof picked !== 'string') {
         return
     }
-    backupError.value = ''
-    backupNotice.value = ''
     confirmAction(t('settings.backupImportConfirmBody'), () => {
         passphraseDialog.value = { mode: 'import', kind: 'local', path: picked, passphrase: '', confirm: '' }
     })
@@ -139,34 +134,33 @@ async function commitBackupPassphrase (): Promise<void> {
         return
     }
     backupBusy.value = true
-    backupError.value = ''
     try {
         if (dialog.kind === 'local' && dialog.mode === 'export') {
             const summary = await exportConfigBackup(dialog.path ?? '', dialog.passphrase)
-            backupNotice.value = t('settings.backupExportDone', {
+            message.success(t('settings.backupExportDone', {
                 p: summary.profileCount,
                 q: summary.quickCommandCount,
                 k: summary.sshKeyCount,
-            })
+            }))
         } else if (dialog.kind === 'local') {
             await importConfigBackup(dialog.path ?? '', dialog.passphrase)
             await config.load()
-            backupNotice.value = t('settings.backupImportDone')
+            message.success(t('settings.backupImportDone'))
         } else if (dialog.mode === 'export') {
             const result = await pushBackupToCloud(dialog.passphrase)
-            backupNotice.value = t('settings.syncPushDone', { size: formatBytes(result.size) })
+            message.success(t('settings.syncPushDone', { size: formatBytes(result.size) }))
             void syncSection.value?.refreshState()
         } else {
             await pullRemoteSnapshot(dialog.key ?? '', dialog.passphrase)
             await config.load()
-            backupNotice.value = t('settings.backupImportDone')
+            message.success(t('settings.backupImportDone'))
             void syncSection.value?.refreshState()
         }
         passphraseDialog.value = null
     } catch (error) {
-        backupError.value = dialog.kind === 's3'
+        message.error(dialog.kind === 's3'
             ? syncSection.value?.syncErrorMessage(error) ?? String(error)
-            : String(error instanceof Error ? error.message : error)
+            : String(error instanceof Error ? error.message : error))
     } finally {
         backupBusy.value = false
     }
@@ -185,8 +179,6 @@ function formatBytes (size: number): string {
 
 /** 云端恢复选定快照：打开口令弹窗（import 模式，携带对象键） */
 function onSyncPullRequest (item: RemoteSnapshot): void {
-    backupError.value = ''
-    backupNotice.value = ''
     passphraseDialog.value = { mode: 'import', kind: 's3', key: item.key, passphrase: '', confirm: '' }
 }
 </script>
@@ -212,14 +204,12 @@ function onSyncPullRequest (item: RemoteSnapshot): void {
                 </Button>
             </div>
         </div>
-        <p v-if="backupNotice" class="hint">{{ backupNotice }}</p>
-        <p v-if="backupError" class="import-error">{{ backupError }}</p>
         <p class="hint">{{ t('settings.backupSecurityHint') }}</p>
     </div>
 
     <BackupSyncSection
         ref="syncSection"
-        @request-push="backupError = ''; backupNotice = ''; passphraseDialog = { mode: 'export', kind: 's3', passphrase: '', confirm: '' }"
+        @request-push="passphraseDialog = { mode: 'export', kind: 's3', passphrase: '', confirm: '' }"
         @request-pull="onSyncPullRequest"
     />
 

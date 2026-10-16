@@ -284,7 +284,7 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
 
 .update-notes {
     margin: 0;
-    padding: 8px;
+    padding: 10px 12px;
     max-height: 200px;
     overflow: auto;
     font-size: 12px;

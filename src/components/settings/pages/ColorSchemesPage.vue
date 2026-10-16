@@ -9,6 +9,7 @@ import { Plus, Trash2, Upload } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import Label from '@/components/ui/Label.vue'
+import { message } from '@/components/ui/message'
 import ColorSchemePicker from '@/components/settings/ColorSchemePicker.vue'
 import { useConfigStore } from '@/stores/config'
 import { defaultDarkColorScheme, type TerminalColorScheme } from '@/lib/colorSchemes'
@@ -24,7 +25,6 @@ type SchemeColorKey = 'foreground' | 'background' | 'cursor' | 'cursorAccent' | 
 const customSchemes = computed(() => store.colorSchemes)
 const selectedCustomIndex = ref(0)
 const selectedCustom = computed<TerminalColorScheme | null>(() => customSchemes.value[selectedCustomIndex.value] ?? null)
-const importError = ref('')
 
 const specialSlots = computed<{ key: SchemeColorKey, label: string }[]>(() => [
     { key: 'foreground', label: t('settings.schemeColorForeground') },
@@ -163,11 +163,10 @@ function onImportFile (event: Event): void {
     void file.text().then(text => {
         const name = file.name.replace(/\.itermcolors$/i, '')
         const scheme = parseItermColorsFile(text, name)
-        importError.value = ''
         store.colorSchemes.push(scheme)
         selectedCustomIndex.value = store.colorSchemes.length - 1
     }).catch(() => {
-        importError.value = t('settings.importFailed')
+        message.error(t('settings.importFailed'))
     })
 }
 </script>
@@ -193,7 +192,6 @@ function onImportFile (event: Event): void {
                 </label>
             </div>
         </div>
-        <p v-if="importError" class="import-error">{{ importError }}</p>
         <p v-if="customSchemes.length === 0" class="hint">{{ t('settings.customSchemeEmpty') }}</p>
         <template v-else>
             <div class="custom-scheme-chips">

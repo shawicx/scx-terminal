@@ -11,6 +11,7 @@ import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import Label from '@/components/ui/Label.vue'
 import Select from '@/components/ui/Select.vue'
+import { message } from '@/components/ui/message'
 import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
 import type { Event as TauriEvent, UnlistenFn } from '@tauri-apps/api/event'
 import type { SshKeyMeta, SshKeyInspection } from '@/services/secrets'
@@ -66,7 +67,6 @@ const keyAlgorithmOptions = computed(() => [
 const keyGenAlgorithm = ref<'ed25519' | 'rsa'>('ed25519')
 const keyGenName = ref('')
 const keyGenPassphrase = ref('')
-const keysError = ref('')
 
 /**
  * @description 应用内生成密钥对（ed25519/rsa，可选口令加密）并刷新列表
@@ -76,7 +76,6 @@ const keysError = ref('')
  *
  */
 async function generateKeyEntry (): Promise<void> {
-    keysError.value = ''
     const name = keyGenName.value.trim() || `key-${nanoid(4)}`
     try {
         await generateSshKey({
@@ -90,7 +89,7 @@ async function generateKeyEntry (): Promise<void> {
         keyGenPassphrase.value = ''
         refreshSshKeys()
     } catch (error) {
-        keysError.value = String(error instanceof Error ? error.message : error)
+        message.error(String(error instanceof Error ? error.message : error))
     }
 }
 
@@ -165,7 +164,6 @@ function scheduleKeyInspect (): void {
  *
  */
 async function saveKeyEntry (): Promise<void> {
-    keysError.value = ''
     if (!keyAddPrivatePem.value.trim() && !keyDropFileName.value) {
         keyAddError.value = t('settings.keychainAddEmpty')
         return
@@ -238,7 +236,6 @@ function onDragDropEvent (event: TauriEvent<DragDropEvent>): void {
  *
  */
 async function deleteKeyEntry (key: SshKeyMeta): Promise<void> {
-    keysError.value = ''
     try {
         await deleteSshKey(key.id)
         for (const profile of store.profiles) {
@@ -248,7 +245,7 @@ async function deleteKeyEntry (key: SshKeyMeta): Promise<void> {
         }
         refreshSshKeys()
     } catch (error) {
-        keysError.value = String(error instanceof Error ? error.message : error)
+        message.error(String(error instanceof Error ? error.message : error))
     }
 }
 
@@ -283,7 +280,6 @@ function confirmDeleteKey (key: SshKeyMeta): void {
     <div class="settings-page">
     <h2>{{ t('settings.keychainPage') }}</h2>
     <p class="hint">{{ t('settings.keychainHint') }}</p>
-    <p v-if="keysError" class="import-error">{{ keysError }}</p>
     <div class="master-detail">
         <div class="detail-list">
             <p v-if="sshKeys.length === 0" class="hint">{{ t('settings.keychainEmpty') }}</p>

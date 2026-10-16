@@ -131,7 +131,8 @@ export default { name: 'ProfileForwardingsCard' }
 
 <style scoped>
 .forwardings-hint {
-    margin: 0 0 8px;
+    margin: 0;
+    padding: 11px 16px 8px;
     font-size: 12px;
     color: var(--color-muted-foreground);
 }
@@ -140,7 +141,7 @@ export default { name: 'ProfileForwardingsCard' }
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 6px 0;
+    padding: 6px 16px;
     border-top: 1px solid var(--color-border);
 }
 
@@ -197,7 +198,7 @@ export default { name: 'ProfileForwardingsCard' }
 /* 行内自动启动开关与编辑/删除按钮：与设置页 settings-card-row 的动作密度一致 */
 
 .forwarding-add {
-    margin-top: 8px;
+    margin: 8px 16px 12px;
 }
 
 .confirm-text {
