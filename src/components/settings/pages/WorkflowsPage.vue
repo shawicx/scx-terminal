@@ -693,6 +693,7 @@ async function importWorkflows (): Promise<void> {
         :initial="formInitial"
         :is-new="formIsNew"
         :quick-commands="store.quickCommands"
+        :quick-command-groups="store.quickCommandGroups"
         :groups="displayGroups"
         @submit="onFormSubmit"
     />

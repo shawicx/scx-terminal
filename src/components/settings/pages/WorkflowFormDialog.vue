@@ -16,7 +16,7 @@ import Label from '@/components/ui/Label.vue'
 import Select from '@/components/ui/Select.vue'
 import Switch from '@/components/ui/Switch.vue'
 import type { QuickCommand, Workflow, WorkflowStep } from '@/stores/config'
-import { previewQuickCommand } from '@/lib/quickCommands'
+import { groupQuickCommandSections, previewQuickCommand } from '@/lib/quickCommands'
 import {
     buildWorkflowStep, collectWorkflowParams, stepCommandTemplate, validateWorkflowV2,
 } from '@/lib/workflows'
@@ -33,6 +33,8 @@ const props = defineProps<{
     isNew?: boolean
     /** 现有快捷命令（步骤引用下拉与预览解析） */
     quickCommands: QuickCommand[]
+    /** 快捷命令分组（步骤引用下拉的分组名前缀与按名排序；缺省 = 全部视为未分组） */
+    quickCommandGroups?: Array<{ id: string, name: string }>
     /** 展示分组合集（分组下拉选项：用户自建 + 内置虚拟；缺省 = 无分组可选） */
     groups?: Array<{ id: string, name: string }>
 }>()
@@ -97,12 +99,24 @@ const executionModel = computed({
     },
 })
 
-/** 步骤引用下拉：现有快捷命令 */
-const quickCommandOptions = computed(() =>
-    quickCommands.value.map(command => ({
-        value: command.id,
-        label: command.name || previewQuickCommand(command.command),
-    })))
+/**
+ * @description 步骤引用下拉选项：未分组置顶（无前缀），其余按分组名 localeCompare
+ *              排序、选项名前缀「分组名 / 」；组内维持 store 顺序（与设置页/面板一致）。
+ *              悬空分组引用归入未分组，保证任何命令都可选
+ * @returns Array<{ value, label }>
+ *
+ */
+const quickCommandOptions = computed(() => {
+    const groupsByName = [...(props.quickCommandGroups ?? [])].sort((a, b) => a.name.localeCompare(b.name))
+    const knownGroupIds = new Set(groupsByName.map(group => group.id))
+    const normalized = quickCommands.value.map(command =>
+        command.groupId && knownGroupIds.has(command.groupId) ? command : { ...command, groupId: undefined })
+    const labelOf = (command: QuickCommand) => command.name || previewQuickCommand(command.command)
+    return groupQuickCommandSections(normalized, groupsByName).flatMap(section => {
+        const prefix = section.title === null ? '' : `${section.title} / `
+        return section.items.map(command => ({ value: command.id, label: prefix + labelOf(command) }))
+    })
+})
 
 /** 分组下拉选项：未分组 + 展示分组合集（用户自建 + 内置虚拟） */
 const groupSelectOptions = computed(() => [
