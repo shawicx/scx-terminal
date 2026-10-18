@@ -14,14 +14,16 @@
     user-select: none;
 }
 
-/* 滚动区包装：top 模式下作为 title-bar 的 flex 子项参与布局（原 tabs-region 的 max-width 职责上移至此）；
+/* 滚动区包装：top 模式下作为 title-bar 的 flex 子项参与布局；
+   弹性吃满红绿灯与右侧操作钮之间的可用空间（定宽上限会让标签区在窗口还有
+   富余时提前进入按比例收缩，激活标签的 200px 基准被压掉）；
    相对定位用于承载两侧渐隐遮罩 */
 .tabs-region-wrap {
     position: relative;
     display: flex;
     align-items: flex-end;
+    flex: 1 1 auto;
     min-width: 0;
-    max-width: 70%;
 }
 
 /* 两侧渐隐遮罩：溢出方向提示「旁边还有被裁切的标签」；不拦截鼠标（title hover 仍可用） */
@@ -102,11 +104,14 @@
     transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease, flex-basis 0.25s ease;
 }
 
-/* 激活标签与内容区连通：背景取内容区底色，侧/顶描边 + 下探 1px 盖住标题栏底边线；加宽基准 200px 突出当前标签 */
+/* 激活标签与内容区连通：背景取内容区底色，侧/顶描边 + 下探 1px 盖住标题栏底边线；加宽基准 200px 突出当前标签；
+   收缩下限也同步抬高（150 = 120 × 基准比 200/160）：触底压缩时激活标签仍保持
+   明显更宽，不会与其他标签一起齐平到 120 */
 .tab-header.active {
     height: 33px;
     margin-bottom: -1px;
     flex-basis: 200px;
+    min-width: 150px;
     background: var(--color-background);
     color: var(--color-foreground);
     border-color: var(--color-border);
