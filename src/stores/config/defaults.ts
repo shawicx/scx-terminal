@@ -339,7 +339,8 @@ export function defaultHotkeys (): HotkeysConfig {
         'pane-forward': [['Ctrl-Alt-Right']],
         'pane-backward': [['Ctrl-Alt-Left']],
         'copy': [['Ctrl-Shift-C']],
-        'paste': [['Ctrl-Shift-V']],
+        // Shift-Insert 是 Windows/Linux 终端的惯用粘贴键，xterm 键盘门函数已为应用层粘贴保留它
+        'paste': [['Ctrl-Shift-V'], ['Shift-Insert']],
         'clear': [['Ctrl-Shift-K']],
         'find': [['Ctrl-Shift-F']],
         'suggestions-trigger': [['Ctrl-Space']],

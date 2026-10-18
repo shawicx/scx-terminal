@@ -72,20 +72,28 @@ export interface KeyGateDeps {
 }
 
 /**
- * @description xterm attachCustomKeyEventHandler 的门函数：粘贴归应用层、Meta+方向键
- *              放行 macOS 桌面、keypress 不进热键状态机（WKWebView 会补发 meta keypress，
- *              二次喂入会重复匹配 ⌘T）、Linux IME 标点键放行
+ * @description xterm attachCustomKeyEventHandler 的门函数：粘贴归应用层（喂热键机后屏蔽
+ *              xterm 与浏览器原生粘贴）、Meta+方向键放行 macOS 桌面、keypress 不进热键
+ *              状态机（WKWebView 会补发 meta keypress，二次喂入会重复匹配 ⌘T）、
+ *              Linux IME 标点键放行
  * @param deps 平台与底层键盘处理链
  * @returns (event: KeyboardEvent) => boolean
  *
  */
 export function createKeyGate (deps: KeyGateDeps) {
     return (event: KeyboardEvent): boolean => {
-        // let the app-level paste handling own Cmd/Ctrl+V
+        // 粘贴键归应用层（paste 热键 → 读剪贴板 → 写会话）：返回 false 让 xterm 不处理，
+        // preventDefault 压掉浏览器原生 paste 事件（否则 xterm 的 paste 监听会再写一次
+        // 形成双粘贴）。但屏蔽前必须先喂热键状态机——App 的 document 级监听会跳过
+        // xterm 的 textarea，本 handler 是终端内按键进入状态机的唯一入口，先吞不喂会
+        // 让 paste 热键永远匹配不到（⌘V 整体失效）。keypress 不喂，原因见下方说明
         if (
             event.getModifierState('Meta') && event.key.toLowerCase() === 'v' ||
             event.key === 'Insert' && event.shiftKey
         ) {
+            if (event.type !== 'keypress') {
+                deps.handle(event.type === 'keyup' ? 'keyup' : 'keydown', event)
+            }
             event.preventDefault()
             return false
         }
