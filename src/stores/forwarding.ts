@@ -1,17 +1,14 @@
 /**
- * @description 端口转发运行态聚合 store：`forward_list_all` 全量拉取 + 按连接订阅
- *              `forward:{sshId}:changed` 事件（连接集合来自 sshConnections 注册表，
- *              registryVersion 变化时同步增删订阅）。隧道管理器标签页与 TitleBar
- *              隧道指示器的数据源。
- *              注意：registryVersion 的 watch 在模块作用域同步创建（WKWebView 下
- *              await 之后创建的 watch 不触发）。
+ * @description 端口转发运行态聚合 store：订阅 Rust 全局 `forwards-changed` 事件（负载为全部
+ *              连接的完整状态快照，整体替换）+ 初始化时 `forward_list_all` 拉取基线。
+ *              订阅必须不绑定连接集合：会话断开时后端级联清理的终态空快照与前端连接注销
+ *              同一时刻到达，按连接增删订阅会在退订瞬间漏掉该快照而残留无法停止的条目。
+ *              隧道管理器标签页与 TitleBar 隧道指示器的数据源。
  */
-import { watch } from 'vue'
 import { defineStore } from 'pinia'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { listen } from '@tauri-apps/api/event'
 import type { ForwardState } from '@/lib/portForwarding'
 import { listAllForwards } from '@/services/forward'
-import { knownSshIds, registryVersion } from '@/services/sshConnections'
 
 export const useForwardingStore = defineStore('forwarding', {
     state: () => ({
@@ -30,7 +27,7 @@ export const useForwardingStore = defineStore('forwarding', {
     },
     actions: {
         /**
-         * @description 初始化：全量拉取 + 订阅同步（幂等，App 挂载时调用）
+         * @description 初始化：订阅全局事件并拉取一次全量（幂等，App 挂载时调用）
          * @returns Promise<void>
          *
          * @example await useForwardingStore().init()
@@ -41,54 +38,32 @@ export const useForwardingStore = defineStore('forwarding', {
                 return
             }
             this.initialized = true
+            await listen<ForwardState[]>('forwards-changed', event => {
+                this.apply(event.payload)
+            })
             await this.refreshAll()
-            await syncSubscriptions(this)
         },
         /**
-         * @description 全量拉取转发运行态（任一连接的 changed 事件后调用）
+         * @description 应用一份全量快照（整体替换并递增 version）
+         * @param states 全部连接的转发运行态
+         * @returns void
+         *
+         */
+        apply (states: ForwardState[]): void {
+            this.states = states
+            this.version += 1
+        },
+        /**
+         * @description 全量拉取转发运行态（初始化基线；失败保留上次快照）
          * @returns Promise<void>
          *
          */
         async refreshAll (): Promise<void> {
             try {
-                this.states = await listAllForwards()
-                this.version += 1
+                this.apply(await listAllForwards())
             } catch {
                 // 连接层错误不打断 UI：保留上次快照
             }
         },
     },
-})
-
-/** 连接级事件订阅登记（sshId → unlisten） */
-const subscriptions = new Map<string, UnlistenFn>()
-
-/**
- * @description 按注册表连接集合增删 changed 事件订阅；事件到达后全量刷新
- * @param store 转发 store
- * @returns Promise<void>
- *
- */
-async function syncSubscriptions (store: ReturnType<typeof useForwardingStore>): Promise<void> {
-    const ids = knownSshIds()
-    for (const sshId of ids) {
-        if (subscriptions.has(sshId)) {
-            continue
-        }
-        const unlisten = await listen(`forward:${sshId}:changed`, () => {
-            void store.refreshAll()
-        })
-        subscriptions.set(sshId, unlisten)
-    }
-    for (const [sshId, unlisten] of subscriptions) {
-        if (!ids.includes(sshId)) {
-            unlisten()
-            subscriptions.delete(sshId)
-        }
-    }
-}
-
-// 连接集合变化（窗格连接建立/断开、headless 建连/关闭）→ 同步订阅
-watch(registryVersion, () => {
-    void syncSubscriptions(useForwardingStore())
 })

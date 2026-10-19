@@ -2,7 +2,8 @@
 //!              远程转发（-R，tcpip_forward 请求 server 监听 → 入站 channel 回连本地目标）、
 //!              动态转发（-D，fast-socks5 no-auth CONNECT → direct-tcpip channel）。
 //!              生命周期与 SFTP 一致：转发绑定 ssh_id，SSH 会话断开后由 exit 路径级联停止。
-//!              事件约定 `forward:{sshId}:changed`（负载为该连接完整状态快照）。
+//!              事件约定：按连接 `forward:{sshId}:changed`（负载为该连接完整状态快照，窗格面板消费）
+//!              + 全局 `forwards-changed`（负载为全部连接完整快照，聚合 store 消费，不随连接集合增删）。
 //!              数据面循环（监听/SOCKS5/入站监督/搬运）在 loops 子模块。
 
 mod loops;
@@ -275,6 +276,14 @@ impl ForwardManager {
         states.sort_by(|a, b| a.id.cmp(&b.id));
         states
     }
+
+    /// 全部连接的转发状态快照（forward_list_all / 全局 changed 事件用，按 id 排序）
+    fn states_all(&self) -> Vec<ForwardState> {
+        let forwards = self.forwards.lock().unwrap();
+        let mut states: Vec<ForwardState> = forwards.values().map(|handle| handle.snapshot()).collect();
+        states.sort_by(|a, b| a.id.cmp(&b.id));
+        states
+    }
 }
 
 /// 发送关停信号并 abort 全部受管任务（任务丢弃即 channel/监听关闭、端口释放）
@@ -286,13 +295,16 @@ fn shutdown_handle(handle: &ForwardHandle) {
     }
 }
 
-/// 广播该连接的完整转发状态快照（ForwardManager 经 manage 注册后可从 AppHandle 取回）
+/// 广播转发状态变化：按连接 `forward:{sshId}:changed`（该连接快照）+ 全局 `forwards-changed`
+/// （全部连接快照）。聚合侧必须走全局事件：会话断开的终态空快照与前端连接注销同时到达，
+/// 按连接订阅会在退订瞬间漏掉该快照，残留无法停止的条目。
 fn emit_changed(app: &AppHandle, ssh_id: &str) {
     if let Some(manager) = app.try_state::<ForwardManager>() {
         let _ = app.emit(
             &format!("forward:{ssh_id}:changed"),
             manager.states_for_ssh(ssh_id),
         );
+        let _ = app.emit("forwards-changed", manager.states_all());
     }
 }
 
@@ -477,8 +489,5 @@ pub fn forward_list(forward_manager: State<'_, ForwardManager>, ssh_id: String) 
 /// `invoke('forward_list_all')`
 #[tauri::command]
 pub fn forward_list_all(forward_manager: State<'_, ForwardManager>) -> Vec<ForwardState> {
-    let forwards = forward_manager.forwards.lock().unwrap();
-    let mut states: Vec<ForwardState> = forwards.values().map(|handle| handle.snapshot()).collect();
-    states.sort_by(|a, b| a.id.cmp(&b.id));
-    states
+    forward_manager.states_all()
 }
