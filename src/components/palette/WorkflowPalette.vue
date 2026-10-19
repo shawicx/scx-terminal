@@ -78,19 +78,8 @@ interface VisibleItem {
 /** 分组分区条目：可见项 + 过滤后扁平列表中的索引（键盘选中与高亮定位用） */
 type SectionItem = VisibleItem & { flatIndex: number }
 
-/** 分组分区（未分组在前，其余按展示分组顺序）：带扁平索引导航 */
-const visibleSections = computed<{ title: string | null, items: SectionItem[] }[]>(() => {
-    let flat = 0
-    return groupWorkflowSections(visibleItems.value, workflowDisplayGroups(config.store))
-        .filter(section => section.items.length > 0)
-        .map(section => ({
-            title: section.title,
-            items: section.items.map(item => ({ ...item, flatIndex: flat++ })),
-        }))
-})
-
-/** 按搜索词过滤工作流列表（名称/预览/描述模糊匹配；仅保留有可执行步骤的） */
-const visibleItems = computed<VisibleItem[]>(() =>
+/** 按搜索词过滤工作流列表（名称/预览/描述模糊匹配；仅保留有可执行步骤的）；原始顺序，仅作分区输入 */
+const filteredItems = computed<VisibleItem[]>(() =>
     visibleWorkflows(config.store)
         .filter(workflow => workflow.steps.length > 0)
         .filter(workflow =>
@@ -104,6 +93,20 @@ const visibleItems = computed<VisibleItem[]>(() =>
             description: workflow.description ?? '',
             groupId: workflow.groupId ?? '',
         })))
+
+/** 分组分区（未分组在前，其余按展示分组顺序）：带扁平索引导航 */
+const visibleSections = computed<{ title: string | null, items: SectionItem[] }[]>(() => {
+    let flat = 0
+    return groupWorkflowSections(filteredItems.value, workflowDisplayGroups(config.store))
+        .filter(section => section.items.length > 0)
+        .map(section => ({
+            title: section.title,
+            items: section.items.map(item => ({ ...item, flatIndex: flat++ })),
+        }))
+})
+
+/** 过滤后扁平列表（分区展示顺序）：selectedIndex / flatIndex 唯一的索引空间，pick 与键盘导航按它取项 */
+const visibleItems = computed<SectionItem[]>(() => visibleSections.value.flatMap(section => section.items))
 
 watch(visibleItems, () => {
     selectedIndex.value = 0
