@@ -102,6 +102,7 @@ pub fn run() {
             fsutil::fs_write_text_file,
             fsutil::fs_browse_dir,
             fsutil::fs_home_dir,
+            fsutil::clear_app_xattr,
             background::background_image_set,
             background::background_image_load,
             history::history_record,

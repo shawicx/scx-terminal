@@ -24,15 +24,18 @@ export async function checkForUpdate (): Promise<Update | null> {
 }
 
 /**
- * @description 下载并安装更新，完成后重启应用；下载失败时抛出且不重启
+ * @description 下载并安装更新，完成后重启应用；下载失败时抛出且不重启。
+ *              安装成功后、重启前调用 beforeRelaunch（更新器收尾，如清除应用
+ *              扩展属性），回调失败只记日志、不阻断重启
  * @param update checkForUpdate 返回的待安装更新
  * @param onProgress 进度回调（可选）
+ * @param beforeRelaunch 安装完成后的收尾回调（可选）
  * @returns Promise<void>
  *
- * @example await installUpdate(update, p => console.log(p.percent))
+ * @example await installUpdate(update, p => console.log(p.percent), clearXattr)
  *
  */
-export async function installUpdate (update: Update, onProgress?: (progress: UpdateProgress) => void): Promise<void> {
+export async function installUpdate (update: Update, onProgress?: (progress: UpdateProgress) => void, beforeRelaunch?: () => Promise<void>): Promise<void> {
     let total: number | null = null
     let received = 0
     await update.downloadAndInstall(event => {
@@ -49,5 +52,12 @@ export async function installUpdate (update: Update, onProgress?: (progress: Upd
         const percent = total && total > 0 ? Math.floor((received / total) * 100) : null
         onProgress?.({ total, received, percent })
     })
+    if (beforeRelaunch) {
+        try {
+            await beforeRelaunch()
+        } catch (error) {
+            console.error('[updater] before-relaunch hook failed:', error)
+        }
+    }
     await relaunch()
 }

@@ -1,6 +1,7 @@
 <!--
   @description 设置·关于页：应用图标/版本展示、配置与日志目录打开、调试开关、
-              手动检查更新（下载进度 + 安装确认弹窗，成功后 relaunch）。
+              手动检查更新（下载进度 + 安装确认弹窗，成功后 relaunch；支持
+              「下载后自动安装」跳过弹窗与「清除扩展属性」安装后收尾）。
 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, shallowRef } from 'vue'
@@ -100,7 +101,9 @@ function revertUpdaterButton () {
 }
 
 /**
- * @description 手动检查更新：无更新/失败以按钮文案反馈 3s；有更新弹确认对话框
+ * @description 手动检查更新：无更新/失败以按钮文案反馈 3s；有更新时按
+ *              advanced.updateAutoInstall 分流——开启则跳过确认弹窗直接下载安装，
+ *              关闭则弹确认对话框
  * @returns Promise<void>
  *
  * @example await checkUpdates()
@@ -114,8 +117,12 @@ async function checkUpdates (): Promise<void> {
     try {
         const update = await checkForUpdate()
         if (update) {
-            pendingUpdate.value = update
-            updaterPhase.value = 'idle'
+            if (store.advanced.updateAutoInstall) {
+                await runInstall(update)
+            } else {
+                pendingUpdate.value = update
+                updaterPhase.value = 'idle'
+            }
         } else {
             updaterPhase.value = 'uptodate'
             revertUpdaterButton()
@@ -128,8 +135,37 @@ async function checkUpdates (): Promise<void> {
 }
 
 /**
- * @description 确认安装：关闭对话框，按钮转为下载进度；成功后 relaunch 重启，
- *              失败停在「下载失败」3s
+ * @description 执行下载安装：按钮转为下载进度；成功后按 advanced.updateClearXattr
+ *              清除应用扩展属性（由 updater 服务 relaunch 重启），失败停在「下载失败」3s
+ * @param update checkForUpdate 返回的待安装更新
+ * @returns Promise<void>
+ *
+ * @example await runInstall(update)
+ *
+ */
+async function runInstall (update: Update): Promise<void> {
+    updaterPhase.value = 'downloading'
+    updateProgress.value = null
+    try {
+        await installUpdate(
+            update,
+            progress => (updateProgress.value = progress),
+            async () => {
+                if (!store.advanced.updateClearXattr) {
+                    return
+                }
+                await invoke('clear_app_xattr')
+            }
+        )
+    } catch (error) {
+        console.error('[settings] update download failed:', error)
+        updaterPhase.value = 'downloadFailed'
+        revertUpdaterButton()
+    }
+}
+
+/**
+ * @description 确认安装：关闭对话框并转入下载安装流程
  * @returns Promise<void>
  *
  * @example await confirmUpdate()
@@ -141,15 +177,7 @@ async function confirmUpdate (): Promise<void> {
         return
     }
     pendingUpdate.value = null
-    updaterPhase.value = 'downloading'
-    updateProgress.value = null
-    try {
-        await installUpdate(update, progress => (updateProgress.value = progress))
-    } catch (error) {
-        console.error('[settings] update download failed:', error)
-        updaterPhase.value = 'downloadFailed'
-        revertUpdaterButton()
-    }
+    await runInstall(update)
 }
 
 onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
@@ -196,6 +224,15 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                     {{ updaterButtonLabel }}
                 </Button>
             </div>
+            <div class="settings-card-row">
+                <Label>{{ t('settings.updateAutoInstall') }}</Label>
+                <Switch v-model="store.advanced.updateAutoInstall" />
+            </div>
+            <div class="settings-card-row">
+                <Label>{{ t('settings.updateClearXattr') }}</Label>
+                <Switch v-model="store.advanced.updateClearXattr" />
+            </div>
+            <p class="hint">{{ t('settings.updateClearXattrHint') }}</p>
         </div>
     </div>
 

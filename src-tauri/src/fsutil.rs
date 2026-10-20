@@ -1,5 +1,6 @@
-//! @description 文件系统工具命令：路径补全的列目录与 shell history 文件读取，
-//!              以及 SFTP 本地栏的目录浏览（含大小/修改时间、隐藏文件开关、错误显式传播）。
+//! @description 文件系统工具命令：路径补全的列目录与 shell history 文件读取、
+//!              SFTP 本地栏的目录浏览（含大小/修改时间、隐藏文件开关、错误显式传播），
+//!              以及 macOS 应用更新后清除 .app 扩展属性（移除隔离标记，避免「已损坏」提示）。
 //!              补全命令做 `~` → $HOME 展开（前端不知道 HOME，统一传 ~ 相对路径）；
 //!              列目录错误（权限/不存在）返回空数组静默降级，读取文件不存在返回 None，
 //!              浏览命令错误显式返回 Err（UI 呈现 banner）。
@@ -167,6 +168,81 @@ pub fn fs_home_dir () -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
 }
 
+/// 从可执行文件路径向上找最近的 .app bundle 根（仅 macOS；找不到返回 None，
+/// dev / 裸二进制运行时不存在 bundle）
+///
+/// # Arguments
+///
+/// * `exe` - 当前可执行文件绝对路径（…/Foo.app/Contents/MacOS/Foo）
+#[cfg(target_os = "macos")]
+fn nearest_app_bundle (exe: &std::path::Path) -> Option<&std::path::Path> {
+    let mut dir = exe.parent();
+    while let Some(current) = dir {
+        if current.extension().map_or(false, |ext| ext == "app") {
+            return Some(current);
+        }
+        dir = current.parent();
+    }
+    None
+}
+
+/// 递归清除路径的全部扩展属性（/usr/bin/xattr -cr；绝对路径调用，不依赖 GUI 进程的 PATH）
+///
+/// # Arguments
+///
+/// * `path` - 目标文件或目录（.app bundle 根）
+///
+/// # Returns
+///
+/// Result<(), String>（xattr 不存在/执行失败返回错误信息）
+#[cfg(target_os = "macos")]
+fn clear_xattr_recursive (path: &std::path::Path) -> Result<(), String> {
+    let output = std::process::Command::new("/usr/bin/xattr")
+        .arg("-cr")
+        .arg(path)
+        .output()
+        .map_err(|e| format!("spawn xattr failed: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "xattr -cr {} failed: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
+/// 清除当前应用扩展属性（内部实现，命令函数转发）：bundle 根不可得时回退对
+/// 可执行文件自身清除；非 macOS 平台为 no-op
+#[cfg(target_os = "macos")]
+fn clear_app_xattr_inner () -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| format!("resolve current exe failed: {e}"))?;
+    clear_xattr_recursive(nearest_app_bundle(&exe).unwrap_or(&exe))
+}
+
+/// 清除当前应用扩展属性（内部实现，命令函数转发）：非 macOS 无扩展属性语义，恒 Ok
+#[cfg(not(target_os = "macos"))]
+fn clear_app_xattr_inner () -> Result<(), String> {
+    Ok(())
+}
+
+/// 清除当前应用扩展属性：更新安装后、relaunch 前由前端调用，移除 bundle 上
+/// com.apple.quarantine 等隔离标记，避免未公证应用被 Gatekeeper 判定「已损坏」；
+/// 非 macOS 平台为 no-op
+///
+/// # Returns
+///
+/// Result<(), String>（可执行文件路径不可得或 xattr 失败返回错误信息；调用方
+/// 收到错误时只记日志、不阻断重启）
+///
+/// # Examples
+///
+/// `invoke('clear_app_xattr')`
+#[tauri::command]
+pub fn clear_app_xattr () -> Result<(), String> {
+    clear_app_xattr_inner()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,5 +339,39 @@ mod tests {
     #[test]
     fn browse_dir_missing_path_propagates_error () {
         assert!(fs_browse_dir_inner("/nonexistent-scx-path-xyz".into(), false).is_err());
+    }
+
+    /// macOS：可执行文件路径向上定位最近的 .app bundle 根；裸二进制返回 None
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_nearest_app_bundle_resolves_bundle_root () {
+        let exe = Path::new("/Applications/scx-terminal.app/Contents/MacOS/scx-terminal");
+        assert_eq!(nearest_app_bundle(exe), Some(Path::new("/Applications/scx-terminal.app")));
+        // 嵌套场景取最内层 bundle
+        let nested = Path::new("/opt/Foo.app/Contents/Bars/Bar.app/Contents/MacOS/Bar");
+        assert_eq!(nearest_app_bundle(nested), Some(Path::new("/opt/Foo.app/Contents/Bars/Bar.app")));
+        assert_eq!(nearest_app_bundle(Path::new("/usr/local/bin/tool")), None);
+    }
+
+    /// macOS：写入 quarantine 后递归清除，属性读取由成功转为失败（已不存在）
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_clear_xattr_removes_quarantine () {
+        let file = std::env::temp_dir().join(format!("scx-xattr-test-{}", std::process::id()));
+        std::fs::write(&file, "x").unwrap();
+        let write = std::process::Command::new("/usr/bin/xattr")
+            .args(["-w", "com.apple.quarantine", "0081;60000000;updater;"])
+            .arg(&file)
+            .output()
+            .unwrap();
+        assert!(write.status.success(), "fixture xattr write failed");
+        clear_xattr_recursive(&file).unwrap();
+        let probe = std::process::Command::new("/usr/bin/xattr")
+            .args(["-p", "com.apple.quarantine"])
+            .arg(&file)
+            .output()
+            .unwrap();
+        assert!(!probe.status.success(), "quarantine should be removed");
+        let _ = std::fs::remove_file(&file);
     }
 }

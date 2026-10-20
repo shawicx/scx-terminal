@@ -229,10 +229,14 @@ export interface AppearanceConfig {
     bellNotifications: boolean
 }
 
-/** 高级配置：调试诊断等非视觉开关 */
+/** 高级配置：调试诊断、应用更新等非视觉开关 */
 export interface AdvancedConfig {
     /** 调试日志：开启后前后端诊断行写入 app-data/logs/scx-terminal.log，启动自动打开 DevTools */
     debugEnabled: boolean
+    /** 更新：检查到新版本时跳过确认弹窗，下载后自动安装并重启 */
+    updateAutoInstall: boolean
+    /** 更新：安装后清除应用扩展属性（quarantine），避免 macOS「已损坏」提示 */
+    updateClearXattr: boolean
 }
 
 /** 最近 SSH 连接记录（profileId → 最后一次连接的 epoch 毫秒；仅 SSH 档案记录） */

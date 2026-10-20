@@ -408,6 +408,9 @@ export const settings = {
         updateAvailableTitle: 'Update available',
         updateNotes: 'Release notes',
         updateInstall: 'Download & restart',
+        updateAutoInstall: 'Auto-install after download',
+        updateClearXattr: 'Clear extended attributes (xattr)',
+        updateClearXattrHint: 'Remove quarantine attributes after install to avoid the "damaged" warning',
         hotkeysHint: 'Click a field and press a new key combination to rebind',
     },
 }

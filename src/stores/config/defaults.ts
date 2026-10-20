@@ -52,6 +52,8 @@ export function defaultConfig (): ConfigStore {
         },
         advanced: {
             debugEnabled: false,
+            updateAutoInstall: false,
+            updateClearXattr: true,
         },
         recents: {} as RecentsConfig,
         monitor: { open: false, width: 320 },

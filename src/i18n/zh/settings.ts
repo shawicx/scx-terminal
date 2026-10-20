@@ -408,6 +408,9 @@ export const settings = {
         updateAvailableTitle: '发现新版本',
         updateNotes: '更新说明',
         updateInstall: '下载并重启',
+        updateAutoInstall: '下载后自动安装',
+        updateClearXattr: '清除扩展属性 (xattr)',
+        updateClearXattrHint: '安装后移除隔离属性，避免「已损坏」提示',
         hotkeysHint: '点击输入框并按下新的组合键即可修改绑定',
     },
 }
