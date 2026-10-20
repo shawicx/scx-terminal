@@ -205,7 +205,12 @@ pub fn run() {
             // the webview owns keyboard shortcuts (⌘T/⌘W/⌘C/⌘V are handled in-app),
             // so the macOS menu deliberately omits every item carrying those
             // accelerators; it still needs the app submenu for ⌘H/⌘Q to work
-            // (menu-less apps get no ⌘Q quit accelerator from the system)
+            // (menu-less apps get no ⌘Q quit accelerator from the system).
+            // The Edit submenu is the exception: WKWebView dispatches cut/copy/
+            // paste/selectAll on native inputs (settings forms) through the
+            // responder chain, which requires these menu items to exist —
+            // inside the terminal ⌘C/⌘V are preventDefaulted by the frontend
+            // hotkey layer first, so the menu accelerators never fire there
             #[cfg(target_os = "macos")]
             {
                 use tauri::menu::{MenuBuilder, PredefinedMenuItem, Submenu};
@@ -219,7 +224,21 @@ pub fn run() {
                     true,
                     &[&hide, &hide_others, &separator, &quit],
                 )?;
-                let menu = MenuBuilder::new(app).items(&[&app_submenu]).build()?;
+                let edit_submenu = Submenu::with_items(
+                    app,
+                    "Edit",
+                    true,
+                    &[
+                        &PredefinedMenuItem::undo(app, None)?,
+                        &PredefinedMenuItem::redo(app, None)?,
+                        &PredefinedMenuItem::separator(app)?,
+                        &PredefinedMenuItem::cut(app, None)?,
+                        &PredefinedMenuItem::copy(app, None)?,
+                        &PredefinedMenuItem::paste(app, None)?,
+                        &PredefinedMenuItem::select_all(app, None)?,
+                    ],
+                )?;
+                let menu = MenuBuilder::new(app).items(&[&app_submenu, &edit_submenu]).build()?;
                 app.set_menu(menu)?;
             }
             #[cfg(not(target_os = "macos"))]
