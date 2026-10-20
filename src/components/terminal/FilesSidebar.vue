@@ -5,12 +5,13 @@
               channel（openSftp/readSftpDir）；双击文件夹 = 向该窗格终端发送
               cd 命令（由 TerminalTabContent 执行 emit navigate）。当前路径解析：
               优先窗格 OSC 7/1337 上报的 cwd（TerminalTabContent 轮询下发），
-              远端 shell 未配置上报 hook 时退化为面板自跟踪路径（初始 = 远端
-              home，双击导航时乐观更新），此限制下终端手动 cd 不会同步面板。
-              传输：条目右键「下载到…」（save/open 对话框选本地目标，目录递归）；
-              expose upload(localPaths) 供 TerminalTabContent 拖入系统文件上传到
-              面板当前路径（同名冲突逐个确认）；传输终态经 transfers store 自动
-              刷新列表。
+              无上报时退化为面板自跟踪路径，并由终端 cd 命令识别驱动跟随
+              （TerminalTabContent 解析 cd 目标后调 followCwd，SFTP 列目录验证
+              通过才进入——目录不存在即 cd 失败时保持原位）；Tab 补全/方向键
+              历史快调等不可信输入行不触发。传输：条目右键「下载到…」（save/open
+              对话框选本地目标，目录递归）；expose upload(localPaths) 供
+              TerminalTabContent 拖入系统文件上传到面板当前路径（同名冲突逐个
+              确认）；传输终态经 transfers store 自动刷新列表。
 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
@@ -385,9 +386,36 @@ async function upload (localPaths: string[]): Promise<void> {
     }
 }
 
+/**
+ * @description 终端 cd 命令跟随（OSC 上报不可用时的兜底，由 TerminalTabContent
+ *              调用）：SFTP 列目录验证候选路径存在且为可列目录后才跟随
+ *              （trackedPath 更新触发自动刷新）；验证失败（cd 目标大概率不存在
+ *              即命令失败）静默保持原位
+ * @param candidate 解析出的候选目录绝对路径
+ * @returns Promise<void>
+ *
+ * @example await followCwd('/var/log')
+ *
+ */
+async function followCwd (candidate: string): Promise<void> {
+    if (!sftpId.value) {
+        return
+    }
+    try {
+        await readSftpDir(sftpId.value, candidate)
+    } catch {
+        return
+    }
+    trackedPath.value = candidate
+}
+
 defineExpose({
     /** 当前面板浏览路径（拖放上传目标提示用） */
     currentPath: () => effectivePath.value,
+    /** 远端主目录（cd 无参/~ 解析用；未就绪为 null） */
+    homePath: () => home.value || null,
+    /** 终端 cd 命令跟随（验证候选目录后进入） */
+    followCwd,
     upload,
 })
 

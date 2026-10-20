@@ -2,16 +2,18 @@
 /**
  * @description 终端标签页内容：分屏树容器 + 文件侧栏 + 监控侧栏（后两者仅 SSH 档案）。
  *              文件侧栏跟随活动窗格：轮询窗格 cwd（OSC 7/1337）与 sshId 下发，
- *              双击文件夹经 sendTextToLeaf 在该窗格执行 cd。系统文件拖入本标签页
- *              （终端区或文件面板）上传到面板当前浏览路径（webview 级拖放事件，
- *              悬停时浮层提示目标路径）。
+ *              双击文件夹经 sendTextToLeaf 在该窗格执行 cd；远端无 OSC 上报时
+ *              以输入命令行识别兜底——活动窗格执行的 cd 解析出目标后由面板
+ *              SFTP 验证并跟随。系统文件拖入本标签页（终端区或文件面板）上传
+ *              到面板当前浏览路径（webview 级拖放事件，悬停时浮层提示目标路径）。
  */
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SplitContainer from '@/components/split/SplitContainer.vue'
 import MonitorSidebar from '@/components/monitor/MonitorSidebar.vue'
 import FilesSidebar from '@/components/terminal/FilesSidebar.vue'
 import { shellQuoteSingle } from '@/lib/shellQuote'
+import { resolveCdTarget } from '@/lib/sessions/resolveCdTarget'
 import {
     listLeaves,
     makeLeaf,
@@ -213,6 +215,8 @@ onBeforeUnmount(() => {
     unbindDetailMonitor(profile.value.id)
     stopFilesPolling()
     resetFilesBinding()
+    untapShellCommand?.()
+    untapShellCommand = null
     unregisterTerminalTabApi(props.tabId)
     if (terminalTabApi.current === tabApi) {
         terminalTabApi.current = null
@@ -323,6 +327,54 @@ watch(activeLeafId, () => {
         void refreshFilesBinding()
     }
 })
+
+// ---- 终端 cd 命令跟随（OSC 上报不可用时的兜底）：订阅活动窗格的 shell 命令行 ----
+let untapShellCommand: (() => void) | null = null
+
+/**
+ * @description 处理活动窗格执行的命令行：无 OSC cwd 上报时解析 cd 目标并让文件
+ *              面板验证跟随（不可确定性解析的形态返回 null，面板不动）
+ * @param line 输入流还原的命令行文本
+ * @returns void
+ *
+ * @example handleShellCommand('cd /var/log')
+ *
+ */
+function handleShellCommand (line: string): void {
+    // OSC 上报可用时轮询已同步 cwd，双机制无益且会与上报路径打架
+    if (filesCwd.value !== null) {
+        return
+    }
+    const candidate = resolveCdTarget(line, filesRef.value?.currentPath() ?? null, filesRef.value?.homePath() ?? null)
+    if (candidate) {
+        void filesRef.value?.followCwd(candidate)
+    }
+}
+
+/**
+ * @description 重挂活动窗格的 shell 命令订阅（活动窗格切换/面板轮询启停时）：
+ *              先退旧订阅，nextTick 等新窗格挂载后挂 tap
+ * @returns void
+ *
+ * @example retapShellCommand()
+ *
+ */
+function retapShellCommand (): void {
+    untapShellCommand?.()
+    untapShellCommand = null
+    if (!filesPolling.value) {
+        return
+    }
+    void nextTick(() => {
+        if (!filesPolling.value || !rootContainer.value) {
+            return
+        }
+        untapShellCommand = rootContainer.value.tapLeafCommand(activeLeafId.value, handleShellCommand) ?? null
+    })
+}
+
+// immediate：单窗格场景下 activeLeafId/filesPolling 自始不变，无 immediate 会永不挂订阅
+watch([activeLeafId, filesPolling], () => retapShellCommand(), { immediate: true })
 
 /**
  * @description 文件侧栏导航请求：向活动窗格终端发送 cd -- '<path>' 并立即执行

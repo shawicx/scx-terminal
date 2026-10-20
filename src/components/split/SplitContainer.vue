@@ -22,9 +22,9 @@ const emit = defineEmits<{
 }>()
 
 const branchEl = ref<HTMLElement>()
-type PaneHandle = { focus (): void, copy (): void, paste (): void, clear (): void, find (): void, triggerSuggestions (): void, toggleForward (): void, getWorkingDirectory (): Promise<string | null>, sendText (text: string, execute?: boolean): void, paneKey (): string, tapOutput (cb: (chunk: string) => void): () => void, getSshId (): string | null }
+type PaneHandle = { focus (): void, copy (): void, paste (): void, clear (): void, find (): void, triggerSuggestions (): void, toggleForward (): void, getWorkingDirectory (): Promise<string | null>, sendText (text: string, execute?: boolean): void, paneKey (): string, tapOutput (cb: (chunk: string) => void): () => void, tapShellCommand (cb: (line: string) => void): () => void, getSshId (): string | null }
 const paneRefs = new Map<string, PaneHandle>()
-type ContainerHandle = { focusLeaf (id: string): void, invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find' | 'triggerSuggestions' | 'toggleForward'): void, getLeafCwd (id: string): Promise<string | null | undefined>, sendTextToLeaf (id: string, text: string, execute?: boolean): void, getLeafPaneKey (id: string): string | null | undefined, tapLeafOutput (id: string, cb: (chunk: string) => void): (() => void) | undefined, getLeafSshId (id: string): string | null | undefined }
+type ContainerHandle = { focusLeaf (id: string): void, invokeOnLeaf (id: string, method: 'copy' | 'paste' | 'clear' | 'find' | 'triggerSuggestions' | 'toggleForward'): void, getLeafCwd (id: string): Promise<string | null | undefined>, sendTextToLeaf (id: string, text: string, execute?: boolean): void, getLeafPaneKey (id: string): string | null | undefined, tapLeafOutput (id: string, cb: (chunk: string) => void): (() => void) | undefined, tapLeafCommand (id: string, cb: (line: string) => void): (() => void) | undefined, getLeafSshId (id: string): string | null | undefined }
 const containerRefs = new Map<string, ContainerHandle>()
 
 function registerPane (id: string, comp: unknown) {
@@ -143,6 +143,29 @@ function tapLeafOutput (id: string, cb: (chunk: string) => void): (() => void) |
 }
 
 /**
+ * @description 订阅叶窗格会话执行的 shell 命令行（文件面板 cd 跟随用；递归下钻子容器）
+ * @param id 叶节点 id
+ * @param cb 命令行回调
+ * @returns (() => void) | undefined 退订函数；undefined = 叶不在本子树
+ *
+ * @example tapLeafCommand(activeLeafId, line => ...)
+ *
+ */
+function tapLeafCommand (id: string, cb: (line: string) => void): (() => void) | undefined {
+    const pane = paneRefs.get(id)
+    if (pane) {
+        return pane.tapShellCommand(cb)
+    }
+    for (const container of containerRefs.values()) {
+        const stop = container.tapLeafCommand(id, cb)
+        if (stop !== undefined) {
+            return stop
+        }
+    }
+    return undefined
+}
+
+/**
  * @description 查询叶窗格会话的 SSH 会话 id（递归下钻子容器；文件侧栏用）
  * @param id 叶节点 id
  * @returns string | null | undefined sshId；null = 叶存在但非 SSH/未连接；undefined = 叶不在本子树
@@ -164,7 +187,7 @@ function getLeafSshId (id: string): string | null | undefined {
     return undefined
 }
 
-defineExpose({ focusLeaf, invokeOnLeaf, getLeafCwd, sendTextToLeaf, getLeafPaneKey, tapLeafOutput, getLeafSshId })
+defineExpose({ focusLeaf, invokeOnLeaf, getLeafCwd, sendTextToLeaf, getLeafPaneKey, tapLeafOutput, tapLeafCommand, getLeafSshId })
 
 function onSpannerResize (index: number, delta: number) {
     const node = props.node.type === 'branch' ? props.node : null

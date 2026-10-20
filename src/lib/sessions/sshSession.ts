@@ -1,8 +1,9 @@
 /**
  * @description SSH 远程 shell 会话：对接 Rust russh 会话（services/ssh.ts SshProxy）。
  *              连接/认证/指纹确认失败以错误文本打进终端缓冲（同 LocalSession 的
- *              "Could not start" 模式，不抛异常）；cwd 跟踪仅依赖远端 shell 的
- *              OSC 7/1337 上报（BaseSession 中间件已解析），无进程探测可用；
+ *              "Could not start" 模式，不抛异常）；cwd 跟踪优先依赖远端 shell 的
+ *              OSC 7/1337 上报（BaseSession 中间件已解析），另以输入命令行跟踪
+ *              （shellCommand$，逐行还原用户键入的命令）支撑无上报时的 cd 跟随；
  *              kbd-interactive 凭据挑战应答与记住密码回存；连接丢失（exit 载荷
  *              lost）不销毁会话，改发 disconnected$ 供 UI 保留窗格并提供手动重连。
  */
@@ -12,6 +13,7 @@ import { SshProxy, type HostKeyChallenge, type JumpHop, type KbdAnswer, type Kbd
 import { setProfilePassword } from '@/services/secrets'
 import { encodeUTF8 } from '@/lib/utils/bytes'
 import { nanoid } from 'nanoid'
+import { createInputLineTracker } from './inputLineTracker'
 
 export interface SshSessionOptions {
     host: string
@@ -45,12 +47,18 @@ export class SshSession extends BaseSession {
     /** 重连进行中标志（覆盖层按钮防重入） */
     private reconnecting = false
     private disconnectedSubj = new Subject<void>()
+    private shellCommandSubj = new Subject<string>()
+    private readonly inputTracker: ReturnType<typeof createInputLineTracker>
 
     /** 连接丢失（非远端正常退出）时发出；窗格据此显示重连覆盖层而不关窗格 */
     get disconnected$ (): Observable<void> { return this.disconnectedSubj }
 
+    /** 用户执行的 shell 命令行（输入流逐行还原；不可信行不上报）——文件面板 cd 跟随用 */
+    get shellCommand$ (): Observable<string> { return this.shellCommandSubj }
+
     constructor (private readonly setup: SshSessionSetup = {}) {
         super(setup)
+        this.inputTracker = createInputLineTracker(line => this.shellCommandSubj.next(line))
     }
 
     async start (options: SshSessionOptions): Promise<void> {
@@ -209,6 +217,17 @@ export class SshSession extends BaseSession {
         if (this.proxy && this.open) {
             void this.proxy.write(data)
         }
+    }
+
+    /** 输入透传中间件后再喂命令行跟踪器（shellCommand$ 的数据源） */
+    override feedFromTerminal (data: Uint8Array): void {
+        super.feedFromTerminal(data)
+        this.inputTracker.feed(data)
+    }
+
+    override async destroy (): Promise<void> {
+        await super.destroy()
+        this.shellCommandSubj.complete()
     }
 
     kill (): void {

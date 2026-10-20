@@ -218,6 +218,23 @@ function tapOutput (cb: (chunk: string) => void): () => void {
     return () => subscription.unsubscribe()
 }
 
+/**
+ * @description 订阅本窗格会话执行的 shell 命令行（SSH 输入流逐行还原；文件面板
+ *              cd 跟随用）；非 SSH 会话或未启动时订阅挂起（noop 退订）
+ * @param cb 命令行回调（仅可信行触发）
+ * @returns () => void 退订函数
+ *
+ * @example const stop = paneRef.value?.tapShellCommand(line => ...)
+ *
+ */
+function tapShellCommand (cb: (line: string) => void): () => void {
+    if (!(session instanceof SshSession)) {
+        return () => {}
+    }
+    const subscription = session.shellCommand$.subscribe(cb)
+    return () => subscription.unsubscribe()
+}
+
 defineExpose({
     focus: () => frontend?.focus(),
     copy: () => frontend?.copySelection(),
@@ -229,6 +246,7 @@ defineExpose({
     sendText,
     paneKey: () => paneKey,
     tapOutput,
+    tapShellCommand,
     // 直读会话而非 sshSessionId computed：该 computed 无响应式依赖会被 Vue 永久
     // 缓存首次结果（启动前读到 null 即永远 null），文件侧栏轮询需要每次取实时值
     getSshId: () => (session instanceof SshSession ? session.sshSessionId : null),
