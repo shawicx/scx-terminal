@@ -1,11 +1,11 @@
 <!--
-  @description 设置页外壳：左侧导航 + 页面切换容器（11 个页组件互斥挂载）；
+  @description 设置页外壳：左侧导航 + 页面切换容器（12 个页组件互斥挂载）；
               跨页共享的删除确认弹窗与分组名称弹窗在此统一渲染。
 -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Terminal, Palette, Keyboard, Info, KeyRound, HardDriveDownload, Zap, Globe, Server, SquareTerminal, Layers, Workflow } from 'lucide-vue-next'
+import { Terminal, Palette, Keyboard, Info, KeyRound, HardDriveDownload, Zap, Globe, Server, SquareTerminal, Layers, Workflow, FileCode } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import Dialog from '@/components/ui/Dialog.vue'
 import Input from '@/components/ui/Input.vue'
@@ -20,6 +20,7 @@ import AppearancePage from '@/components/settings/pages/AppearancePage.vue'
 import ColorSchemesPage from '@/components/settings/pages/ColorSchemesPage.vue'
 import HotkeysPage from '@/components/settings/pages/HotkeysPage.vue'
 import TabGroupsPage from '@/components/settings/pages/TabGroupsPage.vue'
+import ConfigFilePage from '@/components/settings/pages/ConfigFilePage.vue'
 import BackupPage from '@/components/settings/pages/BackupPage.vue'
 import AboutPage from '@/components/settings/pages/AboutPage.vue'
 import type { SettingsPageId } from '@/stores/tabs'
@@ -44,6 +45,7 @@ const pages = computed(() => [
     { id: 'colorSchemes' as const, label: t('settings.colorSchemesPage'), icon: Palette },
     { id: 'hotkeys' as const, label: t('settings.hotkeys'), icon: Keyboard },
     { id: 'tabGroups' as const, label: t('settings.tabGroupsPage'), icon: Layers },
+    { id: 'configFile' as const, label: t('settings.configFilePage'), icon: FileCode },
     { id: 'backup' as const, label: t('settings.backupPage'), icon: HardDriveDownload },
     { id: 'about' as const, label: t('settings.about'), icon: Info },
 ])
@@ -80,6 +82,7 @@ const { groupNameDialog, groupNameDialogTitle, groupNameDialogIsQuickCommand, co
             <ColorSchemesPage v-else-if="page === 'colorSchemes'" key="colorSchemes" />
             <HotkeysPage v-else-if="page === 'hotkeys'" key="hotkeys" />
             <TabGroupsPage v-else-if="page === 'tabGroups'" key="tabGroups" />
+            <ConfigFilePage v-else-if="page === 'configFile'" key="configFile" />
             <BackupPage v-else-if="page === 'backup'" key="backup" />
             <AboutPage v-else key="about" />
             </Transition>
