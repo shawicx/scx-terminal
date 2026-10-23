@@ -195,6 +195,10 @@ export interface TerminalConfig {
     fontWeightBold: 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900'
     minimumContrastRatio: number
     copyOnSelect: boolean
+    /** 复制选区文本时去除首尾空格/制表符/换行 */
+    copyTrimWhitespace: boolean
+    /** 粘贴包含换行的多行文本时先弹确认对话框（每行都会被立即执行） */
+    pasteConfirmMultiline: boolean
     paletteGenerate: boolean
     paletteHarmonious: boolean
     backspace: 'ctrl-h' | 'ctrl-?' | 'delete' | 'backspace'

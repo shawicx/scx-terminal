@@ -192,6 +192,10 @@ export const panels = {
     },
 
     terminal: {
+        pasteConfirmTitle: 'Multi-line paste',
+        pasteConfirmBody: 'You are about to paste {n} lines which may contain commands that run immediately. Continue?',
+        pasteConfirmCancel: 'Cancel',
+        pasteConfirmAction: 'Paste',
         suggestionHint: '↑↓ Select · Tab Complete · Enter Run · Esc Dismiss',
         retry: 'Retry',
         sshDisconnected: 'SSH connection lost (idle timeout or network interruption)',

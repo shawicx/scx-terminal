@@ -26,6 +26,8 @@ export function defaultConfig (): ConfigStore {
             fontWeightBold: 'bold',
             minimumContrastRatio: 4,
             copyOnSelect: false,
+            copyTrimWhitespace: true,
+            pasteConfirmMultiline: true,
             paletteGenerate: false,
             paletteHarmonious: false,
             backspace: 'backspace',

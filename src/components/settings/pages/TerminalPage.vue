@@ -203,6 +203,16 @@ const outputNewlinesModel = newlineModel('outputNewlines')
                 <Switch v-model="store.terminal.copyOnSelect" />
             </div>
             <div class="settings-card-row">
+                <Label>{{ t('settings.copyTrimWhitespace') }}</Label>
+                <Switch v-model="store.terminal.copyTrimWhitespace" />
+            </div>
+            <p class="hint">{{ t('settings.copyTrimWhitespaceHint') }}</p>
+            <div class="settings-card-row">
+                <Label>{{ t('settings.pasteConfirmMultiline') }}</Label>
+                <Switch v-model="store.terminal.pasteConfirmMultiline" />
+            </div>
+            <p class="hint">{{ t('settings.pasteConfirmMultilineHint') }}</p>
+            <div class="settings-card-row">
                 <Label>{{ t('settings.altIsMeta') }}</Label>
                 <Switch v-model="store.terminal.altIsMeta" />
             </div>

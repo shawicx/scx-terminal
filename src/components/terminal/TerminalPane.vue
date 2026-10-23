@@ -15,6 +15,7 @@ import { XTermWebGLFrontend } from '@/lib/frontends/xtermFrontend'
 import { createFrontendContext, readClipboardText, writeClipboardText } from '@/lib/frontendContext'
 import { encodeUTF8 } from '@/lib/utils/bytes'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
+import Dialog from '@/components/ui/Dialog.vue'
 import Button from '@/components/ui/Button.vue'
 import HostKeyDialog from '@/components/terminal/HostKeyDialog.vue'
 import CredentialDialog from '@/components/terminal/CredentialDialog.vue'
@@ -150,20 +151,55 @@ const { menuItems, onMenuOpen, onMenuSelect } = usePaneMenu({
 })
 
 /**
- * @description 从剪贴板读取文本并写入当前会话（粘贴）
+ * @description 从剪贴板读取文本并写入当前会话（粘贴）；多行文本按
+ *              terminal.pasteConfirmMultiline 先弹确认对话框（每行都会被立即执行）
  * @returns Promise<void>
  *
  */
 async function pasteFromClipboard (): Promise<void> {
     const text = await readClipboardText()
+    if (!text) {
+        return
+    }
+    const normalized = text.replace(/\r\n/g, '\n')
+    if (configStore.store.terminal.pasteConfirmMultiline && /\n/.test(normalized)) {
+        pendingPaste.value = normalized
+        return
+    }
+    commitPaste(normalized)
+}
+
+/**
+ * @description 执行粘贴写入：关闭建议菜单并写入会话；含换行的粘贴会直接执行，
+ *              绕过 input$ 的命令经源文本直录历史
+ * @param text 待写入文本（换行已归一为 \n）
+ * @returns void
+ *
+ */
+function commitPaste (text: string): void {
+    closeSuggestions(false)
+    session?.feedFromTerminal(encodeUTF8(text))
+    if (/\n/.test(text)) {
+        notifyDirectRecord(text)
+    }
+}
+
+// ---- 多行粘贴确认（terminal.pasteConfirmMultiline）：对话框暂存待粘贴文本 ----
+const pendingPaste = ref<string | null>(null)
+const pendingPasteLines = computed(() => pendingPaste.value ? pendingPaste.value.split('\n').length : 0)
+
+/**
+ * @description 确认多行粘贴：关闭对话框并写入会话
+ * @returns void
+ *
+ * @example confirmPendingPaste()
+ *
+ */
+function confirmPendingPaste (): void {
+    const text = pendingPaste.value
+    pendingPaste.value = null
     if (text) {
-        closeSuggestions(false)
-        const normalized = text.replace(/\r\n/g, '\n')
-        session?.feedFromTerminal(encodeUTF8(normalized))
-        // 含换行的粘贴会直接执行：绕过 input$ 的命令经源文本直录历史
-        if (/\r|\n/.test(normalized)) {
-            notifyDirectRecord(normalized)
-        }
+        commitPaste(text)
     }
 }
 
@@ -523,6 +559,18 @@ onBeforeUnmount(() => {
             <span class="mount-error-text">{{ mountError }}</span>
             <Button variant="outline" size="sm" @click="retryStart">{{ t('terminal.retry') }}</Button>
         </div>
+        <Dialog
+            v-if="pendingPaste"
+            :title="t('terminal.pasteConfirmTitle')"
+            :width="420"
+            @cancel="pendingPaste = null"
+        >
+            <p class="confirm-text">{{ t('terminal.pasteConfirmBody', { n: pendingPasteLines }) }}</p>
+            <template #footer>
+                <Button variant="outline" size="sm" @click="pendingPaste = null">{{ t('terminal.pasteConfirmCancel') }}</Button>
+                <Button size="sm" @click="confirmPendingPaste">{{ t('terminal.pasteConfirmAction') }}</Button>
+            </template>
+        </Dialog>
         <HostKeyDialog
             v-if="hostKeyChallenge"
             :challenge="hostKeyChallenge"

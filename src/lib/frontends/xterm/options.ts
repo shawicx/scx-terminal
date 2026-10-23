@@ -48,11 +48,12 @@ export function buildXtermTheme (
     return theme
 }
 
-/** applyXtermOptions 的回填值（前端据此更新字号/行距私有字段与 copyOnSelect） */
+/** applyXtermOptions 的回填值（前端据此更新字号/行距私有字段与 copyOnSelect/复制修剪） */
 export interface XtermOptionResult {
     fontSize: number
     linePadding: number
     copyOnSelect: boolean
+    copyTrimWhitespace: boolean
 }
 
 /**
@@ -60,7 +61,7 @@ export interface XtermOptionResult {
  * @param xterm 终端实例
  * @param xtermCore xterm 内部核心（browser 判定）
  * @param context 前端上下文
- * @returns XtermOptionResult 字号/行距/copyOnSelect
+ * @returns XtermOptionResult 字号/行距/copyOnSelect/copyTrimWhitespace
  *
  */
 export function applyXtermOptions (
@@ -88,5 +89,6 @@ export function applyXtermOptions (
         fontSize: config.terminal.fontSize,
         linePadding: config.terminal.linePadding,
         copyOnSelect: config.terminal.copyOnSelect,
+        copyTrimWhitespace: config.terminal.copyTrimWhitespace,
     }
 }

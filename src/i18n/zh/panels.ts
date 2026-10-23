@@ -192,6 +192,10 @@ export const panels = {
     },
 
     terminal: {
+        pasteConfirmTitle: '多行粘贴',
+        pasteConfirmBody: '即将粘贴 {n} 行文本，可能包含多条会被立即执行的命令，确定继续？',
+        pasteConfirmCancel: '取消',
+        pasteConfirmAction: '粘贴',
         suggestionHint: '↑↓ 选择 · Tab 补全 · Enter 执行 · Esc 关闭',
         retry: '重试',
         sshDisconnected: 'SSH 连接已断开（长时间未操作或网络中断）',

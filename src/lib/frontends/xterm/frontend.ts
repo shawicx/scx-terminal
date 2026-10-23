@@ -39,6 +39,7 @@ export class XTermFrontend extends Frontend {
     /** 档案专属配色（attach/configure 下发；null 跟随全局） */
     private terminalColorScheme: TerminalColorScheme | null = null
     private copyOnSelect = false
+    private copyTrimWhitespace = false
     private preventNextOnSelectionChangeEvent = false
     private searchController = new XtermSearchController()
     private fitAddon = new FitAddon()
@@ -280,7 +281,8 @@ export class XTermFrontend extends Frontend {
         if (!text.trim().length) {
             return
         }
-        void this.context.setClipboard(text)
+        // 复制修剪：去除选区首尾的空格/制表符/换行（终端行尾补位空格不再进剪贴板）
+        void this.context.setClipboard(this.copyTrimWhitespace ? text.trim() : text)
     }
 
     selectAll (): void {
@@ -425,6 +427,7 @@ export class XTermFrontend extends Frontend {
         this.configuredFontSize = applied.fontSize
         this.configuredLinePadding = applied.linePadding
         this.copyOnSelect = applied.copyOnSelect
+        this.copyTrimWhitespace = applied.copyTrimWhitespace
         this.setFontSize()
 
         this.terminalColorScheme = profile.terminalColorScheme ?? null
