@@ -231,12 +231,16 @@ export interface AppearanceConfig {
     backgroundFit: 'cover' | 'contain' | 'tile'
     /** 后台标签响铃时发送系统通知 */
     bellNotifications: boolean
+    /** 自定义 CSS：注入应用全局界面的样式文本（空 = 禁用） */
+    customCss: string
 }
 
 /** 高级配置：调试诊断、应用更新等非视觉开关 */
 export interface AdvancedConfig {
     /** 调试日志：开启后前后端诊断行写入 app-data/logs/scx-terminal.log，启动自动打开 DevTools */
     debugEnabled: boolean
+    /** 更新：应用启动数秒后自动检查新版本，发现时发系统通知 */
+    updateAutoCheck: boolean
     /** 更新：检查到新版本时跳过确认弹窗，下载后自动安装并重启 */
     updateAutoInstall: boolean
     /** 更新：安装后清除应用扩展属性（quarantine），避免 macOS「已损坏」提示 */

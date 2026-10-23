@@ -28,6 +28,8 @@ import { initMonitorEvents } from '@/services/monitor'
 import { hotkeys } from '@/services/hotkeysSingleton'
 import { pendingHostKey, resolvePendingHostKey, pendingKbdChallenge, resolvePendingKbd } from '@/services/sshConnections'
 import { setBackgroundFit, setBackgroundImageFile } from '@/services/backgroundImage'
+import { applyCustomCss } from '@/lib/customCss'
+import { startupAutoCheck } from '@/services/updater'
 import { initTabSessionSync, loadTabSession } from '@/services/tabSession'
 
 const store = useTabsStore()
@@ -48,6 +50,8 @@ function isEditableTarget (target: EventTarget | null): boolean {
     return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' ||
         target.isContentEditable
 }
+
+let autoCheckTimer = 0
 
 function onKeydown (event: KeyboardEvent): void {
     if (!isEditableTarget(event.target)) {
@@ -86,7 +90,22 @@ onMounted(() => {
     // 终端背景图：config 已在 main.ts bootstrap 先行加载，此处直接应用
     void setBackgroundImageFile(config.store.appearance.backgroundImage)
     setBackgroundFit(config.store.appearance.backgroundFit)
+
+    // 自定义 CSS：启动恢复 + 修改即时生效（外观设置实时预览）
+    applyCustomCss(config.store.appearance.customCss)
+
+    // 自动更新（advanced.updateAutoCheck）：启动数秒后静默检查，避免抢启动网络
+    autoCheckTimer = window.setTimeout(() => void startupAutoCheck(), 5000)
 })
+
+onBeforeUnmount(() => {
+    window.clearTimeout(autoCheckTimer)
+    document.removeEventListener('keydown', onKeydown)
+    document.removeEventListener('keyup', onKeyup)
+})
+
+// 自定义 CSS 修改即时生效
+watch(() => config.store.appearance.customCss, css => applyCustomCss(css))
 
 onBeforeUnmount(() => {
     document.removeEventListener('keydown', onKeydown)

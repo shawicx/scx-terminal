@@ -1,6 +1,7 @@
 <!--
   @description 设置·外观页：语言 / 标签栏位置 / 非默认本地终端标签名 / 终端背景图
-              （选择·清除·不透明度·填充方式）/ 响铃通知。
+              （选择·清除·不透明度·填充方式）/ 响铃通知 / 自定义 CSS（注入全局界面，
+              绑定即时预览）。
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
@@ -143,10 +144,38 @@ async function clearBackgroundImage (): Promise<void> {
             </div>
         </div>
     </div>
+    <div class="settings-section">
+        <h3 class="settings-section-title">{{ t('settings.customCss') }}</h3>
+        <div class="settings-card">
+            <div class="settings-card-row stacked">
+                <textarea
+                    v-model="store.appearance.customCss"
+                    class="custom-css-editor"
+                    spellcheck="false"
+                    :placeholder="t('settings.customCssPlaceholder')"
+                />
+            </div>
+        </div>
+        <p class="hint">{{ t('settings.customCssHint') }}</p>
+    </div>
     </div>
 </template>
 
 <style scoped>
+/* 自定义 CSS 编辑器：等宽字体，绑定 store 即时预览（App 级 watch 注入） */
+.custom-css-editor {
+    min-height: 140px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-card);
+    color: var(--color-foreground);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    resize: vertical;
+}
+
 /* 背景图片行：缩略预览 + 选择/清除按钮 */
 .background-image-row {
     display: flex;

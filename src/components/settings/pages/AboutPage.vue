@@ -1,7 +1,8 @@
 <!--
   @description 设置·关于页：应用图标/版本展示、配置与日志目录打开、调试开关、
-              手动检查更新（下载进度 + 安装确认弹窗，成功后 relaunch；支持
-              「下载后自动安装」跳过弹窗与「清除扩展属性」安装后收尾）。
+              更新设置（启动自动检查/下载后自动安装/清除扩展属性）与手动检查
+              （下载进度 + 安装确认弹窗，成功后 relaunch；启动自动检查已发现的
+              新版本进页直接弹确认框）。
 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, shallowRef } from 'vue'
@@ -16,7 +17,7 @@ import Dialog from '@/components/ui/Dialog.vue'
 import Label from '@/components/ui/Label.vue'
 import Switch from '@/components/ui/Switch.vue'
 import { useConfigStore } from '@/stores/config'
-import { checkForUpdate, installUpdate, type UpdateProgress } from '@/services/updater'
+import { checkForUpdate, getKnownUpdate, installUpdate, type UpdateProgress } from '@/services/updater'
 import appIcon from '../../../../src-tauri/icons/icon.png'
 
 const { t } = useI18n()
@@ -76,6 +77,12 @@ const pendingUpdate = shallowRef<Update | null>(null)
 let updaterRevertTimer = 0
 
 getVersion().then(version => (appVersion.value = version)).catch(() => {})
+
+// 启动自动检查已发现的新版本：进页直接弹安装确认框（不用再手动点检查）
+const known = getKnownUpdate()
+if (known) {
+    pendingUpdate.value = known
+}
 
 const updaterBusy = computed(() => updaterPhase.value === 'checking' || updaterPhase.value === 'downloading')
 
@@ -223,6 +230,10 @@ onBeforeUnmount(() => window.clearTimeout(updaterRevertTimer))
                 <Button variant="outline" size="sm" :disabled="updaterBusy" @click="checkUpdates">
                     {{ updaterButtonLabel }}
                 </Button>
+            </div>
+            <div class="settings-card-row">
+                <Label>{{ t('settings.updateAutoCheck') }}</Label>
+                <Switch v-model="store.advanced.updateAutoCheck" />
             </div>
             <div class="settings-card-row">
                 <Label>{{ t('settings.updateAutoInstall') }}</Label>

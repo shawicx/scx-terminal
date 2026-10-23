@@ -51,9 +51,11 @@ export function defaultConfig (): ConfigStore {
             backgroundOpacity: 0.6,
             backgroundFit: 'cover',
             bellNotifications: true,
+            customCss: '',
         },
         advanced: {
             debugEnabled: false,
+            updateAutoCheck: true,
             updateAutoInstall: false,
             updateClearXattr: true,
         },

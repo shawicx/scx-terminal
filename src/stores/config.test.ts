@@ -75,7 +75,7 @@ describe('config deepMerge', () => {
         deepMerge(config, { terminal: null, appearance: null, advanced: null })
         expect(config.terminal).toEqual(defaultConfig().terminal)
         expect(config.appearance).toEqual(defaultConfig().appearance)
-        expect(config.advanced).toEqual({ debugEnabled: false, updateAutoInstall: false, updateClearXattr: true })
+        expect(config.advanced).toEqual({ debugEnabled: false, updateAutoCheck: true, updateAutoInstall: false, updateClearXattr: true })
     })
 })
 
