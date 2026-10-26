@@ -1,5 +1,5 @@
 <!--
-  @description 全局传输中心（右下角 popover）：所有 SFTP 上传/下载任务的进度、速度（EMA）、
+  @description 全局传输中心（居中模态弹窗）：所有 SFTP 上传/下载任务的进度、速度（EMA）、
                 ETA、取消与完成后的 Finder 定位；TitleBar 指示器点击唤起。数据来自
                 transfers store（订阅 Rust `sftp-transfers-changed` 全量快照）。
 -->
@@ -12,19 +12,20 @@ import { useTransfersStore } from '@/stores/transfers'
 import { cancelTransfer, clearTransfers, pauseTransfer, resumeTransfer, retryTransfer, type TransferSnapshot } from '@/services/sftp'
 import { transferCenterOpen } from '@/services/transferCenter'
 import { etaSeconds, formatBytes, formatEta, formatSpeed } from '@/lib/sftpTransferMath'
-import { panelEnter } from '@/lib/motion'
+import { overlayEnter } from '@/lib/motion'
 
 const { t } = useI18n()
 const store = useTransfersStore()
 
+const backdropEl = ref<HTMLDivElement>()
 const popoverEl = ref<HTMLDivElement>()
 
-// 打开时从右下角弹性浮入（关闭仍瞬卸，保持轻量）
+// 打开时遮罩淡入 + 面板 scale/blur 展开（与通用 Dialog 一致；关闭仍瞬卸，保持轻量）
 watch(transferCenterOpen, open => {
     if (open) {
         void nextTick(() => {
-            if (popoverEl.value) {
-                panelEnter(popoverEl.value, { from: 'bottom', overshoot: true })
+            if (backdropEl.value && popoverEl.value) {
+                overlayEnter(backdropEl.value, popoverEl.value)
             }
         })
     }
@@ -126,7 +127,7 @@ function etaLabel (transfer: TransferSnapshot): string {
 
 <template>
     <Teleport to="body">
-        <div v-if="transferCenterOpen" class="transfer-backdrop" @mousedown.self="close">
+        <div v-if="transferCenterOpen" ref="backdropEl" class="transfer-backdrop" @mousedown.self="close">
             <div ref="popoverEl" class="transfer-popover">
                 <div class="transfer-header">
                     <span class="transfer-title">{{ t('transfer.title') }}</span>
@@ -209,12 +210,13 @@ export default { name: 'TransferPopover' }
     position: fixed;
     inset: 0;
     z-index: var(--z-modal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.4);
 }
 
 .transfer-popover {
-    position: absolute;
-    right: 16px;
-    bottom: 16px;
     width: 400px;
     max-height: min(60vh, 480px);
     display: flex;
