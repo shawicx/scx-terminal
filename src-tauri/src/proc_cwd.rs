@@ -64,7 +64,7 @@ const PROC_PIDVNODEPATHINFO: i32 = 9;
 
 // proc_pidinfo 符号位于 libSystem，无需显式 #[link]
 #[cfg(target_os = "macos")]
-extern "C" {
+unsafe extern "C" {
     fn proc_pidinfo(
         pid: i32,
         flavor: i32,

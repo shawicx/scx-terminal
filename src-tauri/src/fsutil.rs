@@ -270,12 +270,13 @@ mod tests {
         let _guard = home_lock().lock().unwrap();
         let original = std::env::var("HOME").ok();
         let home = temp_home();
-        std::env::set_var("HOME", &home);
+        // edition 2024 起环境变量写入为 unsafe；访问已由 home_lock 串行化
+        unsafe { std::env::set_var("HOME", &home) };
         let result = f(&home);
         if let Some(value) = original {
-            std::env::set_var("HOME", value);
+            unsafe { std::env::set_var("HOME", value) };
         } else {
-            std::env::remove_var("HOME");
+            unsafe { std::env::remove_var("HOME") };
         }
         result
     }

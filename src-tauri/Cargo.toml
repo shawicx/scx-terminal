@@ -2,7 +2,7 @@
 name = "scx-terminal"
 version = "0.2.8"
 description = "scx-terminal — a terminal built with Tauri V2"
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "scx_terminal_lib"
